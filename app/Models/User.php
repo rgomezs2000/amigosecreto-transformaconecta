@@ -101,41 +101,43 @@ class User extends Authenticatable
     }
 
     /**
-     * ¿La cuenta está bloqueada por intentos fallidos?
+     * ¿La cuenta está bloqueada?
+     *
+     * Cualquier locked_until no nulo es un bloqueo permanente hasta que un
+     * administrador lo limpie.
      */
     public function isLocked(): bool
     {
-        return $this->locked_until !== null && $this->locked_until->isFuture();
+        return $this->locked_until !== null;
     }
 
     /**
      * Suma un intento fallido y bloquea al llegar al máximo.
+     *
+     * El bloqueo es permanente: solo un administrador puede levantarlo con
+     * `php artisan user:unlock {usuario}`.
      */
-    public function registerFailedLogin(int $maxAttempts = 3, int $lockoutMinutes = 15): void
+    public function registerFailedLogin(int $maxAttempts = 3): void
     {
-        // Si el bloqueo anterior ya venció, se empieza de cero.
-        if ($this->locked_until !== null && $this->locked_until->isPast()) {
-            $this->failed_login_attempts = 0;
-            $this->locked_until = null;
-        }
-
         $this->failed_login_attempts = (int) $this->failed_login_attempts + 1;
 
         if ($this->failed_login_attempts >= $maxAttempts) {
-            $this->locked_until = now()->addMinutes($lockoutMinutes);
+            $this->locked_until = now();
         }
 
         $this->save();
     }
 
     /**
-     * Limpia intentos y bloqueo tras un acceso correcto.
+     * Limpia el contador tras un acceso correcto.
+     *
+     * No borra locked_until: el bloqueo es permanente hasta que un
+     * administrador lo limpie.
      */
     public function resetLoginAttempts(): void
     {
         $this->forceFill([
             'failed_login_attempts' => 0,
-            'locked_until' => null,
             'last_login_at' => now(),
         ])->save();
     }

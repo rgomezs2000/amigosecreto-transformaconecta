@@ -65,9 +65,8 @@ class LoginController extends Controller
 
             if (! Hash::check($data['password'], $user->password)) {
                 $maxAttempts = (int) config('amigosecreto.login.max_attempts', 3);
-                $lockoutMinutes = (int) config('amigosecreto.login.lockout_minutes', 15);
 
-                $user->registerFailedLogin($maxAttempts, $lockoutMinutes);
+                $user->registerFailedLogin($maxAttempts);
 
                 if ($user->isLocked()) {
                     return api_error('La cuenta quedó bloqueada por demasiados intentos. Contacta al administrador.', 423, [

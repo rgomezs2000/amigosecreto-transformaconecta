@@ -114,13 +114,47 @@ class LoginTest extends TestCase
             ->assertJsonPath('message', 'Esta cuenta se creó con Google. Ingresa con el botón de Google.');
     }
 
+    public function test_login_correcto_reinicia_intentos(): void
+    {
+        $user = $this->user();
+
+        $user->forceFill(['failed_login_attempts' => 2])->save();
+
+        $this->postJson('/login', [
+            'login' => 'ana',
+            'password' => 'ClaveSegura123',
+        ])->assertOk();
+
+        $user->refresh();
+
+        $this->assertSame(0, $user->failed_login_attempts);
+        $this->assertNull($user->locked_until);
+    }
+
+    public function test_el_administrador_puede_desbloquear_la_cuenta(): void
+    {
+        $user = $this->user();
+
+        $user->forceFill([
+            'failed_login_attempts' => 3,
+            'locked_until' => now(),
+        ])->save();
+
+        $this->artisan('user:unlock', ['login' => 'ana'])->assertSuccessful();
+
+        $user->refresh();
+
+        $this->assertSame(0, $user->failed_login_attempts);
+        $this->assertNull($user->locked_until);
+    }
+
     public function test_login_respeta_el_bloqueo_vigente(): void
     {
         $user = $this->user();
 
         $user->forceFill([
             'failed_login_attempts' => 3,
-            'locked_until' => now()->addMinutes(10),
+            'locked_until' => now()->subMinute(),
         ])->save();
 
         $this->postJson('/login', [

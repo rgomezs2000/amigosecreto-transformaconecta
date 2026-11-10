@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Intentos fallidos y bloqueo temporal de la cuenta.
+     * Intentos fallidos y bloqueo permanente de la cuenta.
      */
     public function up(): void
     {
