@@ -29,7 +29,7 @@ class HomeControllerTest extends TestCase
         $this->actingAs($this->usuario())
             ->get('/dashboard')
             ->assertOk()
-            ->assertSee('Panel principal')
+            ->assertSee('Panel de control')
             ->assertSee('Ana Torres');
     }
 

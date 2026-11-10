@@ -1,8 +1,10 @@
 <?php
 
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LoginController;
+use App\Http\Controllers\ModuleController;
 use Illuminate\Support\Facades\Route;
 
 // Punto de entrada: decide entre panel y acceso según la sesión.
@@ -18,5 +20,12 @@ Route::post('/login', [LoginController::class, 'login'])->name('login.attempt');
 Route::get('/auth/google/redirect', [GoogleAuthController::class, 'googleLogin'])->name('google.redirect');
 Route::get('/auth/google/callback', [GoogleAuthController::class, 'handleCallback'])->name('google.callback');
 
-// Provisional: el panel real se construye en la siguiente fase.
-Route::view('/dashboard', 'dashboard')->middleware('auth')->name('dashboard');
+// Panel principal.
+Route::get('/dashboard', [DashboardController::class, 'index'])
+    ->middleware('auth')
+    ->name('dashboard');
+
+// Marcador de posición de cada módulo, protegido por acceso al módulo.
+Route::get('/modulos/{module}', [ModuleController::class, 'show'])
+    ->middleware(['auth', 'module.access'])
+    ->name('modules.show');

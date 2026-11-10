@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\UserRole;
+use App\Models\Profile;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use RuntimeException;
@@ -27,6 +28,7 @@ class AdminUserSeeder extends Seeder
                 'email' => $config['email'],
                 'password' => $password,
                 'role' => UserRole::Admin,
+                'profile_id' => Profile::query()->where('slug', 'administrador')->value('id'),
                 'is_active' => true,
                 'must_change_password' => (bool) $config['force_password_change'],
             ],

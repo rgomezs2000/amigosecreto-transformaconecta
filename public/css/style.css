@@ -378,3 +378,166 @@ textarea:focus-visible,
         scroll-behavior: auto !important;
     }
 }
+
+/* 4. Panel principal */
+.dashboard-page {
+    width: min(1100px, 100%);
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 4rem;
+}
+
+.dashboard-top {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 3.5rem;
+}
+
+.dashboard-menu-btn {
+    position: absolute;
+    left: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 1.25rem;
+}
+
+.dashboard-menu-btn:hover,
+.dashboard-menu-btn:focus-visible {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.dashboard-title {
+    margin: 0;
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    text-align: center;
+}
+
+.dashboard-welcome {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .75rem;
+    margin: 1.5rem 0 2.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.dashboard-greeting {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.dashboard-clock {
+    margin: 0;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.dashboard-content {
+    color: var(--muted);
+}
+
+/* Menú lateral */
+.offcanvas {
+    --bs-offcanvas-width: min(22rem, 85vw);
+}
+
+.menu-group + .menu-group {
+    margin-top: 1.5rem;
+}
+
+.menu-group__title {
+    margin: 0 0 .5rem;
+    color: var(--muted);
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.menu-list {
+    display: grid;
+    gap: .25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.menu-link {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .75rem;
+    border-radius: 8px;
+    color: var(--ink);
+    text-decoration: none;
+}
+
+.menu-link:hover,
+.menu-link:focus-visible {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+}
+
+.menu-empty {
+    color: var(--muted);
+}
+
+/* Páginas de módulo y error */
+.module-page,
+.error-page {
+    width: min(720px, 100%);
+    margin: 0 auto;
+    padding: 3rem 1.25rem;
+}
+
+.module-back {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: 2rem;
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.module-title,
+.error-title {
+    margin: 0 0 .5rem;
+}
+
+.module-subtitle,
+.error-text {
+    color: var(--muted);
+}
+
+.error-code {
+    margin: 0;
+    color: var(--accent);
+    font-size: 3rem;
+    font-weight: 700;
+}
+
+@media (max-width: 575.98px) {
+    .dashboard-welcome {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .dashboard-clock {
+        text-align: left;
+    }
+}

@@ -68,18 +68,18 @@ class LoginTest extends TestCase
             ->assertStatus(423);
     }
 
-    public function test_login_correcto_no_inicia_sesion(): void
+    public function test_login_correcto_inicia_sesion(): void
     {
-        $this->user();
+        $user = $this->user();
 
         $this->postJson('/login', [
             'login' => 'ana',
             'password' => 'ClaveSegura123',
         ])->assertOk()
             ->assertJsonPath('success', true)
-            ->assertJsonPath('redirect', null);
+            ->assertJsonPath('redirect', route('dashboard'));
 
-        $this->assertGuest();
+        $this->assertAuthenticatedAs($user);
     }
 
     public function test_login_acepta_el_correo_sin_distinguir_mayusculas(): void

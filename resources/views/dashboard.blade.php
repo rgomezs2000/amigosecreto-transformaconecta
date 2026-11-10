@@ -1,25 +1,39 @@
 @extends('layouts.base')
 
-@section('title', 'Panel principal · Amigo Secreto Inclusivo')
+@section('title', 'Panel de control · Amigo Secreto Inclusivo')
 
 @section('content')
-<main id="contenido" class="login-page">
-    <div class="login-shell">
+<div class="dashboard-page" id="contenido">
+    <header class="dashboard-top">
+        <button class="btn dashboard-menu-btn"
+                type="button"
+                data-bs-toggle="offcanvas"
+                data-bs-target="#main-menu"
+                aria-controls="main-menu"
+                aria-label="Abrir menú">
+            <i class="fa-solid fa-bars" aria-hidden="true"></i>
+        </button>
 
-        <header class="login-header">
-            <p class="login-eyebrow">Amigo Secreto Inclusivo</p>
-            <h1 class="login-title">Panel principal</h1>
-            <p class="login-subtitle">Sesión iniciada como {{ auth()->user()->name }}.</p>
-        </header>
+        <h1 class="dashboard-title">Panel de control</h1>
+    </header>
 
-        <section class="login-card" aria-labelledby="panel-title">
-            <h2 id="panel-title" class="section-title">Panel en construcción</h2>
-            <p>El panel del evento se conecta en la siguiente fase.</p>
-        </section>
-
-        <footer class="login-footer">
-            <p>Amigo Secreto Inclusivo · {{ now()->year }}</p>
-        </footer>
+    <div class="dashboard-welcome">
+        <p class="dashboard-greeting">Hola: {{ $user->name }}</p>
+        <p class="dashboard-clock" id="dashboard-clock" aria-live="polite"></p>
     </div>
-</main>
+
+    <div class="offcanvas offcanvas-start" tabindex="-1" id="main-menu" aria-labelledby="main-menu-label">
+        <div class="offcanvas-header">
+            <h2 class="offcanvas-title" id="main-menu-label">Menú</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
+        </div>
+        <div class="offcanvas-body">
+            @include('partials.menu', ['groups' => $groups])
+        </div>
+    </div>
+
+    <section class="dashboard-content" aria-label="Contenido del panel">
+        <p>Selecciona un módulo del menú para comenzar.</p>
+    </section>
+</div>
 @endsection

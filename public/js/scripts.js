@@ -17,6 +17,7 @@
         initLoginForm();
         initExitButton();
         showGoogleResult();
+        initDashboardClock();
     });
 
     /**
@@ -135,8 +136,8 @@
                     password: $password.val()
                 }
             }).done(function (response) {
-                // Sin dashboard todavía: se confirma el acceso con un diálogo.
-                dialog(response.message || 'Acceso correcto.', 'Acceso correcto');
+                // La sesión ya quedó iniciada en el servidor: al panel.
+                window.location.assign(response.redirect || '/dashboard');
             }).fail(function (xhr) {
                 var response = xhr.responseJSON || {};
                 var message = response.message;
@@ -195,6 +196,35 @@
                 doExit(window.confirm(message));
             }
         });
+    }
+
+    /**
+     * Fecha y hora del panel, siempre en hora de Venezuela.
+     */
+    function initDashboardClock() {
+        var $clock = $('#dashboard-clock');
+
+        if (!$clock.length) {
+            return;
+        }
+
+        var formatter = new Intl.DateTimeFormat('es-VE', {
+            timeZone: 'America/Caracas',
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        function update() {
+            $clock.text(formatter.format(new Date()));
+        }
+
+        update();
+        window.setInterval(update, 1000);
     }
 
     /**

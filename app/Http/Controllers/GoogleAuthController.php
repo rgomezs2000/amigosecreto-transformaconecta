@@ -8,6 +8,7 @@ use Google\Service\Oauth2;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -72,8 +73,10 @@ class GoogleAuthController extends Controller
 
             $user->resetLoginAttempts();
 
-            // Sin sesión por ahora: solo se confirma el acceso.
-            return $this->result($request, 'ok', ['name' => $user->name]);
+            Auth::login($user);
+            $request->session()->regenerate();
+
+            return $this->result($request, 'ok', ['name' => $user->name], route('dashboard'));
         } catch (Throwable $exception) {
             Log::error('Google: error en el callback', [
                 'error' => $exception->getMessage(),
@@ -96,7 +99,7 @@ class GoogleAuthController extends Controller
      *
      * @param  array<string, mixed>  $data
      */
-    private function result(Request $request, string $status, array $data = []): RedirectResponse|JsonResponse
+    private function result(Request $request, string $status, array $data = [], ?string $redirect = null): RedirectResponse|JsonResponse
     {
         $messages = [
             'ok' => 'Acceso correcto con Google.',
@@ -110,6 +113,16 @@ class GoogleAuthController extends Controller
 
         $message = $messages[$status] ?? $messages['error'];
         $success = $status === 'ok';
+
+        if ($success && $redirect !== null) {
+            if ($request->expectsJson()) {
+                return api_success($message, array_merge([
+                    'google' => $status,
+                ], $data, ['redirect' => $redirect]));
+            }
+
+            return redirect()->to($redirect);
+        }
 
         if ($request->expectsJson()) {
             return api_response($success, $message, array_merge([

@@ -5,7 +5,9 @@ namespace App\Models;
 use App\Enums\UserRole;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -45,6 +47,7 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'profile_id',
         'is_active',
         'must_change_password',
         'phone',
@@ -153,6 +156,84 @@ class User extends Authenticatable
             $query->whereRaw('LOWER(username) = ?', [$login])
                 ->orWhereRaw('LOWER(email) = ?', [$login]);
         });
+    }
+
+    public function profile(): BelongsTo
+    {
+        return $this->belongsTo(Profile::class);
+    }
+
+    /**
+     * Módulos a los que puede entrar: los del perfil, más los concedidos a
+     * mano, menos los revocados a mano.
+     *
+     * @return Collection<int, Module>
+     */
+    public function accessibleModules(): Collection
+    {
+        $profileGrants = $this->profile_id
+            ? ProfilePermissionModule::query()
+                ->where('profile_id', $this->profile_id)
+                ->pluck('module_id')
+            : collect();
+
+        $userGrants = UserPermissionModule::query()
+            ->where('user_id', $this->id)
+            ->where('allowed', true)
+            ->pluck('module_id');
+
+        $userDenials = UserPermissionModule::query()
+            ->where('user_id', $this->id)
+            ->where('allowed', false)
+            ->pluck('module_id');
+
+        $moduleIds = $profileGrants
+            ->merge($userGrants)
+            ->unique()
+            ->diff($userDenials)
+            ->values();
+
+        return Module::query()
+            ->whereIn('id', $moduleIds)
+            ->where('is_active', true)
+            ->orderBy('order')
+            ->get();
+    }
+
+    public function hasModuleAccess(Module $module): bool
+    {
+        return $this->accessibleModules()->contains('id', $module->id);
+    }
+
+    /**
+     * Permisos efectivos del usuario sobre un módulo.
+     *
+     * @return Collection<int, Permission>
+     */
+    public function permissionsForModule(Module $module): Collection
+    {
+        $profileGrants = $this->profile_id
+            ? ProfilePermissionModule::query()
+                ->where('profile_id', $this->profile_id)
+                ->where('module_id', $module->id)
+                ->pluck('permission_id')
+            : collect();
+
+        $userGrants = UserPermissionModule::query()
+            ->where('user_id', $this->id)
+            ->where('module_id', $module->id)
+            ->where('allowed', true)
+            ->pluck('permission_id');
+
+        $userDenials = UserPermissionModule::query()
+            ->where('user_id', $this->id)
+            ->where('module_id', $module->id)
+            ->where('allowed', false)
+            ->pluck('permission_id');
+
+        return Permission::query()
+            ->whereIn('id', $profileGrants->merge($userGrants)->unique()->diff($userDenials))
+            ->get();
     }
 
     public function events(): BelongsToMany

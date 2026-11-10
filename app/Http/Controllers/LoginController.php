@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -84,9 +85,11 @@ class LoginController extends Controller
 
             $user->resetLoginAttempts();
 
-            // Por ahora no se guarda sesión: solo se confirma el acceso.
-            return api_success('Acceso correcto. Bienvenido, ' . $user->name . '.', [
-                'redirect' => null,
+            Auth::login($user);
+            $request->session()->regenerate();
+
+            return api_success('Acceso correcto.', [
+                'redirect' => route('dashboard'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al validar el acceso', [
