@@ -1,0 +1,358 @@
+/* ==========================================================================
+   Amigo Secreto Inclusivo — tema calmado (TEA Grado 1)
+
+   Reglas de diseño:
+   - Sin animaciones ni transiciones.
+   - Sin rojo puro ni amarillos fluorescentes.
+   - Texto base 16px, interlineado 1.5, foco visible.
+   - Un solo acento (verde menta) para acciones.
+   ========================================================================== */
+
+:root {
+    --bg: #F9FAFB;
+    --surface: #FFFFFF;
+    --ink: #1E293B;
+    --muted: #475569;
+    --border: #CBD5E1;
+    --accent: #2F6F62;
+    --accent-strong: #245A4F;
+    --accent-soft: #E6F2EF;
+    --error: #B42318;
+    --error-soft: #FEF3F2;
+    --focus: #1D4ED8;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(30, 41, 59, .06), 0 8px 24px rgba(30, 41, 59, .06);
+    --content-width: 30rem;
+}
+
+html {
+    font-size: 100%;
+}
+
+body.app-body {
+    min-height: 100vh;
+    min-height: 100dvh;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Enlace de salto: solo aparece con teclado. */
+.skip-link {
+    position: absolute;
+    top: 0;
+    left: -9999px;
+    z-index: 1080;
+    padding: .75rem 1rem;
+    background: var(--ink);
+    color: #FFFFFF;
+    border-radius: 0 0 .5rem 0;
+    text-decoration: none;
+}
+
+.skip-link:focus {
+    left: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Página de acceso
+   -------------------------------------------------------------------------- */
+
+.login-page {
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: clamp(1rem, 4vw, 3rem);
+}
+
+.login-shell {
+    display: grid;
+    gap: clamp(1rem, 2.5vw, 1.75rem);
+    width: 100%;
+    max-width: var(--content-width);
+}
+
+/* 1. Título y acceso al sistema */
+.login-header {
+    text-align: center;
+}
+
+.login-eyebrow {
+    margin: 0 0 .25rem;
+    color: var(--accent);
+    font-size: .875rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.login-title {
+    margin: 0 0 .5rem;
+    font-size: clamp(1.75rem, 1.2rem + 2vw, 2.5rem);
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.login-subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1rem, .95rem + .2vw, 1.125rem);
+}
+
+/* 2. Tarjeta del formulario */
+.login-card {
+    padding: clamp(1rem, 3vw, 2rem);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.section-title {
+    margin: 0 0 1rem;
+    font-size: 1.125rem;
+    font-weight: 700;
+}
+
+.field {
+    margin-bottom: 1.25rem;
+}
+
+.form-label {
+    margin-bottom: .375rem;
+    font-weight: 600;
+}
+
+.form-control {
+    min-height: 48px;
+    border-color: var(--border);
+    border-radius: 10px;
+    font-size: 1.0625rem;
+}
+
+.form-control:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(47, 111, 98, .25);
+}
+
+.form-text {
+    margin-top: .375rem;
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
+/* Botones */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    min-height: 48px;
+    border-radius: 10px;
+    font-size: 1.0625rem;
+    font-weight: 600;
+}
+
+.btn-primary {
+    --bs-btn-bg: var(--accent);
+    --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-bg: var(--accent-strong);
+    --bs-btn-hover-border-color: var(--accent-strong);
+    --bs-btn-active-bg: var(--accent-strong);
+    --bs-btn-active-border-color: var(--accent-strong);
+    --bs-btn-disabled-bg: var(--border);
+    --bs-btn-disabled-border-color: var(--border);
+    --bs-btn-focus-shadow-rgb: 47, 111, 98;
+}
+
+.btn-outline-secondary {
+    --bs-btn-color: var(--ink);
+    --bs-btn-border-color: var(--border);
+    --bs-btn-hover-bg: #EEF2F7;
+    --bs-btn-hover-color: var(--ink);
+    --bs-btn-hover-border-color: var(--border);
+    --bs-btn-active-bg: #E2E8F0;
+    --bs-btn-active-color: var(--ink);
+    --bs-btn-active-border-color: var(--border);
+    --bs-btn-focus-shadow-rgb: 71, 85, 105;
+}
+
+/* Foco visible en todos los controles. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.btn:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.login-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .75rem;
+    margin-top: 1.5rem;
+}
+
+.password-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    min-width: 3rem;
+    padding: 0;
+}
+
+/* Mensajes de estado */
+.form-status {
+    margin: 0;
+    padding: .75rem 1rem;
+    border-radius: 10px;
+    font-size: .9375rem;
+}
+
+.form-status:empty {
+    display: none;
+    padding: 0;
+}
+
+.form-status[data-kind="info"] {
+    background: var(--accent-soft);
+    color: #1F4E45;
+}
+
+.form-status[data-kind="error"] {
+    background: var(--error-soft);
+    color: var(--error);
+    font-weight: 600;
+}
+
+/* 3. Acceso con Google */
+.login-google {
+    display: grid;
+    justify-items: center;
+    gap: .5rem;
+    text-align: center;
+}
+
+.login-google .section-title {
+    margin-bottom: .25rem;
+}
+
+.login-google__help {
+    margin: 0 0 .5rem;
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
+.login-google .form-status {
+    width: 100%;
+}
+
+.g_id_signin {
+    display: flex;
+    justify-content: center;
+    min-height: 44px;
+}
+
+/* Pie */
+.login-footer {
+    color: var(--muted);
+    font-size: .875rem;
+    text-align: center;
+}
+
+.login-footer p {
+    margin: 0;
+}
+
+/* ==========================================================================
+   Adaptación por tamaño de pantalla
+
+   Teléfono pequeño → smartphone → phablet → tablet → tablet grande →
+   monitor pequeño → monitor mediano → monitor grande / TV → pantalla enorme.
+   ========================================================================== */
+
+/* Teléfonos pequeños (hasta 360px) */
+@media (max-width: 360px) {
+    .login-shell {
+        gap: 1rem;
+    }
+
+    .login-card {
+        padding: 1rem;
+    }
+
+    .login-actions {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Smartphones y phablets */
+@media (min-width: 361px) and (max-width: 767.98px) {
+    .login-shell {
+        max-width: 26rem;
+    }
+}
+
+/* Tablets */
+@media (min-width: 768px) and (max-width: 991.98px) {
+    :root {
+        --content-width: 32rem;
+    }
+}
+
+/* Tablets grandes y monitores pequeños */
+@media (min-width: 992px) and (max-width: 1399.98px) {
+    :root {
+        --content-width: 34rem;
+    }
+}
+
+/* Monitores medianos */
+@media (min-width: 1400px) and (max-width: 1919.98px) {
+    :root {
+        --content-width: 36rem;
+    }
+
+    html {
+        font-size: 106.25%;
+    }
+}
+
+/* Monitores grandes, smart TV y pantallas muy grandes */
+@media (min-width: 1920px) {
+    :root {
+        --content-width: 40rem;
+    }
+
+    html {
+        font-size: 112.5%;
+    }
+}
+
+@media (min-width: 2560px) {
+    :root {
+        --content-width: 44rem;
+    }
+
+    html {
+        font-size: 125%;
+    }
+}
+
+/* Sin animaciones: el movimiento es opcional y nunca por defecto. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+    }
+}

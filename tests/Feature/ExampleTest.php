@@ -2,18 +2,15 @@
 
 namespace Tests\Feature;
 
-// use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class ExampleTest extends TestCase
 {
     /**
-     * A basic test example.
+     * La raíz depende de la sesión: sin sesión redirige al acceso.
      */
-    public function test_the_application_returns_a_successful_response(): void
+    public function test_la_raiz_redirige_al_login_sin_sesion(): void
     {
-        $response = $this->get('/');
-
-        $response->assertStatus(200);
+        $this->get('/')->assertRedirect(route('login'));
     }
 }

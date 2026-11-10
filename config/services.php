@@ -35,4 +35,20 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Google
+    |--------------------------------------------------------------------------
+    |
+    | El client_id es público (se usa en el botón de Google del navegador).
+    | El client_secret nunca debe llegar al frontend ni al repositorio.
+    |
+    */
+
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
+    ],
+
 ];
