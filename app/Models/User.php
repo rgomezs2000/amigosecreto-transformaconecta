@@ -85,6 +85,8 @@ class User extends Authenticatable
             'reduce_motion' => 'boolean',
             'sound_enabled' => 'boolean',
             'last_login_at' => 'datetime',
+            'failed_login_attempts' => 'integer',
+            'locked_until' => 'datetime',
         ];
     }
 
@@ -96,6 +98,59 @@ class User extends Authenticatable
     public function hasPassword(): bool
     {
         return filled($this->password);
+    }
+
+    /**
+     * ¿La cuenta está bloqueada por intentos fallidos?
+     */
+    public function isLocked(): bool
+    {
+        return $this->locked_until !== null && $this->locked_until->isFuture();
+    }
+
+    /**
+     * Suma un intento fallido y bloquea al llegar al máximo.
+     */
+    public function registerFailedLogin(int $maxAttempts = 3, int $lockoutMinutes = 15): void
+    {
+        // Si el bloqueo anterior ya venció, se empieza de cero.
+        if ($this->locked_until !== null && $this->locked_until->isPast()) {
+            $this->failed_login_attempts = 0;
+            $this->locked_until = null;
+        }
+
+        $this->failed_login_attempts = (int) $this->failed_login_attempts + 1;
+
+        if ($this->failed_login_attempts >= $maxAttempts) {
+            $this->locked_until = now()->addMinutes($lockoutMinutes);
+        }
+
+        $this->save();
+    }
+
+    /**
+     * Limpia intentos y bloqueo tras un acceso correcto.
+     */
+    public function resetLoginAttempts(): void
+    {
+        $this->forceFill([
+            'failed_login_attempts' => 0,
+            'locked_until' => null,
+            'last_login_at' => now(),
+        ])->save();
+    }
+
+    /**
+     * Busca por usuario o correo, sin distinguir mayúsculas.
+     */
+    public function scopeFindByLogin(Builder $query, string $login): Builder
+    {
+        $login = mb_strtolower(trim($login));
+
+        return $query->where(function (Builder $query) use ($login) {
+            $query->whereRaw('LOWER(username) = ?', [$login])
+                ->orWhereRaw('LOWER(email) = ?', [$login]);
+        });
     }
 
     public function events(): BelongsToMany

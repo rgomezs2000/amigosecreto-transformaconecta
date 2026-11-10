@@ -2,12 +2,6 @@
 
 @section('title', 'Acceso al sistema · Amigo Secreto Inclusivo')
 
-@push('head')
-    @if (config('services.google.client_id'))
-        <script src="https://accounts.google.com/gsi/client" async defer></script>
-    @endif
-@endpush
-
 @section('content')
 <main id="contenido" class="login-page">
     <div class="login-shell">
@@ -84,15 +78,11 @@
 
                 @if (config('services.google.client_id'))
                     <div class="login-google-panel">
-                        <div class="google-button"
-                             id="google-button"
-                             data-client-id="{{ config('services.google.client_id') }}"></div>
+                        <a href="{{ route('google.redirect') }}" class="btn btn-outline-secondary btn-lg w-100 google-button-link">
+                            <i class="fa-brands fa-google" aria-hidden="true"></i>
+                            <span>Continuar con Google</span>
+                        </a>
                         <p class="login-google__help">Solo para cuentas creadas por el administrador.</p>
-                        <p id="google-status" class="form-status" role="status" aria-live="polite"></p>
-
-                        <noscript>
-                            <p class="login-google__help">Para usar Google necesitas activar JavaScript.</p>
-                        </noscript>
                     </div>
                 @else
                     <p class="form-status" data-kind="info">

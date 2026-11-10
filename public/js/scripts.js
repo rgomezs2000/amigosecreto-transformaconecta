@@ -1,9 +1,9 @@
 /**
  * Scripts del sistema (frontend).
  *
- * Dependen de jQuery, de functions.js y, solo en el login, del cliente de
- * Google. Cada bloque comprueba que sus elementos existan, así el mismo
- * archivo sirve para todas las pantallas.
+ * Dependen de jQuery y de functions.js. El login valida por AJAX y responde
+ * con JSON; los mensajes se muestran con Bootbox. El regreso de Google llega
+ * con ?google=... y aquí se convierte en un diálogo.
  */
 (function ($, App) {
     'use strict';
@@ -16,8 +16,29 @@
         initPasswordToggle();
         initLoginForm();
         initExitButton();
-        initGoogleButton();
+        showGoogleResult();
     });
+
+    /**
+     * Muestra un aviso con Bootbox (o window.alert si no cargó).
+     */
+    function dialog(message, title, callback) {
+        if (window.bootbox) {
+            window.bootbox.alert({
+                title: title || 'Aviso',
+                message: message,
+                centerVertical: true,
+                callback: typeof callback === 'function' ? callback : $.noop
+            });
+            return;
+        }
+
+        window.alert(message);
+
+        if (typeof callback === 'function') {
+            callback();
+        }
+    }
 
     /**
      * Ver la clave solo mientras se mantiene pulsado el botón.
@@ -69,11 +90,10 @@
     }
 
     /**
-     * Envío del formulario de acceso.
+     * Validación local, foco en el campo vacío y envío por AJAX.
      */
     function initLoginForm() {
         var $form = $('#login-form');
-        var $status = $('#login-status');
 
         if (!$form.length) {
             return;
@@ -82,17 +102,57 @@
         $form.on('submit', function (event) {
             event.preventDefault();
 
-            var form = this;
+            var $login = $('#login');
+            var $password = $('#password');
+            var missing = null;
 
-            if (!form.checkValidity()) {
-                form.reportValidity();
-                App.setStatus($status, 'Completa el usuario y la clave para continuar.', 'error');
+            if (!$.trim($login.val())) {
+                missing = $login;
+            } else if (!$.trim($password.val())) {
+                missing = $password;
+            }
+
+            if (missing) {
+                missing.trigger('focus');
+
+                dialog('Completa el usuario y la clave para continuar.', 'Faltan datos', function () {
+                    missing.trigger('focus');
+                });
+
                 return;
             }
 
-            // TEMPORAL: la validación contra el servidor se conecta en la
-            // siguiente fase (LoginService + POST /login).
-            App.setStatus($status, 'Datos completos. La validación se activa en la siguiente fase.', 'info');
+            var $submit = $form.find('button[type="submit"]');
+            $submit.prop('disabled', true);
+
+            $.ajax({
+                url: $form.attr('action'),
+                method: 'POST',
+                dataType: 'json',
+                data: {
+                    _token: $form.find('input[name="_token"]').val(),
+                    login: $.trim($login.val()),
+                    password: $password.val()
+                }
+            }).done(function (response) {
+                // Sin dashboard todavía: se confirma el acceso con un diálogo.
+                dialog(response.message || 'Acceso correcto.', 'Acceso correcto');
+            }).fail(function (xhr) {
+                var response = xhr.responseJSON || {};
+                var message = response.message;
+
+                if (!message && response.errors) {
+                    var first = Object.keys(response.errors)[0];
+                    message = response.errors[first][0];
+                }
+
+                dialog(
+                    message || 'No se pudo completar el acceso.',
+                    xhr.status === 423 ? 'Cuenta bloqueada' : 'No se pudo ingresar'
+                );
+            }).always(function () {
+                $submit.prop('disabled', false);
+            });
         });
     }
 
@@ -138,78 +198,35 @@
     }
 
     /**
-     * Botón de Google (Google Identity Services).
+     * Lee ?google=ok|not_found|... que deja el callback y lo muestra con Bootbox.
      */
-    function initGoogleButton() {
-        var $button = $('#google-button');
+    function showGoogleResult() {
+        var params = new URLSearchParams(window.location.search);
+        var result = params.get('google');
 
-        if (!$button.length) {
+        if (!result) {
             return;
         }
 
-        var clientId = $button.attr('data-client-id');
-        var $status = $('#google-status');
+        var name = params.get('name');
+        var messages = {
+            ok: 'Acceso correcto con Google' + (name ? ', ' + name : '') + '.',
+            not_found: 'No existe una cuenta con ese correo. Pide al administrador que te cree una.',
+            inactive: 'La cuenta está inactiva. Contacta al administrador.',
+            locked: 'La cuenta está bloqueada. Contacta al administrador.',
+            cancelled: 'Cancelaste el acceso con Google.',
+            error: 'No se pudo completar el acceso con Google. Intenta de nuevo.',
+            not_configured: 'Google no está configurado en este entorno.'
+        };
 
-        function render() {
-            if (!window.google || !window.google.accounts || !window.google.accounts.id) {
-                return;
-            }
+        dialog(
+            messages[result] || messages.error,
+            result === 'ok' ? 'Acceso correcto' : 'Acceso con Google'
+        );
 
-            var width = Math.min($button[0].clientWidth || 320, 400);
-
-            $button.empty();
-            window.google.accounts.id.renderButton($button[0], {
-                type: 'standard',
-                theme: 'outline',
-                size: 'large',
-                shape: 'rectangular',
-                text: 'continue_with',
-                logo_alignment: 'left',
-                locale: 'es',
-                width: width
-            });
-        }
-
-        function onCredential(response) {
-            if (!response || !response.credential) {
-                App.setStatus($status, 'No se recibió la cuenta de Google. Intenta de nuevo.', 'error');
-                return;
-            }
-
-            var account = App.decodeJwt(response.credential);
-
-            if (!account || !account.email) {
-                App.setStatus($status, 'No se pudo leer la cuenta de Google.', 'error');
-                return;
-            }
-
-            App.setStatus(
-                $status,
-                'Cuenta de Google detectada: ' + account.name + '. La verificación se activa en la siguiente fase.',
-                'info'
-            );
-        }
-
-        function init() {
-            if (!clientId || !window.google || !window.google.accounts || !window.google.accounts.id) {
-                return;
-            }
-
-            window.google.accounts.id.initialize({
-                client_id: clientId,
-                callback: onCredential,
-                auto_select: false,
-                cancel_on_tap_outside: true
-            });
-
-            render();
-            $(window).on('resize', render);
-        }
-
-        if (document.readyState === 'complete') {
-            init();
-        } else {
-            $(window).on('load', init);
+        // Quita los parámetros para que el aviso no se repita al recargar.
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, document.title, window.location.pathname);
         }
     }
 })(window.jQuery, window.App);

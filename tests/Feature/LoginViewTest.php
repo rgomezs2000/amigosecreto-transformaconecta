@@ -17,7 +17,8 @@ class LoginViewTest extends TestCase
             ->assertSee('Ingresar')
             ->assertSee('Salir')
             ->assertSee('Solo para cuentas creadas por el administrador')
-            ->assertSee('google-button');
+            ->assertSee('Continuar con Google')
+            ->assertSee('auth/google/redirect', false);
     }
 
     public function test_carga_las_librerias_por_cdn_y_los_assets_locales(): void
@@ -29,18 +30,10 @@ class LoginViewTest extends TestCase
             ->assertSee('jquery-3.7.1', false)
             ->assertSee('bootbox@6.0.4', false)
             ->assertSee('font-awesome', false)
-            ->assertSee('accounts.google.com/gsi/client', false)
+            ->assertSee('auth/google/redirect', false)
             ->assertSee('css/style.css', false)
             ->assertSee('js/functions.js', false)
             ->assertSee('js/scripts.js', false);
-    }
-
-    public function test_incluye_el_client_id_publico_de_google(): void
-    {
-        $response = $this->get('/login');
-
-        $response->assertOk()
-            ->assertSee(config('services.google.client_id'), false);
     }
 
     public function test_no_expone_el_secreto_de_google(): void
