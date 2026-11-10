@@ -1,0 +1,14 @@
+# Seguridad para XAMPP sin VirtualHost.
+#
+# Con el proyecto dentro de C:\xampp\htdocs, toda la carpeta queda bajo la raíz
+# web: .env, vendor, storage y composer.json serían descargables desde el
+# navegador. Esto bloquea todo excepto public/, que es lo único que debe
+# servirse.
+#
+# Si más adelante configuras un VirtualHost con DocumentRoot en public/, este
+# archivo queda fuera de la raíz web y se ignora.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?!public/).* - [F,L]
+</IfModule>

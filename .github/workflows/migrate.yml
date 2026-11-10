@@ -1,0 +1,120 @@
+name: Migraciones
+
+# Se ejecuta SOLO a mano: Actions → Migraciones → Run workflow.
+# El despliegue automático no toca la base de datos.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Ejecutar también los seeders (idempotentes)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Mismo grupo que el despliegue: no se pisan.
+concurrency:
+  group: produccion
+  cancel-in-progress: false
+
+jobs:
+  migrar:
+    name: Migraciones en producción
+    runs-on: windows-2025
+    timeout-minutes: 20
+    environment: production
+
+    steps:
+      - name: Instalar Posh-SSH
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          if (-not (Get-Module -ListAvailable -Name Posh-SSH)) {
+            Install-Module Posh-SSH -Scope CurrentUser -Force
+          }
+
+      - name: Aplicar migraciones pendientes
+        shell: pwsh
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          RUN_SEEDERS: ${{ inputs.seed }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Posh-SSH
+
+          if ([string]::IsNullOrWhiteSpace($env:SSH_HOST) -or
+              [string]::IsNullOrWhiteSpace($env:SSH_USER) -or
+              [string]::IsNullOrWhiteSpace($env:SSH_PASSWORD) -or
+              [string]::IsNullOrWhiteSpace($env:DEPLOY_PATH)) {
+            throw 'Faltan datos: SSH_HOST, SSH_USER, SSH_PASSWORD o DEPLOY_PATH.'
+          }
+
+          $securePassword = ConvertTo-SecureString $env:SSH_PASSWORD -AsPlainText -Force
+          $credential = [pscredential]::new($env:SSH_USER, $securePassword)
+
+          Write-Host "Conectando a $($env:SSH_HOST):$($env:SSH_PORT) como $($env:SSH_USER)..."
+
+          $session = New-SSHSession `
+            -ComputerName $env:SSH_HOST `
+            -Port ([int]$env:SSH_PORT) `
+            -Credential $credential `
+            -AcceptKey
+
+          try {
+            $safeDeployPath = $env:DEPLOY_PATH -replace "'", "''"
+            $runSeeders = ($env:RUN_SEEDERS -eq 'true')
+
+            $remoteLines = @(
+              '$ErrorActionPreference = ''Stop''',
+              'function Step([string]$m) { Write-Host ""; Write-Host "==> $m" }',
+              'function Check([string]$what) { if ($LASTEXITCODE -ne 0) { throw "$what falló con código $LASTEXITCODE" } }',
+              ('$deployPath = ''{0}''' -f $safeDeployPath),
+              'if (-not (Test-Path -LiteralPath $deployPath)) { throw "No existe la ruta: $deployPath" }',
+              'Set-Location -LiteralPath $deployPath',
+              'Step ''[1/2] Migraciones pendientes''',
+              'php artisan migrate --force',
+              'Check ''migrate'''
+            )
+
+            if ($runSeeders) {
+              $remoteLines += @(
+                'Step ''[2/2] Seeders''',
+                'php artisan db:seed --force',
+                'Check ''db:seed'''
+              )
+            } else {
+              $remoteLines += @('Step ''[2/2] Seeders omitidos''')
+            }
+
+            $remoteLines += @('Write-Host ''Migraciones al día.''')
+
+            $remoteScript = $remoteLines -join "`n"
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
+            $command = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+
+            Write-Host 'Ejecutando migraciones...'
+            $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $command -TimeOut 900
+
+            if ($result.Output) {
+              $result.Output | ForEach-Object { Write-Host $_ }
+            }
+
+            if ($result.ExitStatus -ne 0) {
+              throw "Las migraciones fallaron con ExitStatus $($result.ExitStatus)."
+            }
+
+            Write-Host 'Migraciones aplicadas correctamente.'
+          }
+          finally {
+            if ($session) {
+              Remove-SSHSession -SessionId $session.SessionId | Out-Null
+              Write-Host 'Sesión SSH cerrada.'
+            }
+          }

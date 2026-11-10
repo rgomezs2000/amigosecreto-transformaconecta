@@ -1,0 +1,178 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Un solo despliegue a la vez: si llegan dos push seguidos, el segundo espera.
+concurrency:
+  group: produccion
+  cancel-in-progress: false
+
+jobs:
+  pruebas:
+    name: Pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: amigosecreto_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_mysql, xml, curl, zip, bcmath, intl
+          coverage: none
+
+      - name: Instalar dependencias
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Preparar entorno
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Ejecutar pruebas
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: amigosecreto_test
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          GOOGLE_CLIENT_ID: test-client-id
+          GOOGLE_CLIENT_SECRET: test-client-secret
+        run: php artisan test
+
+  desplegar:
+    name: Desplegar a producción (Windows)
+    needs: pruebas
+    runs-on: windows-2025
+    timeout-minutes: 40
+    environment: production
+
+    steps:
+      - name: Instalar Posh-SSH
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          if (-not (Get-Module -ListAvailable -Name Posh-SSH)) {
+            Install-Module Posh-SSH -Scope CurrentUser -Force
+          }
+
+      - name: Autenticación, despliegue y desconexión
+        shell: pwsh
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Posh-SSH
+
+          if ([string]::IsNullOrWhiteSpace($env:SSH_HOST) -or
+              [string]::IsNullOrWhiteSpace($env:SSH_USER) -or
+              [string]::IsNullOrWhiteSpace($env:SSH_PASSWORD) -or
+              [string]::IsNullOrWhiteSpace($env:DEPLOY_PATH)) {
+            throw 'Faltan datos: SSH_HOST, SSH_USER, SSH_PASSWORD o DEPLOY_PATH.'
+          }
+
+          $securePassword = ConvertTo-SecureString $env:SSH_PASSWORD -AsPlainText -Force
+          $credential = [pscredential]::new($env:SSH_USER, $securePassword)
+
+          Write-Host "Conectando a $($env:SSH_HOST):$($env:SSH_PORT) como $($env:SSH_USER)..."
+
+          $session = New-SSHSession `
+            -ComputerName $env:SSH_HOST `
+            -Port ([int]$env:SSH_PORT) `
+            -Credential $credential `
+            -AcceptKey
+
+          try {
+            $safeDeployPath = $env:DEPLOY_PATH -replace "'", "''"
+
+            $remoteLines = @(
+              '$ErrorActionPreference = ''Stop''',
+              'function Step([string]$m) { Write-Host ""; Write-Host "==> $m" }',
+              'function Check([string]$what) { if ($LASTEXITCODE -ne 0) { throw "$what falló con código $LASTEXITCODE" } }',
+              ('$deployPath = ''{0}''' -f $safeDeployPath),
+              'if (-not (Test-Path -LiteralPath $deployPath)) { throw "No existe la ruta: $deployPath" }',
+              'Set-Location -LiteralPath $deployPath',
+              'if (-not (Test-Path -LiteralPath ''.git'')) { throw "No es un repositorio Git: $deployPath" }',
+              'Write-Host "Ruta: $deployPath"',
+              'Step ''[1/5] Pull del repositorio''',
+              'git fetch origin main --prune',
+              'Check ''git fetch''',
+              'git checkout --force main',
+              'Check ''git checkout''',
+              'git reset --hard origin/main',
+              'Check ''git reset''',
+              'git clean -fd',
+              'Check ''git clean''',
+              'git pull --ff-only origin main',
+              'Check ''git pull''',
+              'Write-Host "Commit desplegado: $(git rev-parse --short HEAD)"',
+              'Step ''[2/5] Composer''',
+              'composer install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader',
+              'Check ''composer install''',
+              'Step ''[3/5] Limpieza de cachés''',
+              'php artisan optimize:clear',
+              'Check ''optimize:clear''',
+              'Step ''[4/5] Regeneración de cachés''',
+              'php artisan config:cache',
+              'Check ''config:cache''',
+              'php artisan route:cache',
+              'Check ''route:cache''',
+              'php artisan view:cache',
+              'Check ''view:cache''',
+              'Step ''[5/5] Apache''',
+              'if (Get-Service -Name ''Apache2.4'' -ErrorAction SilentlyContinue) { Restart-Service -Name ''Apache2.4''; Write-Host ''Apache reiniciado.'' } else { Write-Host ''Apache no está instalado como servicio; se omite el reinicio.'' }',
+              'Write-Host ''Despliegue completado.'''
+            )
+
+            $remoteScript = $remoteLines -join "`n"
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
+            $command = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+
+            Write-Host 'Ejecutando despliegue remoto...'
+            $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $command -TimeOut 1800
+
+            if ($result.Output) {
+              $result.Output | ForEach-Object { Write-Host $_ }
+            }
+
+            if ($result.ExitStatus -ne 0) {
+              throw "El despliegue remoto falló con ExitStatus $($result.ExitStatus)."
+            }
+
+            Write-Host 'Despliegue completado correctamente.'
+          }
+          finally {
+            if ($session) {
+              Remove-SSHSession -SessionId $session.SessionId | Out-Null
+              Write-Host 'Sesión SSH cerrada.'
+            }
+          }
