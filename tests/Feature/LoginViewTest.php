@@ -16,10 +16,11 @@ class LoginViewTest extends TestCase
             ->assertSee('Clave')
             ->assertSee('Ingresar')
             ->assertSee('Salir')
-            ->assertSee('Acceso con Google');
+            ->assertSee('Solo para cuentas creadas por el administrador')
+            ->assertSee('google-button');
     }
 
-    public function test_carga_las_librerias_por_cdn(): void
+    public function test_carga_las_librerias_por_cdn_y_los_assets_locales(): void
     {
         $response = $this->get('/login');
 
@@ -28,7 +29,10 @@ class LoginViewTest extends TestCase
             ->assertSee('jquery-3.7.1', false)
             ->assertSee('bootbox@6.0.4', false)
             ->assertSee('font-awesome', false)
-            ->assertSee('accounts.google.com/gsi/client', false);
+            ->assertSee('accounts.google.com/gsi/client', false)
+            ->assertSee('css/style.css', false)
+            ->assertSee('js/functions.js', false)
+            ->assertSee('js/scripts.js', false);
     }
 
     public function test_incluye_el_client_id_publico_de_google(): void

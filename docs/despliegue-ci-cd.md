@@ -150,7 +150,7 @@ Valores mínimos del `.env` de producción:
 ```dotenv
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=http://ec2-3-142-153-156.us-east-2.compute.amazonaws.com
+APP_URL=https://ec2-3-142-153-156.us-east-2.compute.amazonaws.com/amigosecreto-transformaconecta
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -159,8 +159,7 @@ DB_USERNAME=amigosecreto
 DB_PASSWORD=...
 ```
 
-> Si sirves la app desde `.../public` sin VirtualHost, `APP_URL` debe incluir el subdirectorio:
-> `http://ec2-.../amigosecreto-transformaconecta/public`.
+> El `APP_URL` debe coincidir con la URL real, **sin `/public`**. Con el Alias de Apache es `https://ec2-.../amigosecreto-transformaconecta`.
 
 ### IIS (referencia; hoy el servidor usa Apache)
 
@@ -169,29 +168,34 @@ DB_PASSWORD=...
 3. Da permiso de escritura a `IIS_IUSRS` en `storage` y `bootstrap\cache` (el script también lo intenta).
 4. Para HTTPS **no uses certbot** (es de Linux): en Windows se usa **win-acme** (`wacs.exe`) o **Certify The Web**, que integran Let's Encrypt con IIS.
 
-### XAMPP / Apache
+### XAMPP / Apache: quitar `/public` de la URL
 
-**Recomendado: un VirtualHost con la raíz en `public\`.** Así el `.env` y `vendor\` quedan fuera de la web y las rutas son limpias (`/login` en vez de `/amigosecreto-transformaconecta/public/login`).
+Con la app dentro de `htdocs`, la URL queda `.../amigosecreto-transformaconecta/public/login` y **todo el proyecto es accesible**, incluido el `.env`.
 
-En `C:\xampp\apache\conf\extra\httpd-vhosts.conf`:
+Para que sea `.../amigosecreto-transformaconecta/login` y solo se sirva `public\`, agrega un **Alias** al final de `C:\xampp\apache\conf\httpd.conf` (en el servidor, la misma ruta):
 
 ```apache
-<VirtualHost *:80>
-    ServerName ec2-3-142-153-156.us-east-2.compute.amazonaws.com
-    DocumentRoot "C:/xampp/htdocs/amigosecreto-transformaconecta/public"
+Alias /amigosecreto-transformaconecta "C:/xampp/htdocs/amigosecreto-transformaconecta/public"
 
-    <Directory "C:/xampp/htdocs/amigosecreto-transformaconecta/public">
-        AllowOverride All
-        Require all granted
-    </Directory>
-</VirtualHost>
+<Directory "C:/xampp/htdocs/amigosecreto-transformaconecta/public">
+    Options FollowSymLinks
+    AllowOverride All
+    Require all granted
+</Directory>
 ```
 
-Reinicia Apache y comprueba `http://ec2-.../login`.
+Reinicia Apache y comprueba:
 
-**Si prefieres no tocar el VirtualHost**, la app queda en `http://ec2-.../amigosecreto-transformaconecta/public/login`, pero **todo el proyecto es accesible por HTTP**, incluido el `.env`. El `.htaccess` de la raíz que agregué bloquea todo excepto `public/`; comprueba que `AllowOverride All` esté activo para `htdocs`.
+- `http://localhost:8088/amigosecreto-transformaconecta/login` ✅
+- `http://localhost:8088/amigosecreto-transformaconecta/public/login` ❌ (deja de existir)
 
-> **Nunca** dejes la raíz del sitio en la carpeta del proyecto. `public\web.config` protege el `.env` en IIS; en Apache la protección es el VirtualHost o el `.htaccess` de la raíz.
+> El `public/.htaccess` incluye `RewriteBase /amigosecreto-transformaconecta`. Es obligatorio con el Alias: sin él, el `RewriteRule` a `index.php` entra en bucle y Apache devuelve 500 (`AH00124: Request exceeded the limit of 10 internal redirects`). Si cambias el nombre de la URL, actualiza esa línea; si usas un VirtualHost con raíz en `public/`, quítala.
+
+El Alias hace que la URL apunte directamente a `public\`, así que `.env`, `vendor\` y `storage\` quedan fuera de la web. El `.htaccess` de la raíz queda como red de seguridad para el acceso antiguo.
+
+> Si el hosting no permite `Alias`, la alternativa es un VirtualHost con `DocumentRoot` en `public\`; la URL sería `http://tu-host/login`, sin el subdirectorio.
+
+> **Nunca** dejes la raíz del sitio en la carpeta del proyecto. `public\web.config` protege el `.env` en IIS; en Apache la protección es el Alias (o el VirtualHost), más el `.htaccess` de la raíz como respaldo.
 
 Si Apache está instalado como servicio (XAMPP Control Panel → Apache → Service), el deploy lo reinicia solo. Si lo arrancas a mano desde el panel, el script avisa que no pudo reiniciarlo, pero el código igual se actualiza.
 

@@ -5,6 +5,10 @@
 
     RewriteEngine On
 
+    # El proyecto se sirve bajo /amigosecreto-transformaconecta con un Alias.
+    # Sin RewriteBase, el rewrite a index.php entra en bucle (AH00124).
+    RewriteBase /amigosecreto-transformaconecta
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
