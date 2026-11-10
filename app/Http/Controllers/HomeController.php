@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Enums\EventStatus;
 use App\Models\Event;
+use App\Models\Module;
+use App\Services\ExchangeRateService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
@@ -25,12 +27,31 @@ class HomeController extends Controller
         $user = Auth::user();
 
         $modules = $user->accessibleModules()
-            ->where('slug', '!=', 'salir')
+            ->whereNotIn('slug', ['salir', 'amigos.notificaciones'])
             ->values();
 
         $groups = $modules->groupBy('group');
 
         $event = Event::query()->orderByDesc('year')->first();
+
+        $notificationsModule = Module::query()
+            ->where('slug', 'amigos.notificaciones')
+            ->first();
+
+        $showNotifications = $notificationsModule !== null
+            && $user->hasModuleAccess($notificationsModule);
+
+        $notifications = $showNotifications
+            ? $user->notifications()->latest()->get()
+            : collect();
+
+        $notificationsCount = $showNotifications
+            ? $user->unreadNotifications()->count()
+            : 0;
+
+        $dollar = bcv_dollar();
+        $dollarRate = $dollar['promedio']
+            ?? app(ExchangeRateService::class)->latest()?->rate;
 
         return view('dashboard', [
             'user' => $user,
@@ -38,6 +59,10 @@ class HomeController extends Controller
             'groups' => $groups,
             'event' => $event,
             'currentStep' => $this->currentStep($event),
+            'showNotifications' => $showNotifications,
+            'notifications' => $notifications,
+            'notificationsCount' => $notificationsCount,
+            'dollarRate' => $dollarRate,
         ]);
     }
 

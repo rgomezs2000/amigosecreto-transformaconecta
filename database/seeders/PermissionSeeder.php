@@ -27,6 +27,8 @@ class PermissionSeeder extends Seeder
             ['name' => 'Asignar', 'slug' => 'assign'],
             ['name' => 'Cargar obsequios', 'slug' => 'gifts'],
             ['name' => 'Ver lista de deseos', 'slug' => 'wishlist'],
+            ['name' => 'Intercambiar pistas', 'slug' => 'clues'],
+            ['name' => 'Revelar', 'slug' => 'reveal'],
             ['name' => 'Notificaciones', 'slug' => 'notifications'],
         ];
 

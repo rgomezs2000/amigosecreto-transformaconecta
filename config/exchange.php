@@ -19,6 +19,9 @@ return [
     // 'oficial' (BCV) o 'paralelo'. El administrador decide cuál se muestra.
     'default_source' => env('EXCHANGE_DEFAULT_SOURCE', 'oficial'),
 
+    // La tasa se cachea para no golpear la API en cada petición.
+    'cache_ttl' => (int) env('EXCHANGE_CACHE_TTL', 300),
+
     'provider' => [
         'name' => env('EXCHANGE_PROVIDER', 'dolarapi'),
 

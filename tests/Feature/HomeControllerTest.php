@@ -3,10 +3,27 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class HomeControllerTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Http::fake([
+            've.dolarapi.com/*' => Http::response([
+                'fuente' => 'oficial',
+                'nombre' => 'Dólar',
+                'compra' => null,
+                'venta' => null,
+                'promedio' => 899.2705,
+                'fechaActualizacion' => '2026-11-10T00:00:00-04:00',
+            ]),
+        ]);
+    }
+
     public function test_un_invitado_es_enviado_al_login(): void
     {
         $this->get('/')->assertRedirect(route('login'));
@@ -31,7 +48,9 @@ class HomeControllerTest extends TestCase
             ->get('/dashboard')
             ->assertOk()
             ->assertSee('Panel de control')
-            ->assertSee('Ana Torres');
+            ->assertSee('Ana Torres')
+            ->assertSee('US$/Bs (BCV)')
+            ->assertSee('899,27');
     }
 
     public function test_el_logout_cierra_la_sesion_y_vuelve_a_la_raiz(): void

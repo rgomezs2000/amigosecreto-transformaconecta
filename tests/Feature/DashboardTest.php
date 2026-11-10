@@ -10,11 +10,29 @@ use App\Models\Profile;
 use App\Models\ProfilePermissionModule;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Http::fake([
+            've.dolarapi.com/*' => Http::response([
+                'fuente' => 'oficial',
+                'nombre' => 'Dólar',
+                'compra' => null,
+                'venta' => null,
+                'promedio' => 899.2705,
+                'fechaActualizacion' => '2026-11-10T00:00:00-04:00',
+            ]),
+        ]);
+    }
+
 
     /**
      * @return array{0: User, 1: Module}
@@ -64,7 +82,9 @@ class DashboardTest extends TestCase
             ->assertOk()
             ->assertSee('Hola: ' . $user->name)
             ->assertSee($module->name)
-            ->assertSee('dashboard-clock', false);
+            ->assertSee('dashboard-clock', false)
+            ->assertSee('US$/Bs (BCV)')
+            ->assertSee('899,27');
     }
 
     public function test_modulo_permitido_se_muestra(): void

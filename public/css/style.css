@@ -408,7 +408,7 @@ textarea:focus-visible,
 }
 
 .dashboard-heading {
-    max-width: 70%;
+    max-width: 65%;
 }
 
 .dashboard-eyebrow {
@@ -440,6 +440,86 @@ textarea:focus-visible,
 .dashboard-menu-btn:focus-visible {
     border-color: var(--accent);
     color: var(--accent);
+}
+
+.dashboard-notifications-btn {
+    position: absolute;
+    right: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    min-height: 3rem;
+    padding: 0 .9rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.dashboard-notifications-btn:hover,
+.dashboard-notifications-btn:focus-visible {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.dashboard-notifications-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.5rem;
+    height: 1.5rem;
+    padding: 0 .35rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-size: .75rem;
+    font-weight: 700;
+}
+
+#notifications-panel {
+    --bs-offcanvas-width: min(30rem, 95vw);
+}
+
+#notifications-table {
+    font-size: .9375rem;
+}
+
+#notifications-table td,
+#notifications-table th {
+    white-space: normal;
+}
+
+/* DataTables dentro del panel estrecho: apila los controles. */
+#notifications-panel .dataTables_wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+}
+
+#notifications-panel .dataTables_length,
+#notifications-panel .dataTables_filter,
+#notifications-panel .dt-length,
+#notifications-panel .dt-search {
+    float: none;
+    width: 100%;
+    margin: 0;
+    text-align: left;
+}
+
+#notifications-panel .dataTables_filter label,
+#notifications-panel .dt-search label {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    width: 100%;
+}
+
+#notifications-panel .dataTables_filter input,
+#notifications-panel .dt-search input {
+    flex: 1;
+    width: 100%;
+    margin: 0;
 }
 
 .dashboard-title {
@@ -499,6 +579,18 @@ textarea:focus-visible,
     font-weight: 600;
 }
 
+.dashboard-rate {
+    margin: 0;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.dashboard-rate strong {
+    color: var(--ink);
+    font-weight: 700;
+}
+
 .dashboard-modules {
     margin-top: 1.5rem;
 }
@@ -512,6 +604,69 @@ textarea:focus-visible,
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
     gap: 1rem;
+}
+
+.module-panels {
+    display: grid;
+    gap: 1rem;
+}
+
+.module-panel-group {
+    --group-color: var(--accent);
+    --group-soft: var(--accent-soft);
+    padding: 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--group-color);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.module-panel-group--maestros {
+    --group-color: #5B6B8C;
+    --group-soft: #EEF1F7;
+}
+
+.module-panel-group--usuarios {
+    --group-color: #3B7A8F;
+    --group-soft: #EAF4F7;
+}
+
+.module-panel-group--eventos {
+    --group-color: #8A6D3B;
+    --group-soft: #F7F1E8;
+}
+
+.module-panel-group--amigo-secreto {
+    --group-color: #2F6F62;
+    --group-soft: #E6F2EF;
+}
+
+.module-panel-group__title {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 0 0 1rem;
+    color: var(--group-color);
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.module-panel-group__title::before {
+    content: "";
+    width: .625rem;
+    height: .625rem;
+    border-radius: 50%;
+    background: var(--group-color);
+}
+
+.module-panel-group .module-grid {
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+.module-panel-group .module-tile {
+    background: #F8FAFC;
+    box-shadow: none;
 }
 
 .module-tile {
@@ -569,14 +724,9 @@ textarea:focus-visible,
     --group-soft: #F7F1E8;
 }
 
-.module-tile--amigos-secreto {
+.module-tile--amigo-secreto {
     --group-color: #2F6F62;
     --group-soft: #E6F2EF;
-}
-
-.module-tile--amigo-secreto {
-    --group-color: #6B5B8A;
-    --group-soft: #F1EEF7;
 }
 
 /* Stepper de las cinco fases */
@@ -672,14 +822,9 @@ textarea:focus-visible,
     --group-soft: #F7F1E8;
 }
 
-.menu-group--amigos-secreto {
+.menu-group--amigo-secreto {
     --group-color: #2F6F62;
     --group-soft: #E6F2EF;
-}
-
-.menu-group--amigo-secreto {
-    --group-color: #6B5B8A;
-    --group-soft: #F1EEF7;
 }
 
 .menu-group--sesion {
@@ -912,6 +1057,10 @@ textarea:focus-visible,
     }
 
     .dashboard-heading {
-        max-width: 65%;
+        max-width: 55%;
+    }
+
+    .dashboard-notifications-label {
+        display: none;
     }
 }
