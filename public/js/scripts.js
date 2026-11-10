@@ -18,6 +18,7 @@
         initExitButton();
         showGoogleResult();
         initDashboardClock();
+        initEventCountdown();
     });
 
     /**
@@ -196,6 +197,59 @@
                 doExit(window.confirm(message));
             }
         });
+    }
+
+    /**
+     * Cuenta regresiva hasta el intercambio. El texto se mantiene en días y
+     * horas para reducir la incertidumbre sin saturar.
+     */
+    function initEventCountdown() {
+        var $countdown = $('#event-countdown');
+
+        if (!$countdown.length) {
+            return;
+        }
+
+        var $text = $countdown.find('span');
+        var exchangeAt = $countdown.attr('data-exchange-at');
+
+        if (!exchangeAt) {
+            $countdown.addClass('dashboard-countdown--empty');
+            $text.text('Sin fecha de intercambio');
+            return;
+        }
+
+        var end = new Date(exchangeAt).getTime();
+
+        function update() {
+            var diff = end - Date.now();
+
+            if (diff <= 0) {
+                $countdown.removeClass('dashboard-countdown--empty');
+                $text.text('El intercambio es hoy');
+                return;
+            }
+
+            var days = Math.floor(diff / 86400000);
+            var hours = Math.floor((diff % 86400000) / 3600000);
+            var minutes = Math.floor((diff % 3600000) / 60000);
+            var parts = [];
+
+            if (days > 0) {
+                parts.push(days + (days === 1 ? ' día' : ' días'));
+                parts.push(hours + (hours === 1 ? ' hora' : ' horas'));
+            } else if (hours > 0) {
+                parts.push(hours + (hours === 1 ? ' hora' : ' horas'));
+                parts.push(minutes + (minutes === 1 ? ' minuto' : ' minutos'));
+            } else {
+                parts.push(minutes + (minutes === 1 ? ' minuto' : ' minutos'));
+            }
+
+            $text.text('Faltan ' + parts.join(' y ') + ' para el intercambio');
+        }
+
+        update();
+        window.setInterval(update, 60000);
     }
 
     /**

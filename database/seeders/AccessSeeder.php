@@ -31,6 +31,7 @@ class AccessSeeder extends Seeder
             'amigo.asociado' => ['view'],
             'amigo.deseos' => ['wishlist'],
             'amigo.obsequiados' => ['view'],
+            'salir' => ['view'],
         ];
 
         foreach ($map as $moduleSlug => $permissionSlugs) {
@@ -56,8 +57,11 @@ class AccessSeeder extends Seeder
             ]);
         }
 
-        // El perfil usuario recibe los módulos de participación.
-        $participantModuleIds = Module::where('group', 'Amigos secreto')->pluck('id');
+        // El perfil usuario recibe los módulos de participación y Salir.
+        $participantModuleIds = Module::where('group', 'Amigos secreto')
+            ->pluck('id')
+            ->push($moduleIds['salir'] ?? null)
+            ->filter();
 
         foreach ($pairs->whereIn('module_id', $participantModuleIds) as $pair) {
             DB::table('profile_permission_module')->updateOrInsert([

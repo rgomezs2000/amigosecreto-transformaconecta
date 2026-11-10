@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\EventStatus;
+use App\Models\Event;
 use App\Models\Module;
 use App\Models\Permission;
 use App\Models\Profile;
@@ -89,6 +91,26 @@ class DashboardTest extends TestCase
         $this->actingAs($user)
             ->get('/modulos/' . $module->slug)
             ->assertForbidden();
+    }
+
+    public function test_dashboard_muestra_la_fase_activa_y_la_cuenta_regresiva(): void
+    {
+        [$user] = $this->userWithModule();
+
+        Event::create([
+            'name' => 'Amigo Secreto 2026',
+            'year' => 2026,
+            'status' => EventStatus::Drawn,
+            'exchange_at' => now()->addDays(12),
+        ]);
+
+        $this->actingAs($user)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertSee('Amigo Secreto 2026')
+            ->assertSee('Lista de deseos')
+            ->assertSee('event-countdown', false)
+            ->assertSee('aria-current="step"', false);
     }
 
     public function test_dashboard_sin_modulos_muestra_aviso(): void

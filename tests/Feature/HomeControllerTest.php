@@ -12,11 +12,12 @@ class HomeControllerTest extends TestCase
         $this->get('/')->assertRedirect(route('login'));
     }
 
-    public function test_un_usuario_con_sesion_es_enviado_al_panel(): void
+    public function test_un_usuario_con_sesion_ve_el_panel(): void
     {
         $this->actingAs($this->usuario())
             ->get('/')
-            ->assertRedirect(route('dashboard'));
+            ->assertOk()
+            ->assertViewIs('dashboard');
     }
 
     public function test_el_panel_exige_sesion(): void
@@ -31,6 +32,17 @@ class HomeControllerTest extends TestCase
             ->assertOk()
             ->assertSee('Panel de control')
             ->assertSee('Ana Torres');
+    }
+
+    public function test_el_logout_cierra_la_sesion_y_vuelve_a_la_raiz(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->post('/logout')
+            ->assertRedirect(route('home'));
+
+        $this->assertGuest();
     }
 
     private function usuario(): User

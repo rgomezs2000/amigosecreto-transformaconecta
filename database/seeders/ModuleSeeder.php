@@ -24,6 +24,7 @@ class ModuleSeeder extends Seeder
             ['name' => 'Usuario asociado', 'slug' => 'amigo.asociado', 'group' => 'Amigo secreto', 'icon' => 'fa-link', 'order' => 120],
             ['name' => 'Lista de deseos', 'slug' => 'amigo.deseos', 'group' => 'Amigo secreto', 'icon' => 'fa-list', 'order' => 130],
             ['name' => 'Usuarios obsequiados', 'slug' => 'amigo.obsequiados', 'group' => 'Amigo secreto', 'icon' => 'fa-gift', 'order' => 140],
+            ['name' => 'Salir', 'slug' => 'salir', 'group' => 'Sesión', 'icon' => 'fa-right-from-bracket', 'order' => 999],
         ];
 
         foreach ($modules as $module) {
