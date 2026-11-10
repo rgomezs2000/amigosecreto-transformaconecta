@@ -24,7 +24,7 @@
  │  2. Pull: fetch + checkout + reset --hard + clean      │
  │  3. composer install                                   │
  │  4. php artisan optimize:clear                         │
- │  5. config:cache + route:cache + view:cache            │
+ │  5. config:cache + view:cache (sin route:cache)        │
  │  6. Reinicio de Apache (si está como servicio)         │
  │  7. Desconexión (finally)                              │
  └────────────────────────────────────────────────────────┘
@@ -138,6 +138,13 @@ php artisan key:generate
 php artisan migrate --force
 ```
 
+> **El `.env` no viene en el repositorio.** Si la carpeta ya existía y saltaste el clone, verifica que `.env` exista y apunte a MySQL. Sin eso, Laravel usa SQLite por defecto y el despliegue falla al limpiar la caché con `database.sqlite does not exist`.
+>
+> ```powershell
+> Test-Path .env
+> Get-Content .env | Select-String 'APP_KEY|DB_CONNECTION|DB_DATABASE'
+> ```
+
 Valores mínimos del `.env` de producción:
 
 ```dotenv
@@ -221,6 +228,10 @@ También revisa:
 | `php: no se reconoce` | PHP no está en el PATH; el script busca `C:\xampp\php\php.exe` |
 | `composer: no se reconoce` | Composer no está en el PATH ni en las rutas habituales |
 | `No se pudo reiniciar el servidor web` | Apache no está instalado como servicio `Apache2.4` (el deploy igual termina) |
+| `Database file at path ...database.sqlite does not exist` | Falta `.env` o tiene `DB_CONNECTION=sqlite`: el servidor está usando SQLite por defecto |
+| `405 The GET method is not supported for route /. Supported methods: HEAD` | Caché de rutas vieja o generada con `route:cache` en Apache/Windows. Ejecuta `php artisan route:clear` |
+| `Falta .env en ...` | El servidor no tiene `.env` (no está en el repositorio) |
+| `DB_CONNECTION debe ser mysql o mariadb` | El `.env` del servidor apunta a SQLite |
 | `Se requiere PHP 8.2` | XAMPP con PHP viejo: Laravel 12 no arranca con menos |
 | `dubious ownership` | `git config --global --add safe.directory C:\...` |
 
@@ -280,4 +291,5 @@ Si quieres una barrera sin tocar el workflow: **Settings → Environments → `p
 - **El pipeline no toca el `.env`**: `git reset --hard` no afecta archivos ignorados.
 - El repositorio es público, así que el servidor clona por HTTPS sin credenciales.
 - Los scripts corren con `-ExecutionPolicy Bypass`; no hay que cambiar la política de la máquina.
+- **`route:cache` está desactivado** en el pipeline: en Apache/Windows serializa la ruta `/` con solo `HEAD` y devuelve 405. Sin esa caché la app funciona igual; el impacto en rendimiento es mínimo.
 - La base de pruebas vive solo en el runner de GitHub; nunca en producción.

@@ -78,6 +78,9 @@ jobs:
               ('$deployPath = ''{0}''' -f $safeDeployPath),
               'if (-not (Test-Path -LiteralPath $deployPath)) { throw "No existe la ruta: $deployPath" }',
               'Set-Location -LiteralPath $deployPath',
+              '$envFile = Join-Path $deployPath ''.env''',
+              'if (-not (Test-Path -LiteralPath $envFile)) { throw "Falta .env en $deployPath." }',
+              'if (-not (Select-String -Path $envFile -Pattern ''^DB_CONNECTION=(mysql|mariadb)'' -Quiet)) { throw "DB_CONNECTION debe ser mysql o mariadb en .env." }',
               'Step ''[1/2] Migraciones pendientes''',
               'php artisan migrate --force',
               'Check ''migrate'''
