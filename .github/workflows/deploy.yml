@@ -9,8 +9,9 @@ permissions:
   contents: read
 
 # Un solo despliegue a la vez: un push nuevo cancela el anterior en cola.
+# Grupo v2: crea una cola limpia para destrabar ejecuciones antiguas.
 concurrency:
-  group: produccion
+  group: produccion-v2
   cancel-in-progress: true
 
 jobs:
