@@ -8,10 +8,10 @@ on:
 permissions:
   contents: read
 
-# Un solo despliegue a la vez: si llegan dos push seguidos, el segundo espera.
+# Un solo despliegue a la vez: un push nuevo cancela el anterior en cola.
 concurrency:
   group: produccion
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   pruebas:
@@ -68,7 +68,7 @@ jobs:
   desplegar:
     name: Desplegar a producción (Windows)
     needs: pruebas
-    runs-on: windows-2025
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     environment: production
 
