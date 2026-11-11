@@ -19,7 +19,47 @@
         showGoogleResult();
         initDashboardClock();
         initEventCountdown();
+        initOffcanvasDismiss();
+        initProfilePasswordToggles();
+        initPerfilUsernameCheck();
+        initPerfilPasswordForm();
+        showLockedResult();
     });
+
+    /**
+     * Cierra el menú o las notificaciones al hacer clic fuera de ellos.
+     */
+    function initOffcanvasDismiss() {
+        if (!window.bootstrap || !window.bootstrap.Offcanvas) {
+            return;
+        }
+
+        document.addEventListener('click', function (event) {
+            var target = event.target;
+
+            if (!(target instanceof Element)) {
+                return;
+            }
+
+            var panels = document.querySelectorAll('.offcanvas.show');
+
+            if (!panels.length) {
+                return;
+            }
+
+            panels.forEach(function (panel) {
+                if (panel.contains(target)) {
+                    return;
+                }
+
+                if (target.closest('[data-bs-toggle="offcanvas"]')) {
+                    return;
+                }
+
+                window.bootstrap.Offcanvas.getOrCreateInstance(panel).hide();
+            });
+        });
+    }
 
     /**
      * Muestra un aviso con Bootbox (o window.alert si no cargó).
@@ -39,6 +79,33 @@
 
         if (typeof callback === 'function') {
             callback();
+        }
+    }
+
+    /**
+     * Confirmación con Bootbox; si se cancela no se ejecuta la acción.
+     */
+    function confirmAction(message, title, onConfirm) {
+        if (window.bootbox) {
+            window.bootbox.confirm({
+                title: title || 'Confirmar',
+                message: message,
+                centerVertical: true,
+                buttons: {
+                    cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
+                    confirm: { label: 'Aceptar', className: 'btn-primary' }
+                },
+                callback: function (ok) {
+                    if (ok) {
+                        onConfirm();
+                    }
+                }
+            });
+            return;
+        }
+
+        if (window.confirm(message)) {
+            onConfirm();
         }
     }
 
@@ -312,5 +379,271 @@
         if (window.history && window.history.replaceState) {
             window.history.replaceState({}, document.title, window.location.pathname);
         }
+    }
+
+    /**
+     * Aviso al llegar al login con ?locked=1 (sesión cerrada por bloqueo).
+     */
+    function showLockedResult() {
+        var params = new URLSearchParams(window.location.search);
+
+        if (params.get('locked') !== '1') {
+            return;
+        }
+
+        dialog(
+            'Tu usuario se encuentra bloqueado por demasiados intentos. Contacta al administrador.',
+            'Cuenta bloqueada'
+        );
+
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }
+
+    /**
+     * Mostrar/ocultar las claves del perfil mientras se mantiene pulsado.
+     */
+    function initProfilePasswordToggles() {
+        $('[data-toggle-password]').each(function () {
+            var $toggle = $(this);
+            var $input = $($toggle.attr('data-target'));
+
+            if (!$input.length) {
+                return;
+            }
+
+            var $icon = $toggle.find('i');
+
+            function show() {
+                $input.attr('type', 'text');
+                $icon.removeClass('fa-eye').addClass('fa-eye-slash');
+            }
+
+            function hide() {
+                $input.attr('type', 'password');
+                $icon.removeClass('fa-eye-slash').addClass('fa-eye');
+            }
+
+            $toggle.on('pointerdown', function (event) {
+                event.preventDefault();
+                show();
+            });
+
+            $toggle.on('pointerup pointercancel pointerleave', hide);
+
+            $toggle.on('keydown', function (event) {
+                if (event.key === ' ' || event.key === 'Enter') {
+                    event.preventDefault();
+                    show();
+                }
+            });
+
+            $toggle.on('keyup', function (event) {
+                if (event.key === ' ' || event.key === 'Enter') {
+                    hide();
+                }
+            });
+
+            $toggle.on('blur', hide);
+            $(window).on('blur', hide);
+        });
+    }
+
+    /**
+     * Perfil: consulta el login al salir del campo y guarda por AJAX.
+     */
+    function initPerfilUsernameCheck() {
+        var $form = $('#form-perfil');
+
+        if (!$form.length) {
+            return;
+        }
+
+        var $username = $('#perfil-username');
+        var $status = $('#perfil-username-status');
+        var $submit = $('#perfil-submit');
+        var current = String($username.attr('data-current') || '').toLowerCase();
+        var checkUrl = $form.attr('data-login-url');
+        var available = true;
+
+        function setAvailability(ok, message) {
+            available = ok;
+            $status.attr('data-kind', ok ? 'ok' : 'error').text(message || '');
+            $submit.prop('disabled', !ok);
+        }
+
+        function checkLogin() {
+            var value = $.trim($username.val());
+
+            if (!value) {
+                setAvailability(false, 'El usuario es obligatorio.');
+                return;
+            }
+
+            if (value.toLowerCase() === current) {
+                setAvailability(true, 'Usuario disponible.');
+                return;
+            }
+
+            $.ajax({
+                url: checkUrl,
+                method: 'GET',
+                dataType: 'json',
+                data: { login: value }
+            }).done(function (response) {
+                setAvailability(!!response.available, response.message || '');
+            }).fail(function (xhr) {
+                var response = xhr.responseJSON || {};
+                setAvailability(false, response.message || 'No se pudo verificar el usuario.');
+            });
+        }
+
+        $username.on('blur', checkLogin);
+
+        $form.on('submit', function (event) {
+            event.preventDefault();
+
+            var firstInvalid = null;
+
+            $form.find('input[name="name"], input[name="email"], input[name="username"]').each(function () {
+                if (!$.trim($(this).val()) && firstInvalid === null) {
+                    firstInvalid = $(this);
+                }
+            });
+
+            if (firstInvalid !== null) {
+                firstInvalid.trigger('focus');
+                dialog('Completa todos los campos del perfil.', 'Faltan datos', function () {
+                    firstInvalid.trigger('focus');
+                });
+                return;
+            }
+
+            if (!available) {
+                $username.trigger('focus');
+                dialog('El usuario no está disponible. Elige otro.', 'Usuario no disponible');
+                return;
+            }
+
+            confirmAction('¿Desea cambiar el perfil?', 'Confirmar cambio de perfil', function () {
+                $submit.prop('disabled', true);
+
+                $.ajax({
+                    url: $form.attr('action'),
+                    method: 'POST',
+                    dataType: 'json',
+                    data: $form.serialize()
+                }).done(function (response) {
+                    window.location.assign(response.redirect || window.location.href);
+                }).fail(function (xhr) {
+                    var response = xhr.responseJSON || {};
+                    var errors = response.errors || {};
+                    var firstField = Object.keys(errors)[0];
+
+                    if (firstField) {
+                        $form.find('[name="' + firstField + '"]').trigger('focus');
+                    }
+
+                    dialog(
+                        response.message || (firstField ? errors[firstField][0] : 'No se pudo actualizar el perfil.'),
+                        'No se pudo guardar'
+                    );
+                }).always(function () {
+                    $submit.prop('disabled', false);
+                });
+            });
+        });
+    }
+
+    /**
+     * Perfil: cambiar la clave con validación local y AJAX.
+     */
+    function initPerfilPasswordForm() {
+        var $form = $('#form-clave');
+
+        if (!$form.length) {
+            return;
+        }
+
+        var $current = $('#perfil-current');
+        var $password = $('#perfil-password');
+        var $confirm = $('#perfil-password-confirm');
+        var $submit = $('#clave-submit');
+
+        function fail($field, message) {
+            $field.trigger('focus');
+            dialog(message, 'Revisa la clave', function () {
+                $field.trigger('focus');
+            });
+        }
+
+        $form.on('submit', function (event) {
+            event.preventDefault();
+
+            if (!$.trim($current.val())) {
+                fail($current, 'Escribe tu clave actual.');
+                return;
+            }
+
+            if (!$.trim($password.val())) {
+                fail($password, 'Escribe la nueva clave.');
+                return;
+            }
+
+            if ($password.val().length < 10) {
+                fail($password, 'La nueva clave debe tener al menos 10 caracteres.');
+                return;
+            }
+
+            if (!$.trim($confirm.val())) {
+                fail($confirm, 'Confirma la nueva clave.');
+                return;
+            }
+
+            if ($password.val() !== $confirm.val()) {
+                fail($confirm, 'Las claves no coinciden.');
+                return;
+            }
+
+            confirmAction('¿Desea cambiar la contraseña?', 'Confirmar cambio de contraseña', function () {
+                $submit.prop('disabled', true);
+
+                $.ajax({
+                    url: $form.attr('action'),
+                    method: 'POST',
+                    dataType: 'json',
+                    data: $form.serialize()
+                }).done(function (response) {
+                    window.location.assign(response.redirect || window.location.href);
+                }).fail(function (xhr) {
+                    var response = xhr.responseJSON || {};
+                    var errors = response.errors || {};
+                    var firstField = Object.keys(errors)[0];
+
+                    if (firstField) {
+                        $form.find('[name="' + firstField + '"]').trigger('focus');
+                    }
+
+                    if (response.locked && response.redirect) {
+                        dialog(
+                            response.message || 'Tu usuario se encuentra bloqueado.',
+                            'Cuenta bloqueada',
+                            function () {
+                                window.location.assign(response.redirect);
+                            }
+                        );
+                        return;
+                    }
+
+                    dialog(
+                        response.message || (firstField ? errors[firstField][0] : 'No se pudo cambiar la contraseña.'),
+                        'No se pudo cambiar la contraseña'
+                    );
+                }).always(function () {
+                    $submit.prop('disabled', false);
+                });
+            });
+        });
     }
 })(window.jQuery, window.App);

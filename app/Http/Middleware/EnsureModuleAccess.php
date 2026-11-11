@@ -14,15 +14,18 @@ class EnsureModuleAccess
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $module = $request->route('module');
+        $slug = $request->route('module');
 
-        if (! $module instanceof Module) {
-            $module = Module::query()
-                ->where('slug', $module)
-                ->first();
+        if (! is_string($slug)) {
+            abort(404);
         }
 
-        if ($module === null || ! $module->is_active) {
+        $module = Module::query()
+            ->where('slug', $slug)
+            ->where('is_active', true)
+            ->first();
+
+        if ($module === null) {
             abort(404);
         }
 

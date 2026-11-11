@@ -158,6 +158,56 @@ class User extends Authenticatable
         });
     }
 
+    /**
+     * Scope: ¿el login (usuario) ya está ocupado por otra cuenta?
+     */
+    public function scopeLoginExists(Builder $query, string $login, ?int $ignoreId = null): Builder
+    {
+        $login = mb_strtolower(trim($login));
+
+        return $query
+            ->whereRaw('LOWER(username) = ?', [$login])
+            ->when($ignoreId !== null, fn (Builder $query) => $query->whereKeyNot($ignoreId));
+    }
+
+    /**
+     * ¿El login (usuario) ya está ocupado por otra cuenta?
+     */
+    public function loginExists(string $login, ?int $ignoreId = null): bool
+    {
+        $login = mb_strtolower(trim($login));
+
+        if ($login === '') {
+            return false;
+        }
+
+        return static::query()->loginExists($login, $ignoreId)->exists();
+    }
+
+    /**
+     * Actualiza los datos editables del perfil propio.
+     *
+     * @param  array{name:string,email:string,username:string}  $data
+     */
+    public function updateProfile(array $data): bool
+    {
+        return $this->forceFill([
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'username' => $data['username'],
+        ])->save();
+    }
+
+    /**
+     * Cambia la clave. El cast "hashed" la encripta al guardar.
+     */
+    public function updatePassword(string $password): bool
+    {
+        return $this->forceFill([
+            'password' => $password,
+        ])->save();
+    }
+
     public function profile(): BelongsTo
     {
         return $this->belongsTo(Profile::class);

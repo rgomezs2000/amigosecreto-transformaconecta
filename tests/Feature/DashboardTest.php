@@ -92,7 +92,7 @@ class DashboardTest extends TestCase
         [$user, $module] = $this->userWithModule();
 
         $this->actingAs($user)
-            ->get('/modulos/' . $module->slug)
+            ->get($module->url())
             ->assertOk()
             ->assertSee($module->name);
     }
@@ -109,8 +109,47 @@ class DashboardTest extends TestCase
         $user = User::factory()->create();
 
         $this->actingAs($user)
-            ->get('/modulos/' . $module->slug)
-            ->assertForbidden();
+            ->get($module->url())
+            ->assertForbidden()
+            ->assertSee('Error 403')
+            ->assertSee('Menú');
+    }
+
+    public function test_modulo_inexistente_da_404(): void
+    {
+        [$user] = $this->userWithModule();
+
+        $this->actingAs($user)
+            ->get('/no-existe/no-existe')
+            ->assertNotFound()
+            ->assertSee('Error 404')
+            ->assertSee('Menú');
+    }
+
+    public function test_ruta_inexistente_sin_sesion_da_404(): void
+    {
+        $this->get('/ruta-inexistente')
+            ->assertNotFound()
+            ->assertSee('Error 404')
+            ->assertSee('Ir al acceso');
+    }
+
+    public function test_ruta_inexistente_con_sesion_muestra_el_shell(): void
+    {
+        [$user] = $this->userWithModule();
+
+        $this->actingAs($user)
+            ->get('/ruta-inexistente')
+            ->assertNotFound()
+            ->assertSee('Error 404')
+            ->assertSee('Menú');
+    }
+
+    public function test_la_pagina_de_error_500_se_puede_renderizar(): void
+    {
+        $this->view('errors.500')
+            ->assertSee('Error 500')
+            ->assertSee('Error del servidor');
     }
 
     public function test_dashboard_muestra_la_fase_activa_y_la_cuenta_regresiva(): void
@@ -141,5 +180,34 @@ class DashboardTest extends TestCase
             ->get('/dashboard')
             ->assertOk()
             ->assertSee('No tienes módulos asignados');
+    }
+
+    public function test_inicio_aparece_solo_en_el_menu(): void
+    {
+        [$user] = $this->userWithModule();
+
+        $inicio = Module::create([
+            'name' => 'Inicio',
+            'slug' => '',
+            'group' => 'General',
+            'icon' => 'fa-house',
+            'order' => 1,
+            'is_active' => true,
+        ]);
+
+        $permission = Permission::query()->where('slug', 'view')->firstOrFail();
+
+        ProfilePermissionModule::create([
+            'profile_id' => $user->profile_id,
+            'permission_id' => $permission->id,
+            'module_id' => $inicio->id,
+        ]);
+
+        $this->actingAs($user)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertSee('Inicio')
+            ->assertSee('href="' . route('home') . '"', false)
+            ->assertDontSee('module-tile__name">Inicio', false);
     }
 }

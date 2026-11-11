@@ -47,6 +47,31 @@ class AccessService
         return $deleted > 0;
     }
 
+    /**
+     * Revoca todos los permisos de un módulo para un perfil.
+     */
+    public function revokeModule(Profile $profile, Module $module): int
+    {
+        $permissionIds = ProfilePermissionModule::query()
+            ->where('profile_id', $profile->id)
+            ->where('module_id', $module->id)
+            ->pluck('permission_id');
+
+        $permissions = Permission::query()
+            ->whereIn('id', $permissionIds)
+            ->get();
+
+        $revoked = 0;
+
+        foreach ($permissions as $permission) {
+            if ($this->revoke($profile, $module, $permission)) {
+                $revoked++;
+            }
+        }
+
+        return $revoked;
+    }
+
     private function audit(string $action, Profile $profile, Module $module, Permission $permission): void
     {
         AuditLog::query()->create([

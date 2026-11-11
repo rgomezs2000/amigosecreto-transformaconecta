@@ -627,6 +627,11 @@ textarea:focus-visible,
     --group-soft: #EEF1F7;
 }
 
+.module-panel-group--general {
+    --group-color: #475569;
+    --group-soft: #F1F5F9;
+}
+
 .module-panel-group--usuarios {
     --group-color: #3B7A8F;
     --group-soft: #EAF4F7;
@@ -712,6 +717,11 @@ textarea:focus-visible,
 .module-tile--maestros {
     --group-color: #5B6B8C;
     --group-soft: #EEF1F7;
+}
+
+.module-tile--general {
+    --group-color: #475569;
+    --group-soft: #F1F5F9;
 }
 
 .module-tile--usuarios {
@@ -810,6 +820,11 @@ textarea:focus-visible,
 .menu-group--maestros {
     --group-color: #5B6B8C;
     --group-soft: #EEF1F7;
+}
+
+.menu-group--general {
+    --group-color: #475569;
+    --group-soft: #F1F5F9;
 }
 
 .menu-group--usuarios {
@@ -1024,6 +1039,571 @@ textarea:focus-visible,
     font-weight: 700;
 }
 
+/* Perfil propio */
+.perfil-page {
+    display: grid;
+    gap: 1.5rem;
+}
+
+.perfil-alert {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: 1.25rem;
+    background: var(--accent-soft);
+    border: 1px solid #B7E1D4;
+    color: #1F4E45;
+    font-weight: 600;
+}
+
+.perfil-card {
+    padding: clamp(1.25rem, 3vw, 2rem);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.perfil-card__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.perfil-card__title {
+    margin: 0 0 .25rem;
+    font-size: clamp(1.25rem, 2vw, 1.5rem);
+}
+
+.perfil-card__subtitle {
+    margin: 0;
+    color: var(--muted);
+}
+
+.perfil-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+
+.perfil-data {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1rem;
+    margin: 0;
+}
+
+.perfil-data__item {
+    padding: 1rem;
+    background: #F8FAFC;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.perfil-data dt {
+    margin: 0 0 .25rem;
+    color: var(--muted);
+    font-size: .8125rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.perfil-data dd {
+    margin: 0;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.perfil-table {
+    margin: 0;
+}
+
+.perfil-table thead th {
+    padding: .75rem;
+    background: #F8FAFC;
+    color: var(--muted);
+    font-size: .875rem;
+    letter-spacing: 0;
+    font-weight: 700;
+    text-align: left;
+    text-transform: none;
+}
+
+.perfil-table tbody td {
+    padding: .75rem;
+}
+
+.perfil-module {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    font-weight: 600;
+}
+
+.perfil-module i {
+    color: var(--accent);
+}
+
+.perfil-badge {
+    margin: .125rem .25rem .125rem 0;
+    padding: .375rem .625rem;
+    background: var(--accent-soft);
+    color: #1F4E45;
+    font-weight: 600;
+}
+
+.field-message {
+    margin: .375rem 0 0;
+    font-size: .875rem;
+    font-weight: 600;
+}
+
+.field-message:empty {
+    display: none;
+}
+
+.field-message[data-kind="error"] {
+    color: var(--error);
+}
+
+.field-message[data-kind="ok"] {
+    color: #1F4E45;
+}
+
+.modal-content {
+    border-color: var(--border);
+    border-radius: var(--radius);
+}
+
+/* Roles */
+.roles-page {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.roles-toolbar {
+    display: grid;
+    gap: .75rem;
+}
+
+.category-modules {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.category-modules li {
+    padding: .25rem 0;
+}
+
+.module-route {
+    margin: 0;
+    padding: .625rem .75rem;
+    background: #F8FAFC;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .95rem;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+
+.roles-search {
+    display: grid;
+    gap: .75rem;
+    width: 100%;
+}
+
+.roles-search-card {
+    display: grid;
+    gap: 1rem;
+}
+
+.roles-search-card .roles-actions {
+    margin-top: .5rem;
+}
+
+.roles-table-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    margin-bottom: 1rem;
+}
+
+.roles-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+
+.roles-form {
+    padding: 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.roles-form__title {
+    margin: 0 0 1rem;
+    font-size: 1.25rem;
+}
+
+.roles-form__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+
+.roles-table-card {
+    padding: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+}
+
+.roles-table thead th,
+.roles-table tfoot th {
+    background: #F8FAFC;
+    color: var(--muted);
+    font-size: .875rem;
+    letter-spacing: 0;
+    font-weight: 700;
+    text-align: center !important;
+    text-transform: none;
+}
+
+.roles-table tbody td {
+    vertical-align: middle;
+    text-align: center !important;
+}
+
+.roles-table .roles-check {
+    text-align: center !important;
+}
+
+.table-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: center;
+    gap: .375rem;
+    width: 100%;
+}
+
+.table-actions .btn {
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+    font-size: .9375rem;
+}
+
+.roles-table th.roles-actions,
+.roles-table td.roles-actions {
+    display: table-cell;
+    text-align: center !important;
+    vertical-align: middle;
+}
+
+.roles-table thead th.roles-id,
+.roles-table thead th.roles-actions,
+.roles-table thead th.roles-check,
+.matriz-table thead th.matriz-col-associated {
+    background-image: none !important;
+}
+
+.roles-table thead th.roles-id::before,
+.roles-table thead th.roles-id::after,
+.roles-table thead th.roles-actions::before,
+.roles-table thead th.roles-actions::after,
+.roles-table thead th.roles-check::before,
+.roles-table thead th.roles-check::after,
+.matriz-table thead th.matriz-col-associated::before,
+.matriz-table thead th.matriz-col-associated::after {
+    content: none !important;
+    display: none !important;
+}
+
+.roles-table thead th.sorting_disabled,
+.matriz-table thead th.sorting_disabled {
+    background-image: none !important;
+}
+
+.roles-table thead th.sorting_disabled::before,
+.roles-table thead th.sorting_disabled::after,
+.matriz-table thead th.sorting_disabled::before,
+.matriz-table thead th.sorting_disabled::after {
+    content: none !important;
+    display: none !important;
+}
+
+.roles-table-card .dataTables_wrapper,
+.roles-table-card .dataTables_wrapper table,
+.roles-table-card table.dataTable {
+    width: 100% !important;
+}
+
+.dataTables_wrapper {
+    padding: .25rem 0;
+}
+
+.dataTables_wrapper .dataTables_length,
+.dataTables_wrapper .dataTables_info {
+    color: var(--muted);
+}
+
+.dataTables_wrapper .dataTables_filter {
+    display: none;
+}
+
+/* Bootbox por encima de los modales de Bootstrap (confirmaciones del perfil) */
+.bootbox.modal {
+    z-index: 1065;
+}
+
+.bootbox.modal ~ .modal-backdrop {
+    z-index: 1060;
+}
+
+/* Matriz de perfiles */
+.matriz-page {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.matriz-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.matriz-role {
+    width: min(24rem, 100%);
+}
+
+.matriz-role .form-select {
+    min-height: 48px;
+    border-color: var(--border);
+    border-radius: 10px;
+    font-size: 1.0625rem;
+}
+
+.matriz-help {
+    margin: 0;
+    color: var(--muted);
+}
+
+.matriz-card {
+    padding: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+}
+
+.matriz-table {
+    width: 100% !important;
+    table-layout: fixed;
+    min-width: 54rem;
+    margin: 0;
+}
+
+.matriz-table thead th:nth-child(2),
+.matriz-table tbody td:nth-child(2),
+.matriz-table thead th:nth-child(3),
+.matriz-table tbody td:nth-child(3),
+.matriz-table thead th:nth-child(4),
+.matriz-table tbody td:nth-child(4) {
+    width: 33.333% !important;
+}
+
+.matriz-table thead th {
+    background: #F8FAFC;
+    color: var(--muted);
+    font-size: .875rem;
+    letter-spacing: 0;
+    font-weight: 700;
+    text-align: center !important;
+    text-transform: none;
+}
+
+.matriz-table tbody td {
+    text-align: center !important;
+}
+
+.matriz-table .matriz-col-associated {
+    text-align: center !important;
+}
+
+.matriz-module {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .75rem;
+    text-align: center;
+}
+
+.matriz-module__icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 1rem;
+}
+
+.matriz-module__name {
+    display: block;
+    font-weight: 600;
+}
+
+.matriz-module__group {
+    display: block;
+    color: var(--muted);
+    font-size: .8125rem;
+}
+
+.matriz-col-associated {
+    width: 8rem;
+    text-align: center;
+}
+
+.matriz-associated-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    cursor: pointer;
+}
+
+.matriz-permissions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1rem;
+}
+
+.matriz-permission {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    min-height: 2.75rem;
+    font-size: .9375rem;
+}
+
+.matriz-permission .form-check-input {
+    margin: 0;
+}
+
+.matriz-no-permissions {
+    color: var(--muted);
+    font-size: .875rem;
+}
+
+.matriz-empty,
+.matriz-loading {
+    margin: 1rem 0;
+    color: var(--muted);
+    text-align: center;
+}
+
+.form-check-input:disabled {
+    cursor: not-allowed;
+}
+
+.matriz-role-actions {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 1rem;
+}
+
+.matriz-role-actions .btn {
+    width: auto;
+}
+
+.matriz-role-card .form-status {
+    margin-top: 1rem;
+}
+
+.matriz-role-card .form-select {
+    width: 100%;
+    min-height: 48px;
+    border-color: var(--border);
+    border-radius: 10px;
+    font-size: 1.0625rem;
+}
+
+.matriz-filter-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.matriz-filter {
+    display: flex;
+    flex-direction: column;
+    gap: .375rem;
+    min-width: 14rem;
+}
+
+.matriz-filter__action {
+    flex-basis: 100%;
+    align-items: flex-start;
+    justify-content: flex-start;
+    margin-top: .25rem;
+}
+
+.matriz-filter .form-select {
+    min-height: 48px;
+    border-color: var(--border);
+    border-radius: 10px;
+    font-size: 1.0625rem;
+}
+
+.matriz-table thead th,
+.matriz-table tfoot th {
+    text-align: center !important;
+    text-transform: none;
+}
+
+/* DataTables: cabecera/pie centrados y en letra capital; cuerpo a la izquierda. */
+table.dataTable thead th,
+table.dataTable tfoot th {
+    text-align: center !important;
+    text-transform: none;
+}
+
+table.dataTable tbody td {
+    text-align: center !important;
+}
+
+.matriz-table tr.dtrg-group td {
+    background: #EEF2F7;
+    color: var(--ink);
+    font-weight: 700;
+    text-align: center;
+}
+
+@media (max-width: 767.98px) {
+    .perfil-card__header {
+        flex-direction: column;
+    }
+
+    .perfil-actions,
+    .perfil-actions .btn {
+        width: 100%;
+    }
+}
+
 @media (max-width: 991.98px) {
     .module-layout {
         grid-template-columns: 1fr;
@@ -1062,5 +1642,174 @@ textarea:focus-visible,
 
     .dashboard-notifications-label {
         display: none;
+    }
+}
+
+/* ============================================================
+   Modales y formularios responsivos
+   Teléfonos pequeños, smartphones, phablets, tablets, tablets
+   grandes, monitores pequeños/medianos/grandes, Smart TV y
+   pantallas grandes.
+   ============================================================ */
+.modal-dialog {
+    width: 100%;
+    max-width: min(600px, calc(100vw - 2rem));
+    margin: 1rem auto;
+}
+
+.modal-content {
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem);
+    overflow: hidden;
+}
+
+.modal-header,
+.modal-footer {
+    flex-shrink: 0;
+}
+
+.modal-body {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.modal-footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+
+.modal-footer .btn {
+    min-width: 8rem;
+}
+
+/* En los modales cada campo va en su propia fila. */
+.modal .perfil-data {
+    grid-template-columns: 1fr;
+}
+
+/* Teléfonos pequeños (hasta 400 px) */
+@media (max-width: 400px) {
+    .modal-dialog {
+        max-width: calc(100vw - .5rem);
+        margin: .25rem auto;
+    }
+
+    .modal-content {
+        max-height: calc(100vh - .5rem);
+        max-height: calc(100dvh - .5rem);
+        border-radius: 12px;
+    }
+
+    .modal-header,
+    .modal-body,
+    .modal-footer {
+        padding: .625rem .75rem;
+    }
+
+    .modal-title {
+        font-size: 1.05rem;
+    }
+
+    .modal-footer {
+        flex-direction: column;
+    }
+
+    .modal-footer .btn {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+/* Smartphones y phablets (401 a 767 px) */
+@media (min-width: 401px) and (max-width: 767.98px) {
+    .modal-dialog {
+        max-width: calc(100vw - 1rem);
+        margin: .5rem auto;
+    }
+
+    .modal-content {
+        max-height: calc(100vh - 1rem);
+        max-height: calc(100dvh - 1rem);
+        border-radius: 14px;
+    }
+
+    .modal-header,
+    .modal-footer {
+        padding: .75rem 1rem;
+    }
+
+    .modal-body {
+        padding: 1rem;
+    }
+
+    .modal-title {
+        font-size: 1.125rem;
+    }
+
+    .modal-footer {
+        flex-direction: column;
+    }
+
+    .modal-footer .btn {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+/* Tablets (768 a 991 px) */
+@media (min-width: 768px) and (max-width: 991.98px) {
+    .modal-dialog {
+        max-width: min(640px, calc(100vw - 2rem));
+    }
+}
+
+/* Tablets grandes y monitores pequeños (992 a 1199 px) */
+@media (min-width: 992px) and (max-width: 1199.98px) {
+    .modal-dialog {
+        max-width: min(640px, calc(100vw - 3rem));
+    }
+}
+
+/* Monitores medianos (1200 a 1599 px) */
+@media (min-width: 1200px) and (max-width: 1599.98px) {
+    .modal-dialog {
+        max-width: min(620px, 55vw);
+    }
+}
+
+/* Monitores grandes (1600 px en adelante) */
+@media (min-width: 1600px) {
+    .modal-dialog {
+        max-width: 700px;
+    }
+}
+
+/* Full HD y Smart TV (1920 px en adelante) */
+@media (min-width: 1920px) {
+    .modal-dialog {
+        max-width: 760px;
+    }
+}
+
+/* 2K / 4K (2560 px en adelante) */
+@media (min-width: 2560px) {
+    .modal-dialog {
+        max-width: 860px;
+    }
+
+    .modal-body {
+        font-size: 1.0625rem;
+    }
+}
+
+/* Pantallas muy grandes (3200 px en adelante) */
+@media (min-width: 3200px) {
+    .modal-dialog {
+        max-width: 1000px;
+    }
+
+    .modal-body {
+        font-size: 1.125rem;
     }
 }

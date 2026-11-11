@@ -1,15 +1,21 @@
-@extends('layouts.base')
+@extends(isset($shell) ? 'layouts.app' : 'layouts.error')
 
-@section('title', 'Acceso denegado · Amigo Secreto Inclusivo')
+@section('title', 'Error 403 · Amigo Secreto Inclusivo')
+@section('shell-title', 'Error 403')
+@section('shell-eyebrow', 'Acceso denegado')
 
-@section('content')
-<main class="error-page" id="contenido">
-    <p class="error-code">403</p>
-    <h1 class="error-title">Acceso denegado</h1>
-    <p class="error-text">No tienes permiso para entrar a este módulo.</p>
+@section('page')
+    @include('errors.partials.content', [
+        'code' => '403',
+        'title' => 'Acceso denegado',
+        'message' => 'No tienes permiso para entrar a este módulo.',
+    ])
+@endsection
 
-    <a class="btn btn-primary btn-lg" href="{{ route('dashboard') }}">
-        Volver al panel
-    </a>
-</main>
+@section('error')
+    @include('errors.partials.content', [
+        'code' => '403',
+        'title' => 'Acceso denegado',
+        'message' => 'No tienes permiso para entrar a este módulo.',
+    ])
 @endsection

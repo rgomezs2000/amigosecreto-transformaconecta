@@ -8,7 +8,7 @@
             <ul class="menu-list">
                 @foreach ($modules as $module)
                     <li>
-                        <a class="menu-link" href="{{ route('modules.show', $module) }}">
+                        <a class="menu-link" href="{{ $module->url() }}">
                             <i class="fa-solid {{ $module->icon }}" aria-hidden="true"></i>
                             <span>{{ $module->name }}</span>
                         </a>

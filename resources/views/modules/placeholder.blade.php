@@ -1,11 +1,13 @@
-@extends('layouts.base')
+@extends('layouts.app')
 
-@php($groupClass = \Illuminate\Support\Str::slug($module->group))
+@php($moduleGroup = $module->category?->name ?? $module->group)
+@php($groupClass = \Illuminate\Support\Str::slug($moduleGroup))
 
 @section('title', $module->name . ' · Amigo Secreto Inclusivo')
+@section('shell-eyebrow', $moduleGroup)
+@section('shell-title', $module->name)
 
-@section('content')
-<main class="module-page" id="contenido">
+@section('page')
     <a class="module-back" href="{{ route('dashboard') }}">
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
         <span>Volver al panel</span>
@@ -17,8 +19,6 @@
                 <i class="fa-solid {{ $module->icon }}" aria-hidden="true"></i>
             </span>
 
-            <p class="module-eyebrow">{{ $module->group }}</p>
-            <h1 class="module-title">{{ $module->name }}</h1>
             <p class="module-subtitle">Este módulo está en construcción.</p>
             <p class="module-note">Mientras tanto, puedes volver al panel.</p>
 
@@ -38,5 +38,4 @@
             </p>
         </aside>
     </div>
-</main>
 @endsection

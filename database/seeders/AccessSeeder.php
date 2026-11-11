@@ -22,25 +22,29 @@ class AccessSeeder extends Seeder
         $permissionIds = Permission::pluck('id', 'slug');
 
         $map = [
-            'maestros.perfiles' => ['view', 'create', 'edit', 'delete'],
-            'maestros.permisos' => ['view', 'create', 'edit', 'delete', 'grant', 'revoke'],
-            'maestros.modulos' => ['view', 'create', 'edit', 'delete'],
+            '' => ['view'],
+            'perfiles' => ['view'],
+            'roles' => ['view', 'create', 'edit', 'delete'],
+            'matriz' => ['view', 'grant', 'revoke'],
+            'permisos' => ['view', 'create', 'edit', 'delete', 'grant', 'revoke'],
+            'modulos' => ['view', 'create', 'edit', 'delete'],
+            'categorias' => ['view', 'create', 'edit', 'delete'],
             'usuarios' => ['view', 'create', 'edit', 'delete', 'unlock', 'block'],
             'eventos' => ['view', 'edit', 'open', 'postpone', 'cancel', 'suspend', 'reset', 'reset_draw'],
 
-            'amigos.asignar' => ['assign'],
-            'amigos.ver' => ['view'],
-            'amigos.obsequios' => ['gifts'],
-            'amigos.deseos' => ['wishlist'],
-            'amigos.intercambio' => ['clues'],
-            'amigos.revelacion' => ['reveal'],
-            'amigos.notificaciones' => ['notifications'],
+            'asignar-amigo' => ['assign'],
+            'ver-tu-amigo' => ['view'],
+            'obsequios' => ['gifts'],
+            'lista-de-deseos' => ['wishlist'],
+            'intercambio-de-pista' => ['clues'],
+            'revelacion' => ['reveal'],
+            'notificaciones' => ['notifications'],
 
-            'amigo.participantes' => ['view'],
-            'amigo.asociado' => ['view'],
-            'amigo.deseos' => ['wishlist'],
-            'amigo.obsequiados' => ['view'],
-            'salir' => ['view'],
+            'participantes' => ['view'],
+            'usuarios-asociados' => ['view'],
+            'usuarios-obsequiados' => ['view'],
+            'login' => ['view'],
+            'logout' => ['view'],
         ];
 
         foreach ($map as $moduleSlug => $permissionSlugs) {
@@ -56,26 +60,34 @@ class AccessSeeder extends Seeder
         $usuario = Profile::where('slug', 'usuario')->firstOrFail();
 
         $adminModuleSlugs = [
-            'maestros.perfiles',
-            'maestros.permisos',
-            'maestros.modulos',
+            '',
+            'perfiles',
+            'roles',
+            'matriz',
+            'permisos',
+            'modulos',
+            'categorias',
             'usuarios',
             'eventos',
-            'amigo.participantes',
-            'amigo.asociado',
-            'amigo.deseos',
-            'amigo.obsequiados',
-            'salir',
+            'participantes',
+            'usuarios-asociados',
+            'lista-de-deseos',
+            'usuarios-obsequiados',
+            'login',
+            'logout',
         ];
 
         $participantModuleSlugs = [
-            'amigos.asignar',
-            'amigos.ver',
-            'amigos.deseos',
-            'amigos.intercambio',
-            'amigos.revelacion',
-            'amigos.notificaciones',
-            'salir',
+            '',
+            'perfiles',
+            'asignar-amigo',
+            'ver-tu-amigo',
+            'lista-de-deseos',
+            'intercambio-de-pista',
+            'revelacion',
+            'notificaciones',
+            'login',
+            'logout',
         ];
 
         $adminModuleIds = Module::whereIn('slug', $adminModuleSlugs)->pluck('id');
