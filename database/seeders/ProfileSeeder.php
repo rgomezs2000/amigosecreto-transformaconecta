@@ -9,22 +9,23 @@ class ProfileSeeder extends Seeder
 {
     public function run(): void
     {
-        Profile::updateOrCreate(
-            ['slug' => 'administrador'],
-            [
-                'name' => 'Administrador',
-                'description' => 'Acceso total al sistema.',
-                'is_active' => true,
-            ],
-        );
+        // Solo primera instalación: si ya hay perfiles, no se tocan.
+        if (Profile::query()->exists()) {
+            return;
+        }
 
-        Profile::updateOrCreate(
-            ['slug' => 'usuario'],
-            [
-                'name' => 'Usuario',
-                'description' => 'Participante del amigo secreto.',
-                'is_active' => true,
-            ],
-        );
+        Profile::create([
+            'name' => 'Administrador',
+            'slug' => 'administrador',
+            'description' => 'Acceso total al sistema.',
+            'is_active' => true,
+        ]);
+
+        Profile::create([
+            'name' => 'Usuario',
+            'slug' => 'usuario',
+            'description' => 'Participante del amigo secreto.',
+            'is_active' => true,
+        ]);
     }
 }

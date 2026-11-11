@@ -13,6 +13,14 @@ class AdminUserSeeder extends Seeder
     public function run(): void
     {
         $config = config('amigosecreto.admin');
+        $username = strtolower((string) $config['username']);
+
+        // Solo primera instalación: si el admin ya existe, no se modifica
+        // (ni su nombre, ni su correo, ni su clave).
+        if (User::query()->where('username', $username)->exists()) {
+            return;
+        }
+
         $password = (string) $config['password'];
 
         if (app()->environment('production') && $password === 'Admin123456') {
@@ -21,17 +29,15 @@ class AdminUserSeeder extends Seeder
             );
         }
 
-        User::updateOrCreate(
-            ['username' => strtolower((string) $config['username'])],
-            [
-                'name' => $config['name'],
-                'email' => $config['email'],
-                'password' => $password,
-                'role' => UserRole::Admin,
-                'profile_id' => Profile::query()->where('slug', 'administrador')->value('id'),
-                'is_active' => true,
-                'must_change_password' => (bool) $config['force_password_change'],
-            ],
-        );
+        User::create([
+            'username' => $username,
+            'name' => $config['name'],
+            'email' => $config['email'],
+            'password' => $password,
+            'role' => UserRole::Admin,
+            'profile_id' => Profile::query()->where('slug', 'administrador')->value('id'),
+            'is_active' => true,
+            'must_change_password' => (bool) $config['force_password_change'],
+        ]);
     }
 }

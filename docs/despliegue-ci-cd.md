@@ -207,7 +207,9 @@ El despliegue automático **no toca la base de datos**. Para aplicarlas:
 
 - `php artisan migrate --force` ejecuta **solo las migraciones pendientes** (las que no están en la tabla `migrations`). No repite las aplicadas y no borra datos.
 - El flag `--force` **no significa "volver a ejecutar"**: en producción Laravel pide confirmación y, al no haber terminal interactiva, `--force` la omite. Es obligatorio para que corra desde el pipeline.
-- Los seeders solo se ejecutan si marcas la casilla `seed`. `AdminUserSeeder` usa `updateOrCreate`, así que repetirlo no duplica al administrador.
+- Los seeders se ejecutan **siempre** junto con las migraciones en este workflow. `AdminUserSeeder` usa `updateOrCreate`, así que repetirlo no duplica al administrador. Si `APP_ENV=production` y `ADMIN_PASSWORD` sigue en `Admin123456`, el seeder se detiene: define una clave fuerte en el `.env` del servidor antes de lanzarlo.
+- Los seeders son de **primera instalación**: si ya hay perfiles, módulos, permisos, accesos o el administrador, no modifican nada. Por eso el job puede correr varias veces sin pisar cambios hechos desde la aplicación.
+- El job hace `config:clear` antes y `config:cache` después, para que los seeders tomen el `ADMIN_*` actual del `.env` y no una configuración cacheada vieja.
 - Nada de `migrate:fresh` ni `migrate:refresh` en producción: eso sí borra las tablas.
 
 **Orden recomendado:** si un push incluye una migración, ejecuta **Migraciones** inmediatamente después del despliegue. Conviene que las migraciones sean compatibles hacia atrás (columnas nuevas nullable o con default) para que la app no falle durante ese intervalo.

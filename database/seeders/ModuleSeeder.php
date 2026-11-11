@@ -9,6 +9,11 @@ class ModuleSeeder extends Seeder
 {
     public function run(): void
     {
+        // Solo primera instalación: si ya hay módulos, no se tocan.
+        if (Module::query()->exists()) {
+            return;
+        }
+
         $modules = [
             ['name' => 'Perfiles', 'slug' => 'maestros.perfiles', 'group' => 'Maestros', 'icon' => 'fa-id-card', 'order' => 10],
             ['name' => 'Permisos', 'slug' => 'maestros.permisos', 'group' => 'Maestros', 'icon' => 'fa-key', 'order' => 20],
@@ -35,10 +40,7 @@ class ModuleSeeder extends Seeder
         ];
 
         foreach ($modules as $module) {
-            Module::updateOrCreate(
-                ['slug' => $module['slug']],
-                $module + ['is_active' => true],
-            );
+            Module::create($module + ['is_active' => true]);
         }
     }
 }

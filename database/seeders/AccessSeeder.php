@@ -13,6 +13,11 @@ class AccessSeeder extends Seeder
 {
     public function run(): void
     {
+        // Solo primera instalación: si ya hay accesos, no se tocan.
+        if (DB::table('profile_permission_module')->exists()) {
+            return;
+        }
+
         $moduleIds = Module::pluck('id', 'slug');
         $permissionIds = Permission::pluck('id', 'slug');
 

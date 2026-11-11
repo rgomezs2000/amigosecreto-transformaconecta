@@ -9,6 +9,11 @@ class PermissionSeeder extends Seeder
 {
     public function run(): void
     {
+        // Solo primera instalación: si ya hay permisos, no se tocan.
+        if (Permission::query()->exists()) {
+            return;
+        }
+
         $permissions = [
             ['name' => 'Ver', 'slug' => 'view'],
             ['name' => 'Crear', 'slug' => 'create'],
@@ -33,10 +38,7 @@ class PermissionSeeder extends Seeder
         ];
 
         foreach ($permissions as $permission) {
-            Permission::updateOrCreate(
-                ['slug' => $permission['slug']],
-                $permission,
-            );
+            Permission::create($permission);
         }
     }
 }
