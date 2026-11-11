@@ -13,6 +13,7 @@ class AppServiceProvider extends ServiceProvider
     {
         require_once app_path('Helpers/api.php');
         require_once app_path('Helpers/general.php');
+        require_once app_path('Helpers/mail.php');
     }
 
     /**

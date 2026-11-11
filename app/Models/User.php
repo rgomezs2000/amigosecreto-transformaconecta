@@ -208,6 +208,36 @@ class User extends Authenticatable
         ])->save();
     }
 
+    /**
+     * Envía el correo de bienvenida al crear la cuenta.
+     *
+     * Reutiliza el helper de correos y la plantilla accesible del sistema.
+     */
+    public function sendWelcomeEmail(): bool
+    {
+        $appName = config('app.name', 'Amigo Secreto Inclusivo');
+
+        return send_mail(
+            $this->email,
+            'Tu cuenta está lista · ' . $appName,
+            'Tu cuenta está lista',
+            [
+                'Hola, ' . $this->name . '.',
+                'Tu cuenta en ' . $appName . ' fue creada correctamente.',
+                'Ya puedes entrar con tu usuario o correo electrónico.',
+            ],
+            [
+                'label' => 'Entrar al sistema',
+                'url' => route('login'),
+            ],
+            [
+                'recipient_name' => $this->name,
+                'eyebrow' => 'Cuenta creada',
+                'preheader' => 'Tu cuenta ya está disponible.',
+            ]
+        );
+    }
+
     public function profile(): BelongsTo
     {
         return $this->belongsTo(Profile::class);
