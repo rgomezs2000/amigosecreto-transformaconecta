@@ -465,7 +465,14 @@ class ChatController extends Controller
         $reactions = $this->reactionSummary($all, $user);
         $reported = $this->reportedMessageIds($all, $user);
 
-        $map = fn (ChatMessage $message) => $this->messageData($message, $user, $others, $reactions, $reported);
+        $map = fn (ChatMessage $message) => $this->messageData(
+            $message,
+            $user,
+            $others,
+            $reactions,
+            $reported,
+            $this->canDeleteContent($message, $user, $conversation)
+        );
 
         $recentPayload = $recent->map($map)->values();
 
@@ -489,7 +496,7 @@ class ChatController extends Controller
      * @param  array<int, int>  $reported
      * @return array<string, mixed>
      */
-    private function messageData(ChatMessage $message, User $user, $others, array $reactions, array $reported): array
+    private function messageData(ChatMessage $message, User $user, $others, array $reactions, array $reported, bool $canDelete = false): array
     {
         $deleted = $message->isDeleted();
         $read = $others->isNotEmpty() && $others->every(function ($other) use ($message) {
@@ -509,22 +516,26 @@ class ChatController extends Controller
             'created_date' => $message->created_at?->format('Y-m-d'),
             'read' => $read,
             'delivered' => $message->delivered_at !== null,
-            'latitude' => $message->latitude,
-            'longitude' => $message->longitude,
+            'latitude' => $deleted ? null : $message->latitude,
+            'longitude' => $deleted ? null : $message->longitude,
             'type' => $message->type,
-            'attachment_url' => $message->attachment_path
+            'attachment_url' => ! $deleted && $message->attachment_path
                 ? asset('storage/'.$message->attachment_path)
                 : null,
-            'attachment_name' => $message->attachment_name,
-            'attachments' => $message->attachments->map(fn ($item) => [
-                'url' => asset('storage/'.$item->path),
-                'type' => $item->type,
-                'name' => $item->name,
-            ])->values(),
-            'link_url' => $message->link_url,
-            'link_title' => $message->link_title,
-            'link_description' => $message->link_description,
-            'link_image' => $message->link_image,
+            'attachment_name' => $deleted ? null : $message->attachment_name,
+            // Un mensaje eliminado no expone sus adjuntos ni sus enlaces.
+            'attachments' => $deleted
+                ? []
+                : $message->attachments->map(fn ($item) => [
+                    'id' => $item->id,
+                    'url' => asset('storage/'.$item->path),
+                    'type' => $item->type,
+                    'name' => $item->name,
+                ])->values(),
+            'link_url' => $deleted ? null : $message->link_url,
+            'link_title' => $deleted ? null : $message->link_title,
+            'link_description' => $deleted ? null : $message->link_description,
+            'link_image' => $deleted ? null : $message->link_image,
             'edited' => $message->edited_at !== null,
             'deleted' => $deleted,
             'deleted_label' => $deleted
@@ -532,8 +543,7 @@ class ChatController extends Controller
                 : null,
             'reactions' => $reactions[$message->id] ?? [],
             'can_edit' => $message->user_id === $user->id && ! $deleted,
-            'can_delete' => ! $deleted
-                && ($message->user_id === $user->id || $user->role === UserRole::Admin),
+            'can_delete' => ! $deleted && $canDelete,
             'reported' => in_array((int) $message->id, $reported, true),
         ];
     }
@@ -604,6 +614,10 @@ class ChatController extends Controller
     public function enviar(Request $request, Conversation $conversation): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
 
         $user = $request->user();
 
@@ -774,6 +788,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($message->conversation)) {
+            return $readOnly;
+        }
+
         $user = $request->user();
 
         if (! $this->canAccess($message->conversation, $user)) {
@@ -824,16 +842,17 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($message->conversation)) {
+            return $readOnly;
+        }
+
         $user = $request->user();
 
         if (! $this->canAccess($message->conversation, $user)) {
             return api_error('No tienes acceso a este mensaje.', 403);
         }
 
-        $isGroupOwner = $message->conversation->type === 'group'
-            && $message->conversation->created_by === $user->id;
-
-        if ($message->user_id !== $user->id && $user->role !== UserRole::Admin && ! $isGroupOwner) {
+        if (! $this->canDeleteContent($message, $user)) {
             return api_error('Solo el autor, el dueño del grupo o un administrador puede eliminar el mensaje.', 403);
         }
 
@@ -841,13 +860,96 @@ class ChatController extends Controller
             return api_success('El mensaje ya estaba eliminado.');
         }
 
-        $byAdmin = $message->user_id !== $user->id
-            && ($user->role === UserRole::Admin || $isGroupOwner);
+        return api_success('Mensaje eliminado.', [
+            'deleted_label' => $this->deleteMessageContent($message, $user),
+        ]);
+    }
 
+    /**
+     * Elimina un adjunto concreto (foto, vídeo, audio, documento o enlace).
+     *
+     * Si era el último adjunto del mensaje, el mensaje se elimina también: no
+     * debe quedar una burbuja vacía ni el contenido en las galerías.
+     */
+    public function eliminarAdjunto(Request $request, ChatMessageAttachment $attachment): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($attachment->message?->conversation)) {
+            return $readOnly;
+        }
+
+        $user = $request->user();
+        $message = $attachment->message;
+
+        if ($message === null) {
+            return api_error('El contenido ya no existe.', 404);
+        }
+
+        if (! $this->canAccess($message->conversation, $user)) {
+            return api_error('No tienes acceso a este contenido.', 403);
+        }
+
+        if (! $this->canDeleteContent($message, $user)) {
+            return api_error('Solo el autor, el dueño del grupo o un administrador puede eliminar este contenido.', 403);
+        }
+
+        if ($message->isDeleted()) {
+            return api_success('El contenido ya estaba eliminado.', ['message_deleted' => true]);
+        }
+
+        $message->attachments()->whereKey($attachment->id)->delete();
+        Storage::disk('public')->delete($attachment->path);
+
+        if ($message->attachments()->count() === 0) {
+            return api_success('Se eliminó el contenido y el mensaje.', [
+                'message_deleted' => true,
+                'deleted_label' => $this->deleteMessageContent($message, $user),
+            ]);
+        }
+
+        return api_success('Contenido eliminado.', ['message_deleted' => false]);
+    }
+
+    /**
+     * Quién puede borrar el contenido de un mensaje: su autor, el dueño del
+     * grupo o un administrador.
+     */
+    private function canDeleteContent(ChatMessage $message, User $user, ?Conversation $conversation = null): bool
+    {
+        $conversation ??= $message->conversation;
+
+        return $message->user_id === $user->id
+            || $user->role === UserRole::Admin
+            || ($conversation !== null
+                && $conversation->type === 'group'
+                && (int) $conversation->created_by === (int) $user->id);
+    }
+
+    /**
+     * Marca el mensaje como eliminado y limpia sus adjuntos y su fijación.
+     *
+     * @return string Etiqueta que verá el resto («Eliminado por …»).
+     */
+    private function deleteMessageContent(ChatMessage $message, User $user): string
+    {
+        $byAdmin = $message->user_id !== $user->id
+            && ($user->role === UserRole::Admin
+                || ($message->conversation?->type === 'group'
+                    && (int) $message->conversation?->created_by === (int) $user->id));
+
+        // Además de marcarlo como eliminado, se limpian los datos que no deben
+        // quedar como residuo: enlaces, ubicación y referencia al adjunto.
         $message->update([
             'deleted_at' => now(),
             'deleted_by' => $user->id,
             'deleted_by_admin' => $byAdmin,
+            'link_url' => null,
+            'link_title' => null,
+            'link_description' => null,
+            'link_image' => null,
+            'latitude' => null,
+            'longitude' => null,
         ]);
 
         $this->firestore->recordMessage($message->load('user', 'attachments', 'conversation'));
@@ -863,14 +965,52 @@ class ChatController extends Controller
             );
         }
 
-        return api_success('Mensaje eliminado.', [
-            'deleted_label' => $byAdmin ? 'Eliminado por un administrador' : 'Eliminado por el autor',
-        ]);
+        // El adjunto pertenece al mensaje: al eliminarlo no debe quedar ni en la
+        // galería ni ocupando espacio en el almacenamiento.
+        $this->purgeMessageAttachments($message);
+
+        // Si estaba fijado, el cintillo tampoco debe seguir apuntando a él.
+        if ((int) $message->conversation?->pinned_message_id === (int) $message->id) {
+            $message->conversation->forceFill(['pinned_message_id' => null])->save();
+        }
+
+        return $byAdmin ? 'Eliminado por un administrador' : 'Eliminado por el autor';
+    }
+
+    /**
+     * Borra los archivos adjuntos de un mensaje eliminado.
+     */
+    private function purgeMessageAttachments(ChatMessage $message): void
+    {
+        $paths = $message->attachments()->pluck('path')->all();
+
+        if ($message->attachment_path) {
+            $paths[] = $message->attachment_path;
+        }
+
+        $message->attachments()->delete();
+
+        if ($message->attachment_path) {
+            $message->forceFill([
+                'attachment_path' => null,
+                'attachment_name' => null,
+                'attachment_mime' => null,
+                'attachment_size' => null,
+            ])->save();
+        }
+
+        foreach (array_unique(array_filter($paths)) as $path) {
+            Storage::disk('public')->delete($path);
+        }
     }
 
     public function reaccionar(Request $request, ChatMessage $message): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($message->conversation)) {
+            return $readOnly;
+        }
 
         $user = $request->user();
 
@@ -907,6 +1047,10 @@ class ChatController extends Controller
     public function reportar(Request $request, ChatMessage $message): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($message->conversation)) {
+            return $readOnly;
+        }
 
         $user = $request->user();
 
@@ -1104,6 +1248,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         if ($request->user()->role !== UserRole::Admin) {
             return api_error('Solo un administrador puede moderar.', 403);
         }
@@ -1161,25 +1309,42 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
-        if (! $this->canAccess($conversation, $request->user())) {
+        $user = $request->user();
+
+        if (! $this->canAccess($conversation, $user)) {
             return api_error('No tienes acceso a esta conversación.', 403);
         }
 
+        // Lo que el usuario borró de su lado tampoco aparece en su galería.
+        $clearedAt = $conversation->users->firstWhere('id', $user->id)?->pivot->cleared_at;
+
         $items = $conversation->messages()
+            // Un mensaje eliminado se lleva su adjunto: no queda como residuo
+            // en multimedia, documentos, audios ni enlaces.
+            ->whereNull('deleted_at')
+            ->when($clearedAt !== null, fn ($query) => $query->where('created_at', '>=', $clearedAt))
             ->with('attachments')
             ->latest('id')
             ->limit(300)
             ->get()
-            ->flatMap(function (ChatMessage $message) {
-                $base = ['created_at' => $message->created_at?->format('d/m/Y H:i')];
+            ->flatMap(function (ChatMessage $message) use ($user) {
+                // `message_id` y `position` dejan ordenar el contenido por el
+                // mensaje en que se envió, sin agrupar por tipo.
+                $base = [
+                    'message_id' => (int) $message->id,
+                    'created_at' => $message->created_at?->format('d/m/Y H:i'),
+                    'can_delete' => $this->canDeleteContent($message, $user),
+                ];
 
                 if ($message->link_url) {
                     return [array_merge($base, [
+                        'id' => null,
                         'kind' => 'link',
                         'url' => $message->link_url,
                         'name' => $message->link_title ?: $message->link_url,
                         'extension' => 'enlace',
                         'size' => null,
+                        'position' => 0,
                     ])];
                 }
 
@@ -1187,6 +1352,7 @@ class ChatController extends Controller
 
                 if ($attachments->isEmpty() && $message->attachment_path) {
                     $attachments = collect([(object) [
+                        'id' => null,
                         'type' => $message->type,
                         'path' => $message->attachment_path,
                         'name' => $message->attachment_name,
@@ -1195,7 +1361,7 @@ class ChatController extends Controller
                     ]]);
                 }
 
-                return $attachments->map(function ($item) use ($base) {
+                return $attachments->values()->map(function ($item, $index) use ($base) {
                     $extension = strtolower(pathinfo((string) $item->name, PATHINFO_EXTENSION));
                     $kind = $item->type;
 
@@ -1204,11 +1370,13 @@ class ChatController extends Controller
                     }
 
                     return array_merge($base, [
+                        'id' => $item->id ?? null,
                         'kind' => $kind,
                         'url' => asset('storage/'.$item->path),
                         'name' => $item->name,
                         'extension' => $extension,
                         'size' => $item->size,
+                        'position' => (int) $index,
                     ]);
                 })->all();
             })
@@ -1314,6 +1482,19 @@ class ChatController extends Controller
         );
     }
 
+    /**
+     * Los chats de solo lectura (el del evento) no admiten nada del usuario:
+     * ni escribir, ni adjuntar, ni reaccionar, ni reportar, ni silenciar.
+     */
+    private function ensureWritable(?Conversation $conversation): ?JsonResponse
+    {
+        if ($conversation === null || ! $conversation->is_read_only) {
+            return null;
+        }
+
+        return api_error('Este chat es de solo lectura: aquí solo se publican los avisos del evento.', 403);
+    }
+
     private function canAccess(Conversation $conversation, User $user): bool
     {
         $conversation->loadMissing('users');
@@ -1343,6 +1524,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         $user = $request->user();
 
         if (! $this->canAccess($conversation, $user)) {
@@ -1368,6 +1553,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         $user = $request->user();
 
         if (! $this->canAccess($conversation, $user)) {
@@ -1390,6 +1579,10 @@ class ChatController extends Controller
     public function vaciar(Request $request, Conversation $conversation): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
 
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
@@ -1419,6 +1612,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
         }
@@ -1445,6 +1642,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
         }
@@ -1464,6 +1665,10 @@ class ChatController extends Controller
     public function desarchivar(Request $request, Conversation $conversation): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
 
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
@@ -1485,6 +1690,10 @@ class ChatController extends Controller
     public function favorito(Request $request, Conversation $conversation): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
 
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
@@ -1510,6 +1719,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
         }
@@ -1533,6 +1746,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
         }
@@ -1550,6 +1767,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
         }
@@ -1565,7 +1786,7 @@ class ChatController extends Controller
         $conversation->forceFill(['pinned_message_id' => $message->id])->save();
 
         return api_success('Mensaje fijado.', [
-            'pinned_message' => $this->pinnedMessageData($conversation->fresh('pinnedMessage.user')),
+            'pinned_message' => $this->pinnedMessageData($conversation->fresh('pinnedMessage.user'), $request->user()),
         ]);
     }
 
@@ -1575,6 +1796,10 @@ class ChatController extends Controller
     public function desfijarMensaje(Request $request, Conversation $conversation): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
 
         if ($error = $this->ensureMember($conversation, $request->user())) {
             return $error;
@@ -1641,6 +1866,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         $user = $request->user();
 
         if ($conversation->type !== 'group') {
@@ -1667,6 +1896,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         $user = $request->user();
 
         if (! $this->canAccess($conversation, $user)) {
@@ -1674,31 +1907,77 @@ class ChatController extends Controller
         }
 
         $lastMessageId = $conversation->messages()->latest('id')->value('id');
+        $conversationName = $conversation->name ?: ($conversation->isGroup() ? 'un grupo' : 'una conversación');
+        $reason = 'Reporte de la conversación: '.$conversationName;
+        $report = null;
 
         if ($lastMessageId !== null) {
-            ChatReport::query()->firstOrCreate(
+            $report = ChatReport::query()->firstOrCreate(
                 ['message_id' => $lastMessageId, 'reporter_id' => $user->id],
-                ['reason' => 'Reporte de la conversación: '.($conversation->name ?: 'sin nombre')]
+                ['reason' => $reason]
+            );
+
+            if (! $report->wasRecentlyCreated) {
+                return api_success('Este reporte ya estaba registrado.');
+            }
+
+            $this->firestore->recordReport($report);
+        }
+
+        $reports = $this->reportConversation();
+        $reportMessage = $reports->messages()->create([
+            'user_id' => $user->id,
+            'body' => 'Conversación reportada: '.$user->name.' reportó '.$conversationName
+                .'. Fecha: '.now()->format('d/m/Y H:i'),
+            'is_moderation' => true,
+        ]);
+
+        $this->firestore->recordMessage($reportMessage->load('user', 'attachments', 'conversation'));
+        $this->firestore->recordConversation($reports->fresh('users'));
+
+        $admins = User::query()
+            ->where('role', UserRole::Admin)
+            ->where('is_active', true)
+            ->get();
+
+        foreach ($admins as $admin) {
+            if ((int) $admin->id === (int) $user->id) {
+                continue;
+            }
+
+            send_mail(
+                $admin->email,
+                'Conversación reportada en el chat',
+                'Nuevo reporte de conversación',
+                [
+                    $user->name.' reportó '.$conversationName.'.',
+                    'Fecha: '.now()->format('d/m/Y H:i'),
+                ],
+                null,
+                [
+                    'recipient_name' => $admin->name,
+                    'eyebrow' => 'Reporte',
+                    'preheader' => 'Reporte de conversación',
+                    'source' => 'reporte',
+                ]
             );
         }
 
-        User::query()
-            ->where('role', UserRole::Admin)
-            ->where('is_active', true)
-            ->get()
-            ->each(function (User $admin) use ($conversation, $user) {
-                $admin->notifications()->create([
-                    'id' => (string) Str::uuid(),
-                    'type' => 'chat.report',
-                    'data' => [
-                        'title' => 'Conversación reportada',
-                        'body' => $user->name.' reportó una conversación.',
-                        'conversation_id' => $conversation->id,
-                    ],
-                    'sound' => true,
-                    'visual' => true,
-                ]);
-            });
+        $this->push->sendToAdmins(
+            'chat.report',
+            'Conversación reportada',
+            $user->name.' reportó '.$conversationName.'.',
+            [
+                'report_id' => $report?->id,
+                'report_type' => 'conversation',
+                'conversation_id' => $conversation->id,
+                'reporter' => $user->name,
+                'reason' => $reason,
+            ],
+            route('moderacion.index'),
+            'reporte',
+            $user
+        );
 
         return api_success('Reporte enviado a la administración.');
     }
@@ -1706,6 +1985,10 @@ class ChatController extends Controller
     public function expulsar(Request $request, Conversation $conversation, User $user): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
 
         $current = $request->user();
 
@@ -1896,6 +2179,10 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
         $current = $request->user();
 
         $isOwner = $conversation->type === 'group' && $conversation->created_by === $current->id;
@@ -1905,10 +2192,14 @@ class ChatController extends Controller
         }
 
         $messageIds = $conversation->messages()->pluck('id');
+        $paths = collect();
 
         if ($messageIds->isNotEmpty()) {
+            $paths = ChatMessageAttachment::query()->whereIn('message_id', $messageIds)->pluck('path');
             ChatMessageAttachment::query()->whereIn('message_id', $messageIds)->delete();
         }
+
+        $legacy = $conversation->messages()->whereNotNull('attachment_path')->pluck('attachment_path');
 
         $conversation->messages()->delete();
         DB::table('chat_conversation_user')
@@ -1916,6 +2207,11 @@ class ChatController extends Controller
             ->delete();
 
         $conversation->delete();
+
+        // Los archivos de la conversación tampoco se quedan en el disco.
+        foreach ($paths->merge($legacy)->filter()->unique() as $path) {
+            Storage::disk('public')->delete($path);
+        }
 
         return api_success('Conversación eliminada.');
     }
@@ -2259,28 +2555,74 @@ class ChatController extends Controller
             $reason = 'Reporte del usuario '.$user->name;
         }
 
-        ChatReport::query()->firstOrCreate(
+        $report = ChatReport::query()->firstOrCreate(
             ['message_id' => $lastMessageId, 'reporter_id' => $current->id],
             ['reason' => $reason]
         );
 
-        User::query()
+        if (! $report->wasRecentlyCreated) {
+            return api_success('Este reporte ya estaba registrado.');
+        }
+
+        $this->firestore->recordReport($report);
+
+        $reports = $this->reportConversation();
+        $reportMessage = $reports->messages()->create([
+            'user_id' => $current->id,
+            'body' => 'Usuario reportado: '.$current->name.' reportó a '.$user->name
+                .'. Motivo: '.$reason
+                .'. Fecha: '.now()->format('d/m/Y H:i'),
+            'is_moderation' => true,
+        ]);
+
+        $this->firestore->recordMessage($reportMessage->load('user', 'attachments', 'conversation'));
+        $this->firestore->recordConversation($reports->fresh('users'));
+
+        $admins = User::query()
             ->where('role', UserRole::Admin)
             ->where('is_active', true)
-            ->get()
-            ->each(function (User $admin) use ($current, $user, $reason, $conversation) {
-                $admin->notifications()->create([
-                    'id' => (string) Str::uuid(),
-                    'type' => 'chat.report',
-                    'data' => [
-                        'title' => 'Usuario reportado',
-                        'body' => $current->name.' reportó a '.$user->name.' por: '.$reason,
-                        'conversation_id' => $conversation->id,
-                    ],
-                    'sound' => true,
-                    'visual' => true,
-                ]);
-            });
+            ->get();
+
+        foreach ($admins as $admin) {
+            if ((int) $admin->id === (int) $current->id) {
+                continue;
+            }
+
+            send_mail(
+                $admin->email,
+                'Usuario reportado en el chat',
+                'Nuevo reporte de usuario',
+                [
+                    $current->name.' reportó a '.$user->name.'.',
+                    'Motivo: '.$reason,
+                    'Fecha: '.now()->format('d/m/Y H:i'),
+                ],
+                null,
+                [
+                    'recipient_name' => $admin->name,
+                    'eyebrow' => 'Reporte',
+                    'preheader' => 'Reporte de usuario',
+                    'source' => 'reporte',
+                ]
+            );
+        }
+
+        $this->push->sendToAdmins(
+            'chat.report',
+            'Usuario reportado',
+            $current->name.' reportó a '.$user->name.' por: '.$reason,
+            [
+                'report_id' => $report->id,
+                'report_type' => 'user',
+                'conversation_id' => $conversation->id,
+                'reporter' => $current->name,
+                'reported_user' => $user->name,
+                'reason' => $reason,
+            ],
+            route('moderacion.index'),
+            'reporte',
+            $current
+        );
 
         return api_success('Reporte enviado a la administración.');
     }
@@ -2303,7 +2645,10 @@ class ChatController extends Controller
 
         $lastPreview = null;
 
-        if ($last !== null) {
+        if ($last !== null && $last->isDeleted()) {
+            // Un mensaje eliminado no deja ver su texto ni su adjunto.
+            $lastPreview = 'Mensaje eliminado';
+        } elseif ($last !== null) {
             $last->loadMissing('attachments');
             $body = trim(strip_tags((string) $last->body));
             $attachments = $last->attachments;
@@ -2358,6 +2703,8 @@ class ChatController extends Controller
 
         if ($conversation->isGroup()) {
             $subtitle = $onlineUsers.' en línea';
+        } elseif ($conversation->isEventChannel()) {
+            $subtitle = 'Avisos del evento · solo lectura';
         } elseif ($conversation->type === 'secret') {
             $subtitle = $conversation->secretRoleFor($user) === 'giver'
                 ? 'Tu amigo secreto asignado'
@@ -2396,9 +2743,11 @@ class ChatController extends Controller
             'archived' => $pivot?->archived_at !== null,
             'hidden' => $pivot?->hidden_at !== null,
             'is_moderation' => $forModeration,
+            'read_only' => $conversation->is_read_only,
+            'is_event_channel' => $conversation->isEventChannel(),
             'can_archive' => ! $forModeration && $conversation->type === 'direct',
             'can_unarchive' => ! $forModeration && $conversation->canBeUnarchived(),
-            'pinned_message' => $this->pinnedMessageData($conversation),
+            'pinned_message' => $this->pinnedMessageData($conversation, $user),
         ];
     }
 
@@ -2407,7 +2756,7 @@ class ChatController extends Controller
      *
      * @return array{id:int,body:string,sender:string}|null
      */
-    private function pinnedMessageData(Conversation $conversation): ?array
+    private function pinnedMessageData(Conversation $conversation, ?User $user = null): ?array
     {
         if ($conversation->pinned_message_id === null) {
             return null;
@@ -2417,6 +2766,16 @@ class ChatController extends Controller
 
         if ($message === null || $message->isDeleted()) {
             return null;
+        }
+
+        // Si el usuario vació el chat, el mensaje fijado anterior tampoco debe
+        // seguir viéndose en el cintillo.
+        if ($user !== null) {
+            $clearedAt = $this->pivotFor($conversation, $user)?->cleared_at;
+
+            if ($clearedAt !== null && $message->created_at !== null && $message->created_at->lt($clearedAt)) {
+                return null;
+            }
         }
 
         $body = trim(strip_tags((string) $message->body));

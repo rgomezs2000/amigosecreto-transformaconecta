@@ -364,7 +364,7 @@ class FirestoreService
 
         return [
             'report_id' => (int) $report->id,
-            'message_id' => (int) $report->message_id,
+            'message_id' => $report->message_id !== null ? (int) $report->message_id : null,
             'conversation_id' => $conversation !== null ? (int) $conversation->id : null,
             'conversation_type' => $conversation?->type,
             'reporter_id' => (int) $report->reporter_id,

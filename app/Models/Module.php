@@ -102,6 +102,9 @@ class Module extends Model
         $explicitRoutes = [
             'control-notificaciones' => 'notificaciones.index',
             'moderacion' => 'moderacion.index',
+            'restablecer-dinamica' => 'dinamica.index',
+            'asignar-amigo' => 'sorteo.index',
+            'ver-tu-amigo' => 'ver-tu-amigo.index',
         ];
 
         if (isset($explicitRoutes[$this->slug])) {

@@ -24,6 +24,8 @@ class DatabaseSeeder extends Seeder
             PermissionSeeder::class,
             AccessSeeder::class,
             AdminUserSeeder::class,
+            // Después del administrador: le concede los módulos exclusivos.
+            SuperAdminAccessSeeder::class,
         ]);
     }
 }

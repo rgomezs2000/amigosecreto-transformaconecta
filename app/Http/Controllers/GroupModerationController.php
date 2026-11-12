@@ -50,6 +50,7 @@ class GroupModerationController extends Controller
             'invited_by' => $request->user()->id,
             'invited_user_id' => $invitedUserId,
             'token' => Str::random(48),
+            'expires_at' => now()->addDays(7),
         ]);
 
         ChatGroupAudit::log(
@@ -77,10 +78,20 @@ class GroupModerationController extends Controller
      */
     public function verInvitacion(Request $request, string $token): RedirectResponse
     {
-        $invitation = $this->pendingInvitation($token);
+        $state = $this->invitationState($token);
 
-        abort_if($invitation === null, 404);
+        if ($state['status'] !== 'pending') {
+            $request->session()->forget('chat.invitation');
+            $request->session()->put('chat.invitation_notice', $state['message']);
 
+            if (! $request->user()) {
+                return redirect()->route('login');
+            }
+
+            return redirect()->route('dashboard');
+        }
+
+        $request->session()->forget('chat.invitation_notice');
         $request->session()->put('chat.invitation', $token);
 
         if (! $request->user()) {
@@ -95,14 +106,15 @@ class GroupModerationController extends Controller
      */
     public function datosInvitacion(Request $request, string $token): JsonResponse
     {
-        $invitation = $this->pendingInvitation($token);
+        $state = $this->invitationState($token);
 
-        if ($invitation === null) {
+        if ($state['status'] !== 'pending') {
             $request->session()->forget('chat.invitation');
 
-            return api_error('La invitación no existe o ya fue usada.', 404);
+            return api_error($state['message'], 410);
         }
 
+        $invitation = $state['invitation'];
         $invitation->load('conversation', 'inviter');
 
         return api_success('Invitación.', [
@@ -114,12 +126,13 @@ class GroupModerationController extends Controller
 
     public function aceptar(Request $request, string $token): JsonResponse
     {
-        $invitation = $this->pendingInvitation($token);
+        $state = $this->invitationState($token);
 
-        if ($invitation === null) {
-            return api_error('La invitación no existe o ya fue usada.', 404);
+        if ($state['status'] !== 'pending') {
+            return api_error($state['message'], 410);
         }
 
+        $invitation = $state['invitation'];
         $user = $request->user();
 
         if (GroupBan::query()
@@ -143,19 +156,20 @@ class GroupModerationController extends Controller
         );
 
         // Ya no hay que recordar la invitación al entrar al sistema.
-        $request->session()->forget('chat.invitation');
+        $request->session()->forget(['chat.invitation', 'chat.invitation_notice']);
 
         return api_success('Te uniste al grupo.', ['conversation_id' => $invitation->conversation_id]);
     }
 
     public function rechazar(Request $request, string $token): JsonResponse
     {
-        $invitation = $this->pendingInvitation($token);
+        $state = $this->invitationState($token);
 
-        if ($invitation === null) {
-            return api_error('La invitación no existe o ya fue usada.', 404);
+        if ($state['status'] !== 'pending') {
+            return api_error($state['message'], 410);
         }
 
+        $invitation = $state['invitation'];
         $invitation->update(['rejected_at' => now()]);
 
         ChatGroupAudit::log(
@@ -167,7 +181,7 @@ class GroupModerationController extends Controller
             'La invitación fue rechazada.'
         );
 
-        $request->session()->forget('chat.invitation');
+        $request->session()->forget(['chat.invitation', 'chat.invitation_notice']);
 
         return api_success('Rechazaste la invitación.');
     }
@@ -283,13 +297,58 @@ class GroupModerationController extends Controller
         return api_success('Vetados del grupo.', ['items' => $items]);
     }
 
-    private function pendingInvitation(string $token): ?GroupInvitation
+    /**
+     * Estado real de un enlace: pendiente, usado, expirado o eliminado.
+     *
+     * @return array{status:string,message:?string,invitation:?GroupInvitation}
+     */
+    private function invitationState(string $token): array
     {
-        return GroupInvitation::query()
+        $invitation = GroupInvitation::query()
             ->where('token', $token)
-            ->whereNull('accepted_at')
-            ->whereNull('rejected_at')
+            ->with('conversation')
             ->first();
+
+        if ($invitation === null) {
+            return [
+                'status' => 'deleted',
+                'message' => 'Este enlace fue eliminado.',
+                'invitation' => null,
+            ];
+        }
+
+        if ($invitation->accepted_at !== null || $invitation->rejected_at !== null) {
+            return [
+                'status' => 'used',
+                'message' => 'Este enlace ya fue utilizado.',
+                'invitation' => $invitation,
+            ];
+        }
+
+        if ($invitation->conversation === null) {
+            return [
+                'status' => 'deleted',
+                'message' => 'Este enlace fue eliminado.',
+                'invitation' => $invitation,
+            ];
+        }
+
+        $expiresAt = $invitation->expires_at
+            ?? $invitation->created_at?->copy()->addDays(7);
+
+        if ($expiresAt !== null && $expiresAt->isPast()) {
+            return [
+                'status' => 'expired',
+                'message' => 'Este enlace está expirado.',
+                'invitation' => $invitation,
+            ];
+        }
+
+        return [
+            'status' => 'pending',
+            'message' => null,
+            'invitation' => $invitation,
+        ];
     }
 
     private function ensureGroup(Conversation $conversation): void

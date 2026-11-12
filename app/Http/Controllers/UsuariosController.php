@@ -234,6 +234,11 @@ class UsuariosController extends Controller
             $profile = Profile::query()->findOrFail($data['profile_id']);
             $role = $profile->slug === 'administrador' ? UserRole::Admin : UserRole::Participant;
 
+            // El superadministrador no puede perder su rol.
+            if ($user->isSuperAdmin() && (int) $user->profile_id !== (int) $profile->id) {
+                return api_error('El superadministrador es intocable: no puede cambiar de rol.', 409);
+            }
+
             $user->update([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -260,6 +265,10 @@ class UsuariosController extends Controller
     public function eliminar(Request $request, User $user): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($user->isSuperAdmin()) {
+            return api_error('El superadministrador es intocable: no se puede eliminar.', 409);
+        }
 
         if ($request->user()?->id === $user->id) {
             return api_error('No puedes eliminar tu propio usuario.', 409);
@@ -316,6 +325,10 @@ class UsuariosController extends Controller
     public function bloquear(Request $request, User $user): JsonResponse
     {
         $this->ensureAccess();
+
+        if ($user->isSuperAdmin()) {
+            return api_error('El superadministrador es intocable: no se puede bloquear.', 409);
+        }
 
         if ($request->user()?->id === $user->id) {
             return api_error('No puedes bloquear tu propio usuario.', 409);
@@ -387,12 +400,21 @@ class UsuariosController extends Controller
             ], 422);
         }
 
-        $ids = collect($request->input('ids'))
-            ->map(fn ($id) => (int) $id)
+        $requested = collect($request->input('ids'))
+            ->map(fn ($id) => (int) $id);
+
+        $superAdminId = User::superAdmin()?->id;
+
+        $ids = $requested
             ->reject(fn ($id) => $id === $request->user()?->id)
+            ->reject(fn ($id) => $superAdminId !== null && $id === $superAdminId)
             ->values();
 
         if ($ids->isEmpty()) {
+            if ($superAdminId !== null && $requested->contains($superAdminId)) {
+                return api_error('El superadministrador es intocable: no se puede eliminar.', 409);
+            }
+
             return api_error('No puedes eliminar tu propio usuario.', 409);
         }
 

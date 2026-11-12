@@ -1,0 +1,206 @@
+<?php
+
+namespace App\Console\Commands;
+
+use App\Models\User;
+use App\Services\DinamicaProgress;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Throwable;
+
+/**
+ * Restablece por completo la dinámica del amigo secreto.
+ *
+ * Es un proceso distinto al de «evento:reiniciar»: aquel borra un evento de un
+ * año y deja usuarios y chats generales; este deja el sistema en cero.
+ *
+ * Se conserva lo esencial:
+ *   - los CRUD: perfiles (roles), permisos, categorías, módulos y la matriz
+ *     de accesos;
+ *   - la configuración de notificaciones;
+ *   - la cuenta del superadministrador, que es intocable.
+ *
+ * Se elimina todo lo demás: eventos, participaciones, listas de deseos,
+ * asignaciones, pistas, regalos, conversaciones, mensajes, adjuntos,
+ * moderación, reportes, bloqueos, invitaciones, notificaciones, auditoría,
+ * correos registrados y las cuentas de los demás usuarios.
+ */
+class RestablecerDinamica extends Command
+{
+    protected $signature = 'dinamica:reiniciar
+        {--run= : Identificador de la ejecución (progreso y bitácora)}
+        {--force : Ejecuta sin pedir confirmación en consola}';
+
+    protected $description = 'Deja el sistema en cero: elimina toda la dinámica del amigo secreto y conserva los CRUD, los módulos, los roles y el superadministrador.';
+
+    public function handle(DinamicaProgress $progress): int
+    {
+        $run = trim((string) ($this->option('run') ?: Str::uuid()));
+
+        if (! $progress->isValidRun($run)) {
+            $this->error('El identificador de la ejecución no es válido.');
+
+            return self::FAILURE;
+        }
+
+        $progress->start($run);
+
+        $superAdmin = User::superAdmin();
+
+        // Sin superadministrador no se borra nada: se perdería el acceso.
+        if ($superAdmin === null) {
+            $progress->finish(
+                $run,
+                false,
+                'No se encontró al superadministrador. No se eliminó nada.'
+            );
+
+            $this->error('No se encontró al superadministrador. No se eliminó nada.');
+
+            return self::FAILURE;
+        }
+
+        if (! $this->option('force') && $this->input->isInteractive()) {
+            $this->warn('Se eliminará toda la dinámica: evento, chats, adjuntos, moderación, reportes y todos los usuarios excepto '.$superAdmin->username.'.');
+
+            if (! $this->confirm('¿Restablecer la dinámica del amigo secreto?', false)) {
+                $progress->cancel($run);
+
+                $this->info('Proceso cancelado.');
+
+                return self::SUCCESS;
+            }
+        }
+
+        $steps = $this->steps($superAdmin->id);
+        $total = count($steps) + 1; // +1: archivos de los adjuntos.
+
+        $progress->note($run, 'Inicio del restablecimiento de la dinámica.', 'info');
+        $progress->note($run, 'Se conserva la cuenta '.$superAdmin->username.' (#'.$superAdmin->id.').', 'info');
+
+        $this->info('Restableciendo la dinámica del amigo secreto...');
+
+        try {
+            DB::transaction(function () use ($steps, $total, $run, $progress, $superAdmin): void {
+                $index = 0;
+
+                foreach ($steps as $label => $callback) {
+                    $index++;
+                    $rows = (int) $callback();
+
+                    $progress->step($run, $index, $total, $label, $rows);
+                    $this->line('  '.$index.'/'.$total.' '.$label.' ('.$rows.')');
+                }
+
+                // Salvaguarda: el superadministrador sigue ahí.
+                if (! User::query()->whereKey($superAdmin->id)->exists()) {
+                    throw new \RuntimeException('El superadministrador desapareció durante el proceso.');
+                }
+            });
+        } catch (Throwable $exception) {
+            $progress->finish(
+                $run,
+                false,
+                'El restablecimiento falló. No se eliminó nada.',
+                $exception->getMessage()
+            );
+
+            $this->error('Falló el restablecimiento: '.$exception->getMessage());
+
+            return self::FAILURE;
+        }
+
+        // Los adjuntos viven en el disco: se borran después de confirmar la
+        // transacción para no dejar archivos de mensajes que ya no existen.
+        $files = $this->purgeAttachmentFiles();
+
+        $progress->step($run, $total, $total, 'Archivos de los adjuntos', $files);
+
+        $progress->finish(
+            $run,
+            true,
+            'Dinámica restablecida. El sistema quedó en cero; el superadministrador se mantiene.'
+        );
+
+        $this->info('Dinámica restablecida. Ya puedes crear un evento nuevo.');
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Pasos del borrado, en orden de dependencias (hijos antes que padres).
+     *
+     * @return array<string, callable(): int>
+     */
+    private function steps(int $superAdminId): array
+    {
+        return [
+            'Adjuntos del chat' => fn (): int => DB::table('chat_message_attachments')->delete(),
+            'Reacciones del chat' => fn (): int => DB::table('chat_message_reactions')->delete(),
+            'Reportes de moderación' => fn (): int => DB::table('chat_reports')->delete(),
+            'Lecturas de moderación' => fn (): int => DB::table('chat_moderation_reads')->delete(),
+            'Bitácora de grupos' => fn (): int => DB::table('chat_group_audits')->delete(),
+            'Vetados de grupo' => fn (): int => DB::table('chat_group_bans')->delete(),
+            'Suspensiones de grupo' => fn (): int => DB::table('chat_group_suspensions')->delete(),
+            'Invitaciones de grupo' => fn (): int => DB::table('chat_group_invitations')->delete(),
+            'Bloqueos entre usuarios' => fn (): int => DB::table('chat_blocks')->delete(),
+            'Mensajes del chat' => fn (): int => DB::table('chat_messages')->delete(),
+            'Participantes de conversaciones' => fn (): int => DB::table('chat_conversation_user')->delete(),
+            'Conversaciones' => fn (): int => DB::table('chat_conversations')->delete(),
+            'Pistas' => fn (): int => DB::table('clues')->delete(),
+            'Regalos de intercambio' => fn (): int => DB::table('exchange_gifts')->delete(),
+            'Regalos consumibles' => fn (): int => DB::table('consumable_gifts')->delete(),
+            'Listas de deseos' => fn (): int => DB::table('wishlists')->delete(),
+            'Asignaciones' => fn (): int => DB::table('assignments')->delete(),
+            'Participaciones del evento' => fn (): int => DB::table('event_participants')->delete(),
+            'Auditoría' => fn (): int => DB::table('audit_logs')->delete(),
+            'Eventos' => fn (): int => DB::table('events')->delete(),
+            'Notificaciones' => fn (): int => DB::table('notifications')->delete(),
+            'Correos registrados' => fn (): int => DB::table('email_logs')->delete(),
+            'Preferencias de notificación' => fn (): int => DB::table('notification_preferences')
+                ->where('user_id', '!=', $superAdminId)
+                ->delete(),
+            'Cuentas de Google' => fn (): int => DB::table('social_accounts')
+                ->where('user_id', '!=', $superAdminId)
+                ->delete(),
+            // Los permisos individuales del superadministrador definen su
+            // acceso al módulo de restablecer: no se tocan.
+            'Permisos individuales' => fn (): int => DB::table('user_permission_module')
+                ->where('user_id', '!=', $superAdminId)
+                ->delete(),
+            'Usuarios' => fn (): int => DB::table('users')->where('id', '!=', $superAdminId)->delete(),
+            'Sesiones' => fn (): int => DB::table('sessions')
+                ->where(function ($query) use ($superAdminId): void {
+                    $query->where('user_id', '!=', $superAdminId)->orWhereNull('user_id');
+                })
+                ->delete(),
+            'Tokens de recuperación' => fn (): int => DB::table('password_reset_tokens')->delete(),
+        ];
+    }
+
+    /**
+     * Elimina los archivos de los adjuntos del chat del disco público.
+     */
+    private function purgeAttachmentFiles(): int
+    {
+        try {
+            $disk = Storage::disk('public');
+
+            if (! $disk->exists('chat')) {
+                return 0;
+            }
+
+            $files = count($disk->allFiles('chat'));
+
+            $disk->deleteDirectory('chat');
+
+            return $files;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return 0;
+        }
+    }
+}

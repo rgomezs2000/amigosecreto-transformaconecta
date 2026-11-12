@@ -79,6 +79,29 @@
 
         var modalElement = document.getElementById('modal-moderacion-detail');
         var modal = modalElement ? window.bootstrap.Modal.getOrCreateInstance(modalElement) : null;
+        var takeElement = document.getElementById('modal-moderacion-take');
+        var takeModal = takeElement ? window.bootstrap.Modal.getOrCreateInstance(takeElement) : null;
+        var closeElement = document.getElementById('modal-moderacion-close');
+        var closeModal = closeElement ? window.bootstrap.Modal.getOrCreateInstance(closeElement) : null;
+        var tomarUrl = $config.attr('data-url-tomar') || '';
+        var cerrarUrl = $config.attr('data-url-cerrar') || '';
+        var detailReportId = null;
+
+        function reportFilterData() {
+            return {
+                filter_type: $('#moderacion-filter-type').val() || 'all',
+                date_from: $('#moderacion-filter-from').val() || '',
+                date_to: $('#moderacion-filter-to').val() || '',
+                status: $('#moderacion-filter-status').val() || ''
+            };
+        }
+
+        function toggleReportFilter() {
+            var type = $('#moderacion-filter-type').val() || 'all';
+
+            $('#moderacion-filter-date').prop('hidden', type !== 'date');
+            $('#moderacion-filter-status-panel').prop('hidden', type !== 'status');
+        }
 
         var reportesTable = $('#moderacion-table').DataTable({
             serverSide: true,
@@ -86,10 +109,14 @@
             autoWidth: true,
             ajax: {
                 url: $config.attr('data-url-datos'),
-                type: 'GET'
+                type: 'GET',
+                data: function (data) {
+                    $.extend(data, reportFilterData());
+                }
             },
             columns: [
                 { data: 'date' },
+                { data: 'status' },
                 { data: 'reporter' },
                 { data: 'author' },
                 { data: 'reason' },
@@ -97,7 +124,7 @@
                 { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
             ],
             columnDefs: [
-                { orderable: false, targets: [4, 5] }
+                { orderable: false, targets: [5, 6] }
             ],
             order: [[0, 'desc']],
             pageLength: 10,
@@ -129,8 +156,24 @@
 
         $('#moderacion-clear').on('click', function () {
             $('#moderacion-search').val('');
-            reportesTable.search('').draw();
+            $('#moderacion-filter-type').val('all');
+            $('#moderacion-filter-from').val('');
+            $('#moderacion-filter-to').val('');
+            $('#moderacion-filter-status').val('pendiente');
+            toggleReportFilter();
+            reportesTable.search('').ajax.reload(null, true);
         });
+
+        $('#moderacion-filter-type').on('change', function () {
+            toggleReportFilter();
+            reportesTable.ajax.reload(null, true);
+        });
+
+        $('#moderacion-filter-from, #moderacion-filter-to, #moderacion-filter-status').on('change', function () {
+            reportesTable.ajax.reload(null, true);
+        });
+
+        toggleReportFilter();
 
         $('#moderacion-table').on('click', '.moderacion-detail', function () {
             var row = reportesTable.row($(this).closest('tr')).data();
@@ -139,24 +182,164 @@
                 return;
             }
 
+            detailReportId = row.id;
+
             $('#moderacion-detail-date').text(row.date || '—');
+            $('#moderacion-detail-status').html(row.status_html || row.status || '—');
+            $('#moderacion-detail-assigned').text(row.assigned_raw || '—');
+            $('#moderacion-detail-taken').text(row.taken_at || '—');
+            $('#moderacion-detail-attention').text(row.attention_observation || '—');
             $('#moderacion-detail-reporter').text(row.reporter_raw || row.reporter || '—');
             $('#moderacion-detail-author').text(row.author_raw || row.author || '—');
             $('#moderacion-detail-conversation').text(row.conversation_raw || row.conversation || '—');
             $('#moderacion-detail-reason').text(row.reason_full || row.reason || '—');
             $('#moderacion-detail-message').text(row.message_full || row.message || '—');
+            $('#moderacion-detail-closed-at').text(row.closed_at || '—');
+            $('#moderacion-detail-closed-by').text(row.closed_by_name || '—');
+            $('#moderacion-detail-close-observation').text(row.close_observation || '—');
+
+            $('#moderacion-detail-take').prop('hidden', !row.can_take);
+            $('#moderacion-detail-close').prop('hidden', !row.can_close);
 
             var $chat = $('#moderacion-detail-chat');
 
-            if (row.conversation_url) {
+            if (row.conversation_url && row.status_class === 'atendiendo') {
                 $chat.attr('href', row.conversation_url).prop('hidden', false);
             } else {
-                $chat.prop('hidden', true);
+                $chat.prop('hidden', true).removeAttr('href');
             }
 
             if (modal) {
                 modal.show();
             }
+        });
+
+        $('#moderacion-detail-take').on('click', function () {
+            if (!detailReportId) {
+                return;
+            }
+
+            $('#moderacion-take-observation').val('');
+            $('#moderacion-take-error').text('').removeAttr('data-kind');
+
+            if (takeModal) {
+                takeModal.show();
+            }
+        });
+
+        $('#moderacion-detail-close').on('click', function () {
+            if (!detailReportId) {
+                return;
+            }
+
+            $('#moderacion-close-observation').val('');
+            $('#moderacion-close-confirmed').prop('checked', false);
+            $('#moderacion-close-error').text('').removeAttr('data-kind');
+
+            if (closeModal) {
+                closeModal.show();
+            }
+        });
+
+        function caseError(xhr) {
+            var response = xhr && xhr.responseJSON ? xhr.responseJSON : {};
+
+            return response.message || 'No se pudo completar la operación.';
+        }
+
+        $('#moderacion-take-confirm').on('click', function () {
+            if (!detailReportId || !tomarUrl) {
+                return;
+            }
+
+            var $button = $(this);
+            var $error = $('#moderacion-take-error');
+
+            $button.prop('disabled', true);
+            $error.text('').removeAttr('data-kind');
+
+            $.ajax({
+                url: tomarUrl.replace('__ID__', detailReportId),
+                method: 'POST',
+                dataType: 'json',
+                headers: {
+                    'X-CSRF-TOKEN': csrf,
+                    'Accept': 'application/json'
+                },
+                data: {
+                    attention_observation: $('#moderacion-take-observation').val()
+                }
+            }).done(function () {
+                if (takeModal) {
+                    takeModal.hide();
+                }
+
+                if (modal) {
+                    modal.hide();
+                }
+
+                reportesTable.ajax.reload(null, false);
+                refreshModerationCounts();
+            }).fail(function (xhr) {
+                $error.attr('data-kind', 'error').text(caseError(xhr));
+            }).always(function () {
+                $button.prop('disabled', false);
+            });
+        });
+
+        $('#moderacion-close-confirm').on('click', function () {
+            if (!detailReportId || !cerrarUrl) {
+                return;
+            }
+
+            var observation = $.trim($('#moderacion-close-observation').val());
+            var confirmed = $('#moderacion-close-confirmed').is(':checked');
+            var $error = $('#moderacion-close-error');
+
+            $error.text('').removeAttr('data-kind');
+
+            if (!observation) {
+                $error.attr('data-kind', 'error').text('Escribe la observación de cierre.');
+                return;
+            }
+
+            if (!confirmed) {
+                $error.attr('data-kind', 'error').text('Confirma que el reporte quedó cerrado.');
+                return;
+            }
+
+            var $button = $(this);
+
+            $button.prop('disabled', true);
+
+            $.ajax({
+                url: cerrarUrl.replace('__ID__', detailReportId),
+                method: 'POST',
+                dataType: 'json',
+                headers: {
+                    'X-CSRF-TOKEN': csrf,
+                    'Accept': 'application/json'
+                },
+                data: {
+                    close_observation: observation,
+                    confirmed: 1
+                }
+            }).done(function () {
+                if (closeModal) {
+                    closeModal.hide();
+                }
+
+                if (modal) {
+                    modal.hide();
+                }
+
+                reportesTable.ajax.reload(null, false);
+                refreshModerationCounts();
+            }).fail(function (xhr) {
+                $error.attr('data-kind', 'error').text(caseError(xhr));
+            }).always(function () {
+                $button.prop('disabled', false);
+            });
         });
 
         /* ------------------------------------------------------------------
@@ -754,6 +937,20 @@
 
         var usuariosTable = null;
 
+        function usuariosFilterData() {
+            return {
+                filter_type: $('#moderacion-usuarios-filter-type').val() || 'all',
+                role: $('#moderacion-usuarios-role').val() || ''
+            };
+        }
+
+        function toggleUsuariosFilter() {
+            $('#moderacion-usuarios-filter-role').prop(
+                'hidden',
+                ($('#moderacion-usuarios-filter-type').val() || 'all') !== 'role'
+            );
+        }
+
         function initUsuariosTable() {
             var table = $('#moderacion-usuarios-table').DataTable({
                 serverSide: true,
@@ -761,7 +958,10 @@
                 autoWidth: true,
                 ajax: {
                     url: $config.attr('data-url-usuarios'),
-                    type: 'GET'
+                    type: 'GET',
+                    data: function (data) {
+                        $.extend(data, usuariosFilterData());
+                    }
                 },
                 columns: [
                     { data: 'name' },
@@ -802,8 +1002,22 @@
 
             $('#moderacion-usuarios-clear').on('click', function () {
                 $('#moderacion-usuarios-search').val('');
-                table.search('').draw();
+                $('#moderacion-usuarios-filter-type').val('all');
+                $('#moderacion-usuarios-role').val('admin');
+                toggleUsuariosFilter();
+                table.search('').ajax.reload(null, true);
             });
+
+            $('#moderacion-usuarios-filter-type').on('change', function () {
+                toggleUsuariosFilter();
+                table.ajax.reload(null, true);
+            });
+
+            $('#moderacion-usuarios-role').on('change', function () {
+                table.ajax.reload(null, true);
+            });
+
+            toggleUsuariosFilter();
 
             return table;
         }
@@ -833,12 +1047,13 @@
                 },
                 columns: [
                     { data: 'name' },
+                    { data: 'owner' },
                     { data: 'members', orderable: false, searchable: false, className: 'roles-id' },
                     { data: 'banned', orderable: false, searchable: false, className: 'roles-id' },
                     { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
                 ],
                 columnDefs: [
-                    { orderable: false, targets: [1, 2, 3] }
+                    { orderable: false, targets: [2, 3, 4] }
                 ],
                 order: [[0, 'asc']],
                 pageLength: 10,
@@ -959,6 +1174,9 @@
 
             $.getJSON(contadoresUrl).done(function (response) {
                 $('[data-moderation-count="reports"]').text(formatCount(response.reports));
+                $('[data-moderation-count="pending"]').text(formatCount(response.pending));
+                $('[data-moderation-count="attending"]').text(formatCount(response.attending));
+                $('[data-moderation-count="closed"]').text(formatCount(response.closed));
                 $('[data-moderation-count="blocks"]').text(formatCount(response.blocks));
                 $('[data-moderation-count="bans"]').text(formatCount(response.bans));
             });

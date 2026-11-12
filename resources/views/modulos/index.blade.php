@@ -20,11 +20,30 @@
                        placeholder="Escribe para filtrar..." autocomplete="off">
             </div>
 
-            <div class="roles-actions">
-                <button type="button" class="btn btn-outline-secondary" id="modulos-clear">
-                    <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                    <span>Limpiar</span>
-                </button>
+            <div class="matriz-filter-card">
+                <div class="matriz-filter">
+                    <label for="modulos-filter-type" class="form-label">Filtrar por</label>
+                    <select id="modulos-filter-type" class="form-select">
+                        <option value="all">Todos los módulos</option>
+                        <option value="category">Por categoría</option>
+                    </select>
+                </div>
+
+                <div class="matriz-filter d-none" id="modulos-filter-category-wrap">
+                    <label for="modulos-filter-category" class="form-label">Categoría</label>
+                    <select id="modulos-filter-category" class="form-select">
+                        @foreach ($categories as $category)
+                            <option value="{{ $category->id }}">{{ $category->name }}</option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <div class="matriz-filter matriz-filter__action">
+                    <button type="button" class="btn btn-outline-secondary" id="modulos-clear">
+                        <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                        <span>Limpiar</span>
+                    </button>
+                </div>
             </div>
         </section>
 

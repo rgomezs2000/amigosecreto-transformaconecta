@@ -48,6 +48,7 @@ class ModeracionGruposController extends Controller
         $column = (int) $request->input('order.0.column', 0);
 
         $groups = $query
+            ->with('creator:id,name')
             ->withCount('users')
             ->withCount(['bans as banned_count' => fn ($bans) => $bans->whereNull('revoked_at')])
             ->when($column === 0, fn ($groups) => $groups->orderByRaw("LOWER(COALESCE(name, '')) ".$direction))
@@ -65,6 +66,8 @@ class ModeracionGruposController extends Controller
                 'id' => $group->id,
                 'name' => e($group->name ?: 'Grupo sin nombre'),
                 'name_raw' => $group->name ?: 'Grupo sin nombre',
+                'owner' => e($group->creator?->name ?? '—'),
+                'owner_raw' => $group->creator?->name ?? '—',
                 'members' => (int) $group->users_count,
                 'banned' => (int) $group->banned_count,
                 'actions' => view('moderacion.partials.ban-actions', ['group' => $group])->render(),

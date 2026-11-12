@@ -4,10 +4,14 @@ namespace Tests\Feature;
 
 use App\Enums\EventStatus;
 use App\Enums\UserRole;
+use App\Mail\NotificationMail;
 use App\Models\Assignment;
 use App\Models\ChatMessage;
+use App\Models\ChatReaction;
+use App\Models\ChatReport;
 use App\Models\Conversation;
 use App\Models\Event;
+use App\Models\GroupInvitation;
 use App\Models\Module;
 use App\Models\Notification;
 use App\Models\Permission;
@@ -15,7 +19,12 @@ use App\Models\Profile;
 use App\Models\ProfilePermissionModule;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ChatTest extends TestCase
@@ -41,8 +50,8 @@ class ChatTest extends TestCase
     private function userWithChat(string $name, UserRole $role): User
     {
         $profile = Profile::create([
-            'name' => 'Perfil ' . $name,
-            'slug' => 'perfil-' . strtolower(str_replace(' ', '-', $name)),
+            'name' => 'Perfil '.$name,
+            'slug' => 'perfil-'.strtolower(str_replace(' ', '-', $name)),
             'is_active' => true,
         ]);
 
@@ -67,7 +76,7 @@ class ChatTest extends TestCase
 
         return User::factory()->create([
             'name' => $name,
-            'username' => strtolower(str_replace(' ', '-', $name)) . '-' . \Illuminate\Support\Str::lower(\Illuminate\Support\Str::random(5)),
+            'username' => strtolower(str_replace(' ', '-', $name)).'-'.Str::lower(Str::random(5)),
             'profile_id' => $profile->id,
             'role' => $role,
             'is_active' => true,
@@ -89,11 +98,11 @@ class ChatTest extends TestCase
             ->assertJsonPath('moderation.0.id', $conversation->id);
 
         $this->actingAs($admin)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk();
 
         $this->actingAs($admin)
-            ->postJson('/chat/' . $conversation->id . '/mensajes', ['body' => 'Mensaje de moderación'])
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => 'Mensaje de moderación'])
             ->assertOk();
 
         $message = ChatMessage::query()->where('conversation_id', $conversation->id)->firstOrFail();
@@ -121,7 +130,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('moderation.0.id', $group->id);
 
         $this->actingAs($admin)
-            ->getJson('/chat/' . $group->id . '/mensajes')
+            ->getJson('/chat/'.$group->id.'/mensajes')
             ->assertOk();
     }
 
@@ -141,7 +150,7 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($ana)
-            ->postJson('/chat/mensajes/' . $message->id . '/editar', ['body' => 'Hola editado'])
+            ->postJson('/chat/mensajes/'.$message->id.'/editar', ['body' => 'Hola editado'])
             ->assertOk();
 
         $message->refresh();
@@ -150,24 +159,24 @@ class ChatTest extends TestCase
         $this->assertNotNull($message->edited_at);
 
         $this->actingAs($ana)
-            ->postJson('/chat/mensajes/' . $message->id . '/reaccionar', ['emoji' => '👍'])
+            ->postJson('/chat/mensajes/'.$message->id.'/reaccionar', ['emoji' => '👍'])
             ->assertOk();
 
         $this->actingAs($luis)
-            ->postJson('/chat/mensajes/' . $message->id . '/reaccionar', ['emoji' => '👍'])
+            ->postJson('/chat/mensajes/'.$message->id.'/reaccionar', ['emoji' => '👍'])
             ->assertOk();
 
         $this->assertSame(2, $message->reactions()->count());
 
         $this->actingAs($ana)
-            ->postJson('/chat/mensajes/' . $message->id . '/reaccionar', ['emoji' => '❤️'])
+            ->postJson('/chat/mensajes/'.$message->id.'/reaccionar', ['emoji' => '❤️'])
             ->assertOk();
 
         $this->assertSame(2, $message->reactions()->count());
         $this->assertSame('❤️', $message->reactions()->where('user_id', $ana->id)->value('emoji'));
 
         $this->actingAs($admin)
-            ->postJson('/chat/mensajes/' . $message->id . '/eliminar')
+            ->postJson('/chat/mensajes/'.$message->id.'/eliminar')
             ->assertOk();
 
         $message->refresh();
@@ -179,7 +188,7 @@ class ChatTest extends TestCase
 
     public function test_adjunto_se_guarda_en_carpeta_de_la_conversacion(): void
     {
-        \Illuminate\Support\Facades\Storage::fake('public');
+        Storage::fake('public');
 
         $admin = $this->userWithChat('Admin', UserRole::Admin);
         $ana = $this->userWithChat('Ana', UserRole::Participant);
@@ -188,31 +197,31 @@ class ChatTest extends TestCase
         $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
         $conversation->users()->attach([$ana->id, $luis->id]);
 
-        $file = \Illuminate\Http\UploadedFile::fake()->image('foto.jpg');
+        $file = UploadedFile::fake()->image('foto.jpg');
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/mensajes', ['file' => $file])
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['file' => $file])
             ->assertOk();
 
         $message = ChatMessage::query()->latest('id')->firstOrFail();
 
         $this->assertStringStartsWith(
-            'chat/conversations/' . $conversation->id . '/image/',
+            'chat/conversations/'.$conversation->id.'/image/',
             $message->attachment_path
         );
 
-        \Illuminate\Support\Facades\Storage::disk('public')->assertExists($message->attachment_path);
+        Storage::disk('public')->assertExists($message->attachment_path);
 
         $group = Conversation::create(['type' => 'group', 'name' => 'Grupo', 'created_by' => $admin->id]);
         $group->users()->attach([$admin->id, $ana->id]);
 
         $this->actingAs($admin)
-            ->postJson('/chat/' . $group->id . '/mensajes', ['file' => \Illuminate\Http\UploadedFile::fake()->image('grupo.jpg')])
+            ->postJson('/chat/'.$group->id.'/mensajes', ['file' => UploadedFile::fake()->image('grupo.jpg')])
             ->assertOk();
 
         $groupMessage = ChatMessage::query()->latest('id')->firstOrFail();
 
-        $this->assertStringStartsWith('chat/groups/' . $group->id . '/image/', $groupMessage->attachment_path);
+        $this->assertStringStartsWith('chat/groups/'.$group->id.'/image/', $groupMessage->attachment_path);
     }
 
     public function test_mensajes_con_lectura_registrada_no_falla(): void
@@ -233,14 +242,14 @@ class ChatTest extends TestCase
         $conversation->users()->updateExistingPivot($luis->id, ['last_read_at' => now()]);
 
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk()
             ->assertJsonPath('messages.0.read', true);
     }
 
     public function test_reportar_mensaje_crea_reporte_y_avisa_al_administrador(): void
     {
-        \Illuminate\Support\Facades\Mail::fake();
+        Mail::fake();
 
         $admin = $this->userWithChat('Admin', UserRole::Admin);
         $ana = $this->userWithChat('Ana', UserRole::Participant);
@@ -256,7 +265,7 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($ana)
-            ->postJson('/chat/mensajes/' . $message->id . '/reportar', ['reason' => 'Lenguaje ofensivo'])
+            ->postJson('/chat/mensajes/'.$message->id.'/reportar', ['reason' => 'Lenguaje ofensivo'])
             ->assertOk();
 
         $this->assertDatabaseHas('chat_reports', [
@@ -269,7 +278,7 @@ class ChatTest extends TestCase
 
         $this->assertTrue($reports->messages()->where('body', 'like', '%Lenguaje ofensivo%')->exists());
 
-        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\NotificationMail::class, function ($mail) use ($admin) {
+        Mail::assertSent(NotificationMail::class, function ($mail) use ($admin) {
             return $mail->hasTo($admin->email);
         });
     }
@@ -289,7 +298,7 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($luis)
-            ->postJson('/chat/' . $conversation->id . '/silenciar')
+            ->postJson('/chat/'.$conversation->id.'/silenciar')
             ->assertOk()
             ->assertJsonPath('muted', true);
 
@@ -301,7 +310,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('unread', 0);
 
         $this->actingAs($luis)
-            ->postJson('/chat/' . $conversation->id . '/silenciar')
+            ->postJson('/chat/'.$conversation->id.'/silenciar')
             ->assertOk()
             ->assertJsonPath('muted', false);
 
@@ -322,11 +331,11 @@ class ChatTest extends TestCase
         $conversation->users()->attach([$ana->id, $luis->id]);
 
         $this->actingAs($admin)
-            ->postJson('/chat/' . $conversation->id . '/silenciar')
+            ->postJson('/chat/'.$conversation->id.'/silenciar')
             ->assertForbidden();
 
         $this->actingAs($admin)
-            ->postJson('/chat/' . $conversation->id . '/limpiar')
+            ->postJson('/chat/'.$conversation->id.'/limpiar')
             ->assertForbidden();
     }
 
@@ -347,11 +356,11 @@ class ChatTest extends TestCase
         $old->forceFill(['created_at' => now()->subHour()])->save();
 
         $this->actingAs($luis)
-            ->postJson('/chat/' . $conversation->id . '/limpiar')
+            ->postJson('/chat/'.$conversation->id.'/limpiar')
             ->assertOk();
 
         $this->actingAs($luis)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk()
             ->assertJsonCount(0, 'messages');
 
@@ -368,13 +377,13 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($luis)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk()
             ->assertJsonCount(1, 'messages')
             ->assertJsonPath('messages.0.body', 'Mensaje nuevo');
 
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk()
             ->assertJsonCount(2, 'messages');
     }
@@ -388,7 +397,7 @@ class ChatTest extends TestCase
         $conversation->users()->attach([$ana->id, $luis->id]);
 
         $this->actingAs($luis)
-            ->postJson('/chat/usuarios/' . $ana->id . '/bloquear')
+            ->postJson('/chat/usuarios/'.$ana->id.'/bloquear')
             ->assertOk()
             ->assertJsonPath('blocked', true);
 
@@ -404,11 +413,11 @@ class ChatTest extends TestCase
             ->assertJsonPath('conversations.0.other_user_id', $ana->id);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/mensajes', ['body' => '¿Estás ahí?'])
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => '¿Estás ahí?'])
             ->assertForbidden();
 
         $this->actingAs($luis)
-            ->deleteJson('/chat/usuarios/' . $ana->id . '/bloquear')
+            ->deleteJson('/chat/usuarios/'.$ana->id.'/bloquear')
             ->assertOk()
             ->assertJsonPath('blocked', false);
 
@@ -418,7 +427,7 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/mensajes', ['body' => 'Ya puedes escribir'])
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => 'Ya puedes escribir'])
             ->assertOk();
     }
 
@@ -450,11 +459,11 @@ class ChatTest extends TestCase
         $otra->users()->attach([$ana->id, $pedro->id]);
 
         $this->actingAs($luis)
-            ->postJson('/chat/' . $conversation->id . '/silenciar')
+            ->postJson('/chat/'.$conversation->id.'/silenciar')
             ->assertOk();
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/mensajes', ['body' => 'Mensaje silenciado'])
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => 'Mensaje silenciado'])
             ->assertOk();
 
         $this->assertSame(0, Notification::query()
@@ -463,7 +472,7 @@ class ChatTest extends TestCase
             ->count());
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $otra->id . '/mensajes', ['body' => 'Mensaje normal'])
+            ->postJson('/chat/'.$otra->id.'/mensajes', ['body' => 'Mensaje normal'])
             ->assertOk();
 
         $this->assertSame(1, Notification::query()
@@ -482,7 +491,7 @@ class ChatTest extends TestCase
         $conversation->users()->attach([$ana->id, $luis->id]);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/mensajes', ['body' => 'Hola @Administrador'])
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => 'Hola @Administrador'])
             ->assertOk();
 
         $this->assertDatabaseHas('notifications', [
@@ -502,7 +511,7 @@ class ChatTest extends TestCase
         $group->users()->attach([$admin->id, $ana->id, $luis->id]);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $group->id . '/salir')
+            ->postJson('/chat/'.$group->id.'/salir')
             ->assertOk();
 
         $this->assertFalse($group->users()->whereKey($ana->id)->exists());
@@ -525,7 +534,7 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->deleteJson('/chat/' . $conversation->id)
+            ->deleteJson('/chat/'.$conversation->id)
             ->assertOk();
 
         $this->assertDatabaseMissing('chat_conversations', ['id' => $conversation->id]);
@@ -541,7 +550,7 @@ class ChatTest extends TestCase
         $conversation->users()->attach([$ana->id, $luis->id]);
 
         $this->actingAs($ana)
-            ->deleteJson('/chat/' . $conversation->id)
+            ->deleteJson('/chat/'.$conversation->id)
             ->assertForbidden();
 
         $this->assertDatabaseHas('chat_conversations', ['id' => $conversation->id]);
@@ -557,13 +566,13 @@ class ChatTest extends TestCase
         $group->users()->attach([$owner->id, $ana->id]);
 
         $response = $this->actingAs($owner)
-            ->postJson('/chat/grupo/' . $group->id . '/invitar', [])
+            ->postJson('/chat/grupo/'.$group->id.'/invitar', [])
             ->assertOk();
 
         $token = $response->json('token');
 
         $this->actingAs($luis)
-            ->postJson('/chat/grupo/invitacion/' . $token . '/aceptar')
+            ->postJson('/chat/grupo/invitacion/'.$token.'/aceptar')
             ->assertOk();
 
         $this->assertTrue($group->users()->whereKey($luis->id)->exists());
@@ -578,11 +587,11 @@ class ChatTest extends TestCase
         $group->users()->attach([$owner->id, $ana->id]);
 
         $this->actingAs($owner)
-            ->postJson('/chat/grupo/' . $group->id . '/suspender/' . $ana->id, ['days' => 3])
+            ->postJson('/chat/grupo/'.$group->id.'/suspender/'.$ana->id, ['days' => 3])
             ->assertOk();
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $group->id . '/mensajes', ['body' => 'Hola'])
+            ->postJson('/chat/'.$group->id.'/mensajes', ['body' => 'Hola'])
             ->assertForbidden();
     }
 
@@ -595,7 +604,7 @@ class ChatTest extends TestCase
         $group->users()->attach([$owner->id, $ana->id]);
 
         $this->actingAs($owner)
-            ->postJson('/chat/grupo/' . $group->id . '/banear/' . $ana->id)
+            ->postJson('/chat/grupo/'.$group->id.'/banear/'.$ana->id)
             ->assertOk();
 
         $this->assertFalse($group->users()->whereKey($ana->id)->exists());
@@ -610,7 +619,7 @@ class ChatTest extends TestCase
         $group->users()->attach([$owner->id, $ana->id]);
 
         $this->actingAs($owner)
-            ->postJson('/chat/' . $group->id . '/salir')
+            ->postJson('/chat/'.$group->id.'/salir')
             ->assertStatus(422);
 
         $this->assertTrue($group->users()->whereKey($owner->id)->exists());
@@ -626,7 +635,7 @@ class ChatTest extends TestCase
         $group->users()->attach([$ana->id, $luis->id, $admin->id]);
 
         $response = $this->actingAs($ana)
-            ->getJson('/chat/' . $group->id . '/mensajes')
+            ->getJson('/chat/'.$group->id.'/mensajes')
             ->assertOk();
 
         $items = collect($response->json('mentionables'))->keyBy('token');
@@ -652,7 +661,7 @@ class ChatTest extends TestCase
         $conversation->users()->attach([$ana->id, $luis->id]);
 
         $response = $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk();
 
         $tokens = collect($response->json('mentionables'))->pluck('token');
@@ -673,7 +682,7 @@ class ChatTest extends TestCase
         $conversation->users()->attach([$ana->id, $luis->id]);
 
         $response = $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk();
 
         $items = collect($response->json('mentionables'));
@@ -693,7 +702,7 @@ class ChatTest extends TestCase
         $conversation->users()->attach([$ana->id, $luis->id]);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/mensajes', ['body' => 'Hola @AmigoSecreto'])
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => 'Hola @AmigoSecreto'])
             ->assertOk();
 
         $this->assertTrue(
@@ -780,7 +789,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('moderation', 1);
 
         $this->actingAs($admin)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk();
 
         $this->assertDatabaseHas('chat_moderation_reads', [
@@ -841,7 +850,7 @@ class ChatTest extends TestCase
         ]);
 
         $response = $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes?after_id=' . $primero->id)
+            ->getJson('/chat/'.$conversation->id.'/mensajes?after_id='.$primero->id)
             ->assertOk()
             ->assertJsonPath('delta', true)
             ->assertJsonPath('latest_id', $segundo->id)
@@ -874,14 +883,14 @@ class ChatTest extends TestCase
 
         // Primera carga: entrega y marca de lectura normales.
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk();
 
         $marca = now()->subHour()->startOfSecond();
         $conversation->users()->updateExistingPivot($ana->id, ['last_read_at' => $marca]);
 
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes?after_id=' . $mensaje->id)
+            ->getJson('/chat/'.$conversation->id.'/mensajes?after_id='.$mensaje->id)
             ->assertOk()
             ->assertJsonCount(0, 'messages');
 
@@ -889,7 +898,7 @@ class ChatTest extends TestCase
 
         $this->assertSame(
             $marca->toDateTimeString(),
-            \Illuminate\Support\Carbon::parse($guardado)->toDateTimeString()
+            Carbon::parse($guardado)->toDateTimeString()
         );
     }
 
@@ -911,19 +920,19 @@ class ChatTest extends TestCase
             $mensajes[] = ChatMessage::create([
                 'conversation_id' => $conversation->id,
                 'user_id' => $luis->id,
-                'body' => 'Mensaje ' . $i,
+                'body' => 'Mensaje '.$i,
             ]);
         }
 
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk();
 
         $marca = now()->subHour()->startOfSecond();
         $conversation->users()->updateExistingPivot($ana->id, ['last_read_at' => $marca]);
 
         $response = $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes?ids[]=' . $mensajes[0]->id)
+            ->getJson('/chat/'.$conversation->id.'/mensajes?ids[]='.$mensajes[0]->id)
             ->assertOk()
             ->assertJsonPath('delta', true)
             ->assertJsonCount(0, 'messages')
@@ -936,7 +945,7 @@ class ChatTest extends TestCase
 
         $this->assertSame(
             $marca->toDateTimeString(),
-            \Illuminate\Support\Carbon::parse($guardado)->toDateTimeString()
+            Carbon::parse($guardado)->toDateTimeString()
         );
     }
 
@@ -965,10 +974,10 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk();
 
-        \App\Models\ChatReaction::create([
+        ChatReaction::create([
             'message_id' => $primero->id,
             'user_id' => $luis->id,
             'emoji' => '👍',
@@ -980,7 +989,7 @@ class ChatTest extends TestCase
         ])->save();
 
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes?after_id=' . $segundo->id)
+            ->getJson('/chat/'.$conversation->id.'/mensajes?after_id='.$segundo->id)
             ->assertOk()
             ->assertJsonCount(0, 'messages')
             ->assertJsonPath('recent.0.reactions.0.emoji', '👍')
@@ -1013,7 +1022,7 @@ class ChatTest extends TestCase
         $luis = $this->userWithChat('Luis', UserRole::Participant);
 
         $this->actingAs($ana)
-            ->postJson('/chat/usuarios/' . $luis->id . '/silenciar')
+            ->postJson('/chat/usuarios/'.$luis->id.'/silenciar')
             ->assertOk()
             ->assertJsonPath('muted', true);
 
@@ -1044,7 +1053,7 @@ class ChatTest extends TestCase
 
         // Volver a pulsar quita el silencio.
         $this->actingAs($ana)
-            ->postJson('/chat/usuarios/' . $luis->id . '/silenciar')
+            ->postJson('/chat/usuarios/'.$luis->id.'/silenciar')
             ->assertOk()
             ->assertJsonPath('muted', false);
 
@@ -1060,7 +1069,7 @@ class ChatTest extends TestCase
         $luis = $this->userWithChat('Luis', UserRole::Participant);
 
         $this->actingAs($ana)
-            ->postJson('/chat/usuarios/' . $luis->id . '/bloquear')
+            ->postJson('/chat/usuarios/'.$luis->id.'/bloquear')
             ->assertOk()
             ->assertJsonPath('blocked', true);
 
@@ -1085,11 +1094,11 @@ class ChatTest extends TestCase
 
         // El bloqueado tampoco puede reportar mientras dure el bloqueo.
         $this->actingAs($ana)
-            ->postJson('/chat/usuarios/' . $luis->id . '/reportar', ['reason' => 'Molesta'])
+            ->postJson('/chat/usuarios/'.$luis->id.'/reportar', ['reason' => 'Molesta'])
             ->assertStatus(422);
 
         $this->actingAs($ana)
-            ->deleteJson('/chat/usuarios/' . $luis->id . '/bloquear')
+            ->deleteJson('/chat/usuarios/'.$luis->id.'/bloquear')
             ->assertOk()
             ->assertJsonPath('blocked', false);
 
@@ -1118,25 +1127,27 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($luis)
-            ->postJson('/chat/usuarios/' . $ana->id . '/bloquear')
+            ->postJson('/chat/usuarios/'.$ana->id.'/bloquear')
             ->assertOk();
 
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertForbidden();
     }
 
     public function test_reportar_a_un_usuario_avisa_a_la_administracion(): void
     {
+        Mail::fake();
+
         $admin = $this->userWithChat('Admin', UserRole::Admin);
         $ana = $this->userWithChat('Ana', UserRole::Participant);
         $luis = $this->userWithChat('Luis', UserRole::Participant);
 
         $this->actingAs($ana)
-            ->postJson('/chat/usuarios/' . $luis->id . '/reportar', ['reason' => 'Me escribió cosas feas'])
+            ->postJson('/chat/usuarios/'.$luis->id.'/reportar', ['reason' => 'Me escribió cosas feas'])
             ->assertOk();
 
-        $report = \App\Models\ChatReport::query()->firstOrFail();
+        $report = ChatReport::query()->firstOrFail();
 
         $this->assertNull($report->message_id);
         $this->assertSame($ana->id, $report->reporter_id);
@@ -1149,15 +1160,73 @@ class ChatTest extends TestCase
                 ->exists()
         );
 
+        Mail::assertSent(NotificationMail::class, function ($mail) use ($admin) {
+            return $mail->hasTo($admin->email);
+        });
+
         // Sin motivo se guarda un texto por defecto con el nombre.
         $this->actingAs($luis)
-            ->postJson('/chat/usuarios/' . $ana->id . '/reportar')
+            ->postJson('/chat/usuarios/'.$ana->id.'/reportar')
             ->assertOk();
 
         $this->assertDatabaseHas('chat_reports', [
             'reporter_id' => $luis->id,
             'reason' => 'Reporte del usuario Ana',
         ]);
+    }
+
+    public function test_reportar_una_conversacion_tambien_avisa_por_push_y_correo(): void
+    {
+        Mail::fake();
+
+        $admin = $this->userWithChat('Admin', UserRole::Admin);
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $luis->id,
+            'body' => 'Mensaje para reportar la conversación',
+        ]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/reportar-conversacion')
+            ->assertOk();
+
+        $this->assertDatabaseHas('chat_reports', [
+            'message_id' => $conversation->messages()->latest('id')->value('id'),
+            'reporter_id' => $ana->id,
+            'reason' => 'Reporte de la conversación: una conversación',
+        ]);
+
+        $this->assertTrue(
+            Notification::query()
+                ->where('notifiable_id', $admin->id)
+                ->where('type', 'chat.report')
+                ->where('data->report_type', 'conversation')
+                ->exists()
+        );
+
+        Mail::assertSent(NotificationMail::class, function ($mail) use ($admin) {
+            return $mail->hasTo($admin->email);
+        });
+
+        $count = Notification::query()
+            ->where('notifiable_id', $admin->id)
+            ->where('type', 'chat.report')
+            ->count();
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/reportar-conversacion')
+            ->assertOk();
+
+        $this->assertSame($count, Notification::query()
+            ->where('notifiable_id', $admin->id)
+            ->where('type', 'chat.report')
+            ->count());
     }
 
     public function test_crear_grupo_sin_integrantes_y_obtener_el_enlace_de_invitacion(): void
@@ -1176,19 +1245,19 @@ class ChatTest extends TestCase
         $this->assertSame(1, $group->users()->count());
 
         $this->actingAs($ana)
-            ->postJson('/chat/grupo/' . $groupId . '/invitar', [])
+            ->postJson('/chat/grupo/'.$groupId.'/invitar', [])
             ->assertOk()
             ->assertJsonStructure(['token', 'url']);
 
         $this->actingAs($ana)
-            ->postJson('/chat/grupo/' . $groupId . '/invitar')
+            ->postJson('/chat/grupo/'.$groupId.'/invitar')
             ->assertOk();
 
-        $token = \App\Models\GroupInvitation::query()->latest('id')->firstOrFail()->token;
+        $token = GroupInvitation::query()->latest('id')->firstOrFail()->token;
 
         // La invitación no tiene página propia: con sesión lleva al panel.
         $this->actingAs($ana)
-            ->get('/chat/grupo/invitacion/' . $token)
+            ->get('/chat/grupo/invitacion/'.$token)
             ->assertRedirect(route('dashboard'));
 
         // El grupo aparece en la pestaña Grupos del resumen.
@@ -1208,14 +1277,14 @@ class ChatTest extends TestCase
         $group->users()->attach([$owner->id]);
 
         $this->actingAs($owner)
-            ->postJson('/chat/grupo/' . $group->id . '/invitar', [])
+            ->postJson('/chat/grupo/'.$group->id.'/invitar', [])
             ->assertOk();
 
-        $token = \App\Models\GroupInvitation::query()->latest('id')->firstOrFail()->token;
+        $token = GroupInvitation::query()->latest('id')->firstOrFail()->token;
 
         // Con sesión: se recuerda la invitación y se va al panel.
         $this->actingAs($invited)
-            ->get('/chat/grupo/invitacion/' . $token)
+            ->get('/chat/grupo/invitacion/'.$token)
             ->assertRedirect(route('dashboard'))
             ->assertSessionHas('chat.invitation', $token);
 
@@ -1229,14 +1298,14 @@ class ChatTest extends TestCase
 
         // Datos para el modal: grupo y quién invita.
         $this->actingAs($invited)
-            ->getJson('/chat/grupo/invitacion/' . $token . '/datos')
+            ->getJson('/chat/grupo/invitacion/'.$token.'/datos')
             ->assertOk()
             ->assertJsonPath('group', 'Cumpleaños')
             ->assertJsonPath('inviter', 'Dueno');
 
         // Aceptar mete a la persona al grupo y olvida la invitación pendiente.
         $this->actingAs($invited)
-            ->postJson('/chat/grupo/invitacion/' . $token . '/aceptar')
+            ->postJson('/chat/grupo/invitacion/'.$token.'/aceptar')
             ->assertOk()
             ->assertJsonPath('conversation_id', $group->id)
             ->assertSessionMissing('chat.invitation');
@@ -1257,18 +1326,78 @@ class ChatTest extends TestCase
         $group->users()->attach([$owner->id]);
 
         $this->actingAs($owner)
-            ->postJson('/chat/grupo/' . $group->id . '/invitar', [])
+            ->postJson('/chat/grupo/'.$group->id.'/invitar', [])
             ->assertOk();
 
-        $token = \App\Models\GroupInvitation::query()->latest('id')->firstOrFail()->token;
+        $token = GroupInvitation::query()->latest('id')->firstOrFail()->token;
 
         // Se cierra la sesión del dueño para probar el camino del invitado.
         $this->app['auth']->forgetGuards();
 
         // Sin sesión: al acceso, recordando la invitación para después de entrar.
-        $this->get('/chat/grupo/invitacion/' . $token)
+        $this->get('/chat/grupo/invitacion/'.$token)
             ->assertRedirect(route('login'))
             ->assertSessionHas('chat.invitation', $token);
+    }
+
+    public function test_un_enlace_expirado_vuelve_al_panel_con_aviso(): void
+    {
+        $owner = $this->userWithChat('Dueno', UserRole::Participant);
+        $invited = $this->userWithChat('Invitado', UserRole::Participant);
+
+        $group = Conversation::create(['type' => 'group', 'name' => 'Cumpleaños', 'created_by' => $owner->id]);
+        $group->users()->attach([$owner->id]);
+
+        $invitation = GroupInvitation::create([
+            'conversation_id' => $group->id,
+            'invited_by' => $owner->id,
+            'token' => 'token-expirado',
+            'expires_at' => now()->subDay(),
+        ]);
+
+        $this->actingAs($invited)
+            ->get('/chat/grupo/invitacion/'.$invitation->token)
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionHas('chat.invitation_notice', 'Este enlace está expirado.')
+            ->assertSessionMissing('chat.invitation');
+
+        $this->actingAs($invited)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertSee('Este enlace está expirado.')
+            ->assertSee('id="modal-chat-invite"', false)
+            ->assertSee('Cerrar');
+
+        $this->actingAs($invited)
+            ->getJson('/chat/grupo/invitacion/'.$invitation->token.'/datos')
+            ->assertStatus(410)
+            ->assertJsonPath('message', 'Este enlace está expirado.');
+    }
+
+    public function test_un_enlace_usado_o_eliminado_vuelve_al_panel_con_su_aviso(): void
+    {
+        $owner = $this->userWithChat('Dueno', UserRole::Participant);
+        $invited = $this->userWithChat('Invitado', UserRole::Participant);
+
+        $group = Conversation::create(['type' => 'group', 'name' => 'Cumpleaños', 'created_by' => $owner->id]);
+        $group->users()->attach([$owner->id]);
+
+        $used = GroupInvitation::create([
+            'conversation_id' => $group->id,
+            'invited_by' => $owner->id,
+            'token' => 'token-usado',
+            'accepted_at' => now(),
+        ]);
+
+        $this->actingAs($invited)
+            ->get('/chat/grupo/invitacion/'.$used->token)
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionHas('chat.invitation_notice', 'Este enlace ya fue utilizado.');
+
+        $this->actingAs($invited)
+            ->get('/chat/grupo/invitacion/token-eliminado')
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionHas('chat.invitation_notice', 'Este enlace fue eliminado.');
     }
 
     public function test_rechazar_la_invitacion_la_olvida(): void
@@ -1280,21 +1409,68 @@ class ChatTest extends TestCase
         $group->users()->attach([$owner->id]);
 
         $this->actingAs($owner)
-            ->postJson('/chat/grupo/' . $group->id . '/invitar', [])
+            ->postJson('/chat/grupo/'.$group->id.'/invitar', [])
             ->assertOk();
 
-        $token = \App\Models\GroupInvitation::query()->latest('id')->firstOrFail()->token;
+        $token = GroupInvitation::query()->latest('id')->firstOrFail()->token;
 
         $this->actingAs($invited)
-            ->get('/chat/grupo/invitacion/' . $token)
+            ->get('/chat/grupo/invitacion/'.$token)
             ->assertRedirect(route('dashboard'));
 
         $this->actingAs($invited)
-            ->postJson('/chat/grupo/invitacion/' . $token . '/rechazar')
+            ->postJson('/chat/grupo/invitacion/'.$token.'/rechazar')
             ->assertOk()
             ->assertSessionMissing('chat.invitation');
 
         $this->assertFalse($group->users()->whereKey($invited->id)->exists());
+    }
+
+    public function test_el_contenido_multimedia_trae_su_mensaje_para_ordenarlo(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $photo = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $luis->id,
+            'body' => '',
+            'type' => 'image',
+            'attachment_path' => 'chat/direct/1/foto.jpg',
+            'attachment_name' => 'foto.jpg',
+        ]);
+
+        $audio = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $luis->id,
+            'body' => '',
+            'type' => 'audio',
+            'attachment_path' => 'chat/direct/1/nota.m4a',
+            'attachment_name' => 'nota.m4a',
+        ]);
+
+        $second = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $ana->id,
+            'body' => '',
+            'type' => 'image',
+            'attachment_path' => 'chat/direct/1/foto2.jpg',
+            'attachment_name' => 'foto2.jpg',
+        ]);
+
+        $response = $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk();
+
+        $items = collect($response->json('items'));
+
+        // El servidor entrega lo más nuevo primero, pero cada elemento lleva
+        // su mensaje y su posición para poder pintarlos en orden de envío.
+        $this->assertSame([$second->id, $audio->id, $photo->id], $items->pluck('message_id')->all());
+        $this->assertSame(0, $items->first()['position']);
     }
 
     public function test_el_menu_de_la_conversacion_tiene_las_opciones_nuevas(): void
@@ -1340,7 +1516,7 @@ class ChatTest extends TestCase
         $message->forceFill(['created_at' => now()->subMinutes(5)])->save();
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/vaciar')
+            ->postJson('/chat/'.$conversation->id.'/vaciar')
             ->assertOk();
 
         $pivot = $conversation->fresh('users')->users->firstWhere('id', $ana->id)->pivot;
@@ -1349,7 +1525,7 @@ class ChatTest extends TestCase
         $this->assertNull($pivot->hidden_at);
 
         $this->actingAs($ana)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertOk()
             ->assertJsonCount(0, 'messages');
 
@@ -1371,7 +1547,7 @@ class ChatTest extends TestCase
         ChatMessage::create(['conversation_id' => $conversation->id, 'user_id' => $luis->id, 'body' => 'Hola']);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/eliminar')
+            ->postJson('/chat/'.$conversation->id.'/eliminar')
             ->assertOk();
 
         $this->actingAs($ana)
@@ -1415,7 +1591,7 @@ class ChatTest extends TestCase
         $nueva->forceFill(['updated_at' => now()->subMinutes(5)])->save();
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $vieja->id . '/favorito')
+            ->postJson('/chat/'.$vieja->id.'/favorito')
             ->assertOk()
             ->assertJsonPath('favorite', true);
 
@@ -1426,7 +1602,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('conversations.1.favorite', true);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $vieja->id . '/fijar')
+            ->postJson('/chat/'.$vieja->id.'/fijar')
             ->assertOk()
             ->assertJsonPath('pinned', true);
 
@@ -1439,12 +1615,12 @@ class ChatTest extends TestCase
 
         // Volver a pulsar quita la fijación y el favorito.
         $this->actingAs($ana)
-            ->postJson('/chat/' . $vieja->id . '/fijar')
+            ->postJson('/chat/'.$vieja->id.'/fijar')
             ->assertOk()
             ->assertJsonPath('pinned', false);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $vieja->id . '/favorito')
+            ->postJson('/chat/'.$vieja->id.'/favorito')
             ->assertOk()
             ->assertJsonPath('favorite', false);
     }
@@ -1467,7 +1643,7 @@ class ChatTest extends TestCase
 
         // Leído sin entrar al chat.
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/leer')
+            ->postJson('/chat/'.$conversation->id.'/leer')
             ->assertOk();
 
         $this->actingAs($ana)
@@ -1477,7 +1653,7 @@ class ChatTest extends TestCase
 
         // No leído: se revierte la lectura de toda la conversación.
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/no-leido')
+            ->postJson('/chat/'.$conversation->id.'/no-leido')
             ->assertOk();
 
         $this->actingAs($ana)
@@ -1503,7 +1679,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('moderation.0.id', $conversation->id);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/archivar')
+            ->postJson('/chat/'.$conversation->id.'/archivar')
             ->assertOk();
 
         $this->actingAs($admin)
@@ -1512,7 +1688,7 @@ class ChatTest extends TestCase
             ->assertJsonCount(0, 'moderation');
 
         $this->actingAs($admin)
-            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
             ->assertForbidden();
 
         $this->actingAs($ana)
@@ -1523,7 +1699,7 @@ class ChatTest extends TestCase
 
         // Deshacer el archivo la devuelve a la lista y a la moderación.
         $this->actingAs($ana)
-            ->deleteJson('/chat/' . $conversation->id . '/archivar')
+            ->deleteJson('/chat/'.$conversation->id.'/archivar')
             ->assertOk();
 
         $this->actingAs($ana)
@@ -1547,7 +1723,7 @@ class ChatTest extends TestCase
         $group->users()->attach([$admin->id, $ana->id]);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $group->id . '/archivar')
+            ->postJson('/chat/'.$group->id.'/archivar')
             ->assertStatus(422);
     }
 
@@ -1567,7 +1743,7 @@ class ChatTest extends TestCase
         ]);
 
         $this->actingAs($ana)
-            ->postJson('/chat/' . $conversation->id . '/fijar-mensaje/' . $message->id)
+            ->postJson('/chat/'.$conversation->id.'/fijar-mensaje/'.$message->id)
             ->assertOk()
             ->assertJsonPath('pinned_message.id', $message->id)
             ->assertJsonPath('pinned_message.body', 'Mensaje importante');
@@ -1578,7 +1754,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('conversations.0.pinned_message.id', $message->id);
 
         $this->actingAs($admin)
-            ->postJson('/chat/' . $conversation->id . '/fijar-mensaje/' . $message->id)
+            ->postJson('/chat/'.$conversation->id.'/fijar-mensaje/'.$message->id)
             ->assertForbidden();
 
         $this->actingAs($admin)
@@ -1587,7 +1763,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('moderation.0.pinned_message.id', $message->id);
 
         $this->actingAs($ana)
-            ->deleteJson('/chat/' . $conversation->id . '/mensaje-fijado')
+            ->deleteJson('/chat/'.$conversation->id.'/mensaje-fijado')
             ->assertOk();
 
         $this->assertNull($conversation->fresh()->pinned_message_id);
@@ -1647,12 +1823,454 @@ class ChatTest extends TestCase
         );
 
         $this->actingAs($ana)
-            ->deleteJson('/chat/' . $conversation->id . '/archivar')
+            ->deleteJson('/chat/'.$conversation->id.'/archivar')
             ->assertStatus(422);
 
         $this->actingAs($ana)
             ->getJson('/chat/resumen')
             ->assertOk()
             ->assertJsonPath('archived.0.id', $conversation->id);
+    }
+
+    /**
+     * Un mensaje eliminado se lleva su adjunto: no queda como residuo en la
+     * galería de multimedia ni en el almacenamiento.
+     */
+    public function test_eliminar_un_mensaje_borra_su_adjunto_de_la_galeria_y_del_disco(): void
+    {
+        Storage::fake('public');
+
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'file' => UploadedFile::fake()->image('foto.jpg'),
+            ])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+        $path = $message->attachment_path;
+
+        Storage::disk('public')->assertExists($path);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.kind', 'image');
+
+        $this->actingAs($ana)
+            ->postJson('/chat/mensajes/'.$message->id.'/eliminar')
+            ->assertOk();
+
+        // La galería ya no lo muestra y el archivo tampoco se queda en disco.
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(0, 'items');
+
+        $this->assertDatabaseMissing('chat_message_attachments', ['message_id' => $message->id]);
+        Storage::disk('public')->assertMissing($path);
+
+        $this->assertNull($message->fresh()->attachment_path);
+    }
+
+    /**
+     * Lo que se borró «de mi lado» tampoco aparece en la galería.
+     */
+    public function test_la_galeria_respeta_el_borrado_de_mi_lado(): void
+    {
+        Storage::fake('public');
+
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($luis)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'file' => UploadedFile::fake()->image('foto.jpg'),
+            ])
+            ->assertOk();
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(1, 'items');
+
+        // Se retrasa el mensaje para que el borrado de su lado lo deje atrás
+        // (la marca se guarda con precisión de segundos).
+        ChatMessage::query()->latest('id')->firstOrFail()->forceFill([
+            'created_at' => now()->subMinutes(5),
+        ])->save();
+
+        // Se borra de su lado: su galería deja de mostrarlo; la de Luis no.
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/limpiar')
+            ->assertOk();
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(0, 'items');
+
+        $this->actingAs($luis)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(1, 'items');
+    }
+
+    /**
+     * El texto y el adjunto de un mensaje eliminado tampoco se filtran en la
+     * vista previa de la lista de conversaciones.
+     */
+    public function test_la_lista_no_muestra_el_contenido_de_un_mensaje_eliminado(): void
+    {
+        Storage::fake('public');
+
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($luis)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => 'contenido reservado'])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+
+        $this->actingAs($ana)
+            ->getJson('/chat/resumen')
+            ->assertOk()
+            ->assertJsonPath('conversations.0.last_message', 'contenido reservado');
+
+        $this->actingAs($luis)
+            ->postJson('/chat/mensajes/'.$message->id.'/eliminar')
+            ->assertOk();
+
+        $this->actingAs($ana)
+            ->getJson('/chat/resumen')
+            ->assertOk()
+            ->assertJsonPath('conversations.0.last_message', 'Mensaje eliminado');
+    }
+
+    /**
+     * Al eliminar la conversación se borran también los archivos del disco.
+     */
+    public function test_eliminar_la_conversacion_borra_los_archivos(): void
+    {
+        Storage::fake('public');
+
+        $admin = $this->userWithChat('Admin', UserRole::Admin);
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$admin->id, $ana->id]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'file' => UploadedFile::fake()->image('foto.jpg'),
+            ])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+        $path = $message->attachment_path;
+
+        Storage::disk('public')->assertExists($path);
+
+        $this->actingAs($admin)
+            ->deleteJson('/chat/'.$conversation->id)
+            ->assertOk();
+
+        Storage::disk('public')->assertMissing($path);
+        $this->assertDatabaseMissing('chat_message_attachments', ['message_id' => $message->id]);
+    }
+
+    /**
+     * Borrar un adjunto de un mensaje con varios deja el mensaje vivo.
+     */
+    public function test_eliminar_un_adjunto_conserva_el_mensaje_si_quedan_mas(): void
+    {
+        Storage::fake('public');
+
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'files' => [
+                    UploadedFile::fake()->image('a.jpg'),
+                    UploadedFile::fake()->image('b.jpg'),
+                ],
+            ])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+        $attachments = $message->attachments()->orderBy('id')->get();
+        $borrado = $attachments->first();
+
+        $this->actingAs($ana)
+            ->postJson('/chat/adjuntos/'.$borrado->id.'/eliminar')
+            ->assertOk()
+            ->assertJsonPath('message_deleted', false);
+
+        $this->assertNull($message->fresh()->deleted_at);
+        $this->assertSame(1, $message->attachments()->count());
+        Storage::disk('public')->assertMissing($borrado->path);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(1, 'items');
+    }
+
+    /**
+     * Si era el último adjunto, el mensaje se elimina automáticamente.
+     */
+    public function test_eliminar_el_ultimo_adjunto_borra_el_mensaje(): void
+    {
+        Storage::fake('public');
+
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'file' => UploadedFile::fake()->image('unica.jpg'),
+            ])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+        $attachment = $message->attachments()->firstOrFail();
+        $path = $attachment->path;
+
+        $this->actingAs($ana)
+            ->postJson('/chat/adjuntos/'.$attachment->id.'/eliminar')
+            ->assertOk()
+            ->assertJsonPath('message_deleted', true)
+            ->assertJsonPath('deleted_label', 'Eliminado por el autor');
+
+        $message->refresh();
+
+        $this->assertNotNull($message->deleted_at);
+        $this->assertSame(0, $message->attachments()->count());
+        Storage::disk('public')->assertMissing($path);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(0, 'items');
+    }
+
+    /**
+     * Solo el autor, el dueño del grupo o un administrador borran el contenido.
+     */
+    public function test_solo_el_autor_o_la_moderacion_elimina_un_adjunto(): void
+    {
+        Storage::fake('public');
+
+        $admin = $this->userWithChat('Admin', UserRole::Admin);
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($luis)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'file' => UploadedFile::fake()->image('ajena.jpg'),
+            ])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+        $attachment = $message->attachments()->firstOrFail();
+
+        $this->actingAs($ana)
+            ->postJson('/chat/adjuntos/'.$attachment->id.'/eliminar')
+            ->assertForbidden();
+
+        $this->assertSame(1, $message->attachments()->count());
+        $this->assertNull($message->fresh()->deleted_at);
+
+        // La moderación sí puede.
+        $this->actingAs($admin)
+            ->postJson('/chat/adjuntos/'.$attachment->id.'/eliminar')
+            ->assertOk()
+            ->assertJsonPath('message_deleted', true);
+
+        $message->refresh();
+        $this->assertNotNull($message->deleted_at);
+        $this->assertTrue($message->deleted_by_admin);
+    }
+
+    /**
+     * La galería indica qué contenido puede eliminar quien la consulta.
+     */
+    public function test_la_galeria_indica_que_contenido_se_puede_eliminar(): void
+    {
+        Storage::fake('public');
+
+        $admin = $this->userWithChat('Admin', UserRole::Admin);
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'file' => UploadedFile::fake()->image('propia.jpg'),
+            ])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+        $attachment = $message->attachments()->firstOrFail();
+
+        $this->assertNotNull($attachment->id);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonPath('items.0.can_delete', true)
+            ->assertJsonPath('items.0.id', $attachment->id);
+
+        $this->actingAs($luis)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonPath('items.0.can_delete', false);
+
+        $this->actingAs($admin)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonPath('items.0.can_delete', true);
+    }
+
+    /**
+     * Eliminar un mensaje con enlace y adjunto no deja ninguno de los dos.
+     */
+    public function test_eliminar_un_mensaje_limpia_enlaces_y_adjuntos(): void
+    {
+        Storage::fake('public');
+
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'body' => 'mira esto',
+                'file' => UploadedFile::fake()->image('foto.jpg'),
+                'link_url' => 'https://ejemplo.com/promo',
+                'link_title' => 'Promo',
+            ])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+        $path = $message->attachment_path;
+
+        $this->assertSame('https://ejemplo.com/promo', $message->link_url);
+        Storage::disk('public')->assertExists($path);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/mensajes/'.$message->id.'/eliminar')
+            ->assertOk();
+
+        $message->refresh();
+
+        $this->assertNotNull($message->deleted_at);
+        $this->assertNull($message->link_url);
+        $this->assertNull($message->link_title);
+        $this->assertNull($message->attachment_path);
+        $this->assertNull($message->attachment_name);
+        Storage::disk('public')->assertMissing($path);
+        $this->assertDatabaseMissing('chat_message_attachments', ['message_id' => $message->id]);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(0, 'items');
+    }
+
+    /**
+     * «Vaciar» borra de mi lado los mensajes, sus adjuntos y el mensaje fijado,
+     * sin tocar lo que ven los demás.
+     */
+    public function test_vaciar_oculta_adjuntos_mensajes_y_el_mensaje_fijado(): void
+    {
+        Storage::fake('public');
+
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', [
+                'body' => 'foto para el grupo',
+                'file' => UploadedFile::fake()->image('foto.jpg'),
+            ])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/fijar-mensaje/'.$message->id)
+            ->assertOk();
+
+        // Se retrasa el mensaje para que el vaciado lo deje atrás.
+        $message->forceFill(['created_at' => now()->subMinutes(5)])->save();
+        $conversation->forceFill(['updated_at' => now()->subMinutes(5)])->save();
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/vaciar')
+            ->assertOk();
+
+        // Para Ana ya no hay mensajes, ni adjuntos, ni cintillo.
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
+            ->assertOk()
+            ->assertJsonCount(0, 'messages');
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(0, 'items');
+
+        $this->actingAs($ana)
+            ->getJson('/chat/resumen')
+            ->assertOk()
+            ->assertJsonPath('conversations.0.pinned_message', null)
+            ->assertJsonPath('conversations.0.last_message', null);
+
+        // Para Luis sigue todo.
+        $this->actingAs($luis)
+            ->getJson('/chat/'.$conversation->id.'/media')
+            ->assertOk()
+            ->assertJsonCount(1, 'items');
+
+        $this->actingAs($luis)
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
+            ->assertOk()
+            ->assertJsonPath('messages.0.body', 'foto para el grupo');
+
+        $this->actingAs($luis)
+            ->getJson('/chat/resumen')
+            ->assertOk()
+            ->assertJsonPath('conversations.0.pinned_message.id', $message->id);
     }
 }

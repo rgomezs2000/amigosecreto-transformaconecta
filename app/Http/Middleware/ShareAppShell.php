@@ -89,6 +89,8 @@ class ShareAppShell
                 'dollarRate' => $dollarRate,
                 // Invitación a un grupo pendiente de mostrar como modal al entrar.
                 'chatInvitation' => $request->session()->get('chat.invitation'),
+                // Motivo por el que un enlace ya no sirve: expirado, usado o eliminado.
+                'chatInvitationNotice' => $request->session()->pull('chat.invitation_notice'),
             ]);
         }
 

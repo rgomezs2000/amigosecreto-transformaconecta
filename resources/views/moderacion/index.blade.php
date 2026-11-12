@@ -33,9 +33,23 @@
                 <div>
                     <p class="dashboard-eyebrow">Reportes del chat</p>
                     <p class="moderacion-summary__total" data-moderation-count="reports">{{ format_count($total) }}</p>
+                    <div class="moderacion-summary__counts" aria-label="Reportes por estado">
+                        <span class="moderacion-summary__count">
+                            <strong data-moderation-count="pending">{{ format_count($pendientes) }}</strong>
+                            Por atender
+                        </span>
+                        <span class="moderacion-summary__count">
+                            <strong data-moderation-count="attending">{{ format_count($atendiendo) }}</strong>
+                            Atendiendo
+                        </span>
+                        <span class="moderacion-summary__count">
+                            <strong data-moderation-count="closed">{{ format_count($cerrados) }}</strong>
+                            Cerrados
+                        </span>
+                    </div>
                     <p class="notification-row__hint">
-                        Este apartado es de solo lectura: recopila los reportes hechos en el chat.
-                        Desde cada fila puedes abrir la conversación para revisarla.
+                        Los reportes pasan por «Por atender», «Atendiendo» y «Cerrado». Abre el detalle
+                        para tomar el caso; solo quien lo toma puede cerrarlo, con observación y confirmación.
                     </p>
                 </div>
             </section>
@@ -45,6 +59,37 @@
                     <label for="moderacion-search" class="form-label">Buscar reporte</label>
                     <input type="search" class="form-control" id="moderacion-search"
                            placeholder="Motivo, persona o mensaje..." autocomplete="off">
+                </div>
+
+                <div class="moderacion-filter" id="moderacion-report-filter">
+                    <label for="moderacion-filter-type" class="form-label">Filtrar por</label>
+                    <select class="form-select" id="moderacion-filter-type">
+                        <option value="all">Todos los reportes</option>
+                        <option value="date">Por fecha</option>
+                        <option value="status">Estado</option>
+                    </select>
+
+                    <div class="moderacion-filter__panel" id="moderacion-filter-date" hidden>
+                        <label class="moderacion-filter__field">
+                            <span>Desde</span>
+                            <input type="datetime-local" class="form-control" id="moderacion-filter-from">
+                        </label>
+                        <label class="moderacion-filter__field">
+                            <span>Hasta</span>
+                            <input type="datetime-local" class="form-control" id="moderacion-filter-to">
+                        </label>
+                    </div>
+
+                    <div class="moderacion-filter__panel" id="moderacion-filter-status-panel" hidden>
+                        <label class="moderacion-filter__field">
+                            <span>Estado</span>
+                            <select class="form-select" id="moderacion-filter-status">
+                                <option value="pendiente">Por atender</option>
+                                <option value="atendiendo">Atendiendo</option>
+                                <option value="cerrado">Cerrado</option>
+                            </select>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="roles-actions">
@@ -60,6 +105,7 @@
                     <thead>
                         <tr>
                             <th scope="col" class="roles-id">Fecha</th>
+                            <th scope="col" class="roles-name">Estado</th>
                             <th scope="col" class="roles-name">Reportado por</th>
                             <th scope="col" class="roles-name">Autor del mensaje</th>
                             <th scope="col" class="roles-name">Motivo</th>
@@ -79,9 +125,9 @@
                     <p class="dashboard-eyebrow">Bloqueos entre usuarios</p>
                     <p class="moderacion-summary__total" data-moderation-count="blocks">{{ format_count($usuarios) }}</p>
                     <p class="notification-row__hint">
-                        Total de bloqueos activos entre usuarios. Con «Gestionar bloqueos» eliges a quién
-                        tiene bloqueado cada uno: al pasar a «Bloqueados» se crea el bloqueo y al volver a
-                        «Desbloqueados» se elimina.
+                        Total de bloqueos activos entre usuarios. Con el botón de bloqueos de cada
+                        persona eliges a quién tiene bloqueado: al pasar a «Bloqueados» se crea el
+                        bloqueo y al volver a «Desbloqueados» se elimina.
                     </p>
                 </div>
             </section>
@@ -91,6 +137,24 @@
                     <label for="moderacion-usuarios-search" class="form-label">Buscar usuario</label>
                     <input type="search" class="form-control" id="moderacion-usuarios-search"
                            placeholder="Nombre, usuario o correo..." autocomplete="off">
+                </div>
+
+                <div class="moderacion-filter" id="moderacion-usuarios-filter">
+                    <label for="moderacion-usuarios-filter-type" class="form-label">Filtrar por</label>
+                    <select class="form-select" id="moderacion-usuarios-filter-type">
+                        <option value="all">Todos los usuarios</option>
+                        <option value="role">Por rol</option>
+                    </select>
+
+                    <div class="moderacion-filter__panel" id="moderacion-usuarios-filter-role" hidden>
+                        <label class="moderacion-filter__field">
+                            <span>Rol</span>
+                            <select class="form-select" id="moderacion-usuarios-role">
+                                <option value="admin">Administrador</option>
+                                <option value="participant">Participante</option>
+                            </select>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="roles-actions">
@@ -124,9 +188,9 @@
                     <p class="dashboard-eyebrow">Vetados de grupo</p>
                     <p class="moderacion-summary__total" data-moderation-count="bans">{{ format_count($grupos) }}</p>
                     <p class="notification-row__hint">
-                        Total de vetos activos en grupos. Con «Ver baneados» eliges quién está vetado en cada
-                        grupo: al pasar a «Vetados» se aplica el veto y, si la persona está dentro del
-                        grupo, se le saca. Al volver a «Disponibles» se retira el veto.
+                        Total de vetos activos en grupos. Con el botón de vetados de cada grupo eliges
+                        quién está vetado: al pasar a «Vetados» se aplica el veto y, si la persona está
+                        dentro del grupo, se le saca. Al volver a «Disponibles» se retira el veto.
                     </p>
                 </div>
             </section>
@@ -151,6 +215,7 @@
                     <thead>
                         <tr>
                             <th scope="col" class="roles-name">Grupo</th>
+                            <th scope="col" class="roles-name">Dueño</th>
                             <th scope="col" class="roles-id">Miembros</th>
                             <th scope="col" class="roles-id">Vetados</th>
                             <th scope="col" class="roles-actions">Acciones</th>
@@ -167,6 +232,8 @@
          data-url-usuarios="{{ route('moderacion.bloqueos.usuarios') }}"
          data-url-grupos="{{ route('moderacion.grupos') }}"
          data-url-contadores="{{ route('moderacion.contadores') }}"
+         data-url-tomar="{{ route('moderacion.reportes.tomar', ['report' => '__ID__']) }}"
+         data-url-cerrar="{{ route('moderacion.reportes.cerrar', ['report' => '__ID__']) }}"
          data-csrf="{{ csrf_token() }}"
          hidden></div>
 
@@ -176,6 +243,22 @@
                 <div class="perfil-data__item">
                     <dt>Fecha</dt>
                     <dd id="moderacion-detail-date"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Estado</dt>
+                    <dd id="moderacion-detail-status"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Asignado a</dt>
+                    <dd id="moderacion-detail-assigned"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Tomado el</dt>
+                    <dd id="moderacion-detail-taken"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Observación al tomar</dt>
+                    <dd id="moderacion-detail-attention"></dd>
                 </div>
                 <div class="perfil-data__item">
                     <dt>Reportado por</dt>
@@ -197,15 +280,77 @@
                     <dt>Mensaje reportado</dt>
                     <dd id="moderacion-detail-message"></dd>
                 </div>
+                <div class="perfil-data__item">
+                    <dt>Cerrado el</dt>
+                    <dd id="moderacion-detail-closed-at"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Cerrado por</dt>
+                    <dd id="moderacion-detail-closed-by"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Observación de cierre</dt>
+                    <dd id="moderacion-detail-close-observation"></dd>
+                </div>
             </dl>
         </x-slot:body>
 
         <x-slot:footer>
+            <button type="button" class="btn btn-primary" id="moderacion-detail-take" hidden>
+                <i class="fa-solid fa-hand" aria-hidden="true"></i>
+                <span>Tomar caso</span>
+            </button>
+            <button type="button" class="btn btn-success" id="moderacion-detail-close" hidden>
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                <span>Cerrar caso</span>
+            </button>
             <a class="btn btn-primary" id="moderacion-detail-chat" href="#" hidden>
                 <i class="fa-solid fa-comments" aria-hidden="true"></i>
                 <span>Ir al chat</span>
             </a>
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+        </x-slot:footer>
+    </x-app-modal>
+
+    <x-app-modal id="modal-moderacion-take" title="Tomar caso">
+        <x-slot:body>
+            <p class="chat-hint">
+                Al tomar el caso queda asociado a tu usuario y pasa a «Atendiendo».
+                Solo tú podrás cerrarlo.
+            </p>
+            <label class="form-label" for="moderacion-take-observation">Observación al tomar (opcional)</label>
+            <textarea class="form-control" id="moderacion-take-observation" rows="3" maxlength="1000"></textarea>
+            <p class="field-message" id="moderacion-take-error" role="status"></p>
+        </x-slot:body>
+
+        <x-slot:footer>
+            <button type="button" class="btn btn-primary" id="moderacion-take-confirm">Tomar caso</button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        </x-slot:footer>
+    </x-app-modal>
+
+    <x-app-modal id="modal-moderacion-close" title="Cerrar caso">
+        <x-slot:body>
+            <p class="chat-hint">
+                Solo el administrador que tomó el caso puede cerrarlo. La observación
+                de cierre es obligatoria.
+            </p>
+            <label class="form-label" for="moderacion-close-observation">Observación de cierre</label>
+            <textarea class="form-control" id="moderacion-close-observation" rows="4" maxlength="2000"
+                      required></textarea>
+            <p class="field-message" id="moderacion-close-error" role="status"></p>
+
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="moderacion-close-confirmed">
+                <label class="form-check-label" for="moderacion-close-confirmed">
+                    Confirmo que el reporte quedó cerrado.
+                </label>
+            </div>
+        </x-slot:body>
+
+        <x-slot:footer>
+            <button type="button" class="btn btn-success" id="moderacion-close-confirm">Sí, cerrar caso</button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">No cerrar</button>
         </x-slot:footer>
     </x-app-modal>
 

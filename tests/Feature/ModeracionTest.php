@@ -72,7 +72,7 @@ class ModeracionTest extends TestCase
         return [$conversation, $message, $ana, $luis];
     }
 
-    public function test_el_administrador_ve_los_reportes_en_solo_lectura(): void
+    public function test_el_administrador_ve_los_reportes_y_su_flujo(): void
     {
         [$conversation, $message, $ana] = $this->conversationWithReport();
 
@@ -82,7 +82,7 @@ class ModeracionTest extends TestCase
             ->get('/administracion/moderacion')
             ->assertOk()
             ->assertSee('Reportes del chat')
-            ->assertSee('solo lectura');
+            ->assertSee('tomar el caso');
 
         $response = $this->actingAs($admin)
             ->getJson('/moderacion/datos?draw=1&start=0&length=10')
@@ -232,7 +232,9 @@ class ModeracionTest extends TestCase
         $this->assertSame(2, $rows[$ana->id]['blocked_count']);
         $this->assertSame(0, $rows[$luis->id]['blocked_count']);
         $this->assertSame('Ana', $rows[$ana->id]['name_raw']);
-        $this->assertStringContainsString('Gestionar bloqueos', $rows[$ana->id]['actions']);
+        $this->assertStringContainsString('moderacion-bloqueos', $rows[$ana->id]['actions']);
+        $this->assertStringContainsString('title="Gestionar bloqueos', $rows[$ana->id]['actions']);
+        $this->assertStringNotContainsString('<span>', $rows[$ana->id]['actions']);
     }
 
     public function test_el_listado_de_bloqueos_se_puede_buscar(): void
@@ -420,10 +422,12 @@ class ModeracionTest extends TestCase
             ->assertOk()
             ->assertJsonPath('recordsTotal', 1)
             ->assertJsonPath('data.0.name_raw', 'Cumpleaños')
+            ->assertJsonPath('data.0.owner_raw', 'Admin')
             ->assertJsonPath('data.0.members', 3)
             ->assertJsonPath('data.0.banned', 1);
 
-        $this->assertStringContainsString('Ver baneados', $response->json('data.0.actions'));
+        $this->assertStringContainsString('moderacion-baneados', $response->json('data.0.actions'));
+        $this->assertStringNotContainsString('<span>', $response->json('data.0.actions'));
     }
 
     public function test_el_detalle_de_vetados_separa_vetados_y_disponibles(): void
@@ -573,6 +577,215 @@ class ModeracionTest extends TestCase
         $this->assertSame(0, ChatBlock::query()->count());
         $this->assertSame(0, GroupBan::query()->count());
         $this->assertNotNull($conversation->fresh());
+    }
+
+    public function test_los_reportes_se_filtran_por_estado_y_por_rango_de_fecha(): void
+    {
+        [$conversation, $message, $ana] = $this->conversationWithReport();
+
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $report = ChatReport::query()->firstOrFail();
+        $report->update(['status' => ChatReport::STATUS_ATTENDING]);
+
+        $closed = ChatReport::create([
+            'message_id' => $message->id,
+            'reporter_id' => $ana->id,
+            'reason' => 'Otro reporte cerrado',
+            'status' => ChatReport::STATUS_CLOSED,
+        ]);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/datos?draw=1&start=0&length=10')
+            ->assertOk()
+            ->assertJsonPath('recordsTotal', 2);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/datos?'.http_build_query([
+                'draw' => 1,
+                'start' => 0,
+                'length' => 10,
+                'filter_type' => 'status',
+                'status' => ChatReport::STATUS_ATTENDING,
+            ]))
+            ->assertOk()
+            ->assertJsonPath('recordsTotal', 2)
+            ->assertJsonPath('recordsFiltered', 1)
+            ->assertJsonPath('data.0.id', $report->id);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/datos?'.http_build_query([
+                'draw' => 1,
+                'start' => 0,
+                'length' => 10,
+                'filter_type' => 'status',
+                'status' => ChatReport::STATUS_CLOSED,
+            ]))
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', 1)
+            ->assertJsonPath('data.0.id', $closed->id);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/datos?'.http_build_query([
+                'draw' => 1,
+                'start' => 0,
+                'length' => 10,
+                'filter_type' => 'date',
+                'date_from' => now()->subDay()->format('Y-m-d\TH:i'),
+                'date_to' => now()->addDay()->format('Y-m-d\TH:i'),
+            ]))
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', 2);
+    }
+
+    public function test_los_bloqueos_se_filtran_por_rol(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $user = $this->makeUser('Ana', UserRole::Participant, ['chat']);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/bloqueos/usuarios?'.http_build_query([
+                'draw' => 1,
+                'start' => 0,
+                'length' => 10,
+                'filter_type' => 'role',
+                'role' => 'admin',
+            ]))
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', 1)
+            ->assertJsonPath('data.0.name_raw', 'Admin');
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/bloqueos/usuarios?'.http_build_query([
+                'draw' => 1,
+                'start' => 0,
+                'length' => 10,
+                'filter_type' => 'role',
+                'role' => 'participant',
+            ]))
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', 1)
+            ->assertJsonPath('data.0.name_raw', 'Ana');
+    }
+
+    public function test_los_contadores_de_reportes_incluyen_los_tres_estados(): void
+    {
+        [$conversation, $message, $ana] = $this->conversationWithReport();
+
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/contadores')
+            ->assertOk()
+            ->assertJsonPath('reports', 1)
+            ->assertJsonPath('pending', 1)
+            ->assertJsonPath('attending', 0)
+            ->assertJsonPath('closed', 0);
+    }
+
+    public function test_el_reporte_pasa_por_atender_atendiendo_y_cerrado(): void
+    {
+        [$conversation, $message, $ana] = $this->conversationWithReport();
+
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $otherAdmin = $this->makeUser('Otro Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $report = ChatReport::query()->firstOrFail();
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/datos?draw=1&start=0&length=10')
+            ->assertOk()
+            ->assertJsonPath('data.0.status_label', 'Por atender')
+            ->assertJsonPath('data.0.can_take', true)
+            ->assertJsonPath('data.0.can_close', false);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar', [
+                'attention_observation' => 'Revisando el caso',
+            ])
+            ->assertOk()
+            ->assertJsonPath('report.status_label', 'Atendiendo')
+            ->assertJsonPath('report.assigned_raw', 'Admin');
+
+        $this->assertDatabaseHas('chat_reports', [
+            'id' => $report->id,
+            'status' => ChatReport::STATUS_ATTENDING,
+            'assigned_to' => $admin->id,
+            'attention_observation' => 'Revisando el caso',
+        ]);
+
+        $this->assertStringContainsString(
+            'Ir al chat',
+            $this->actingAs($admin)->getJson('/moderacion/datos?draw=1&start=0&length=10')->json('data.0.actions')
+        );
+
+        // Otro administrador ya no puede tomarlo.
+        $this->actingAs($otherAdmin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar')
+            ->assertStatus(409);
+
+        $this->actingAs($otherAdmin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/cerrar', [
+                'close_observation' => 'Intento ajeno',
+                'confirmed' => 1,
+            ])
+            ->assertForbidden();
+
+        // El asignado no puede cerrar sin observación ni sin confirmación.
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/cerrar', ['confirmed' => 1])
+            ->assertStatus(422);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/cerrar', [
+                'close_observation' => 'Caso resuelto',
+            ])
+            ->assertStatus(422);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/cerrar', [
+                'close_observation' => 'Caso resuelto',
+                'confirmed' => 1,
+            ])
+            ->assertOk()
+            ->assertJsonPath('report.status_label', 'Cerrado');
+
+        $report->refresh();
+
+        $this->assertSame(ChatReport::STATUS_CLOSED, $report->status);
+        $this->assertSame($admin->id, $report->closed_by);
+        $this->assertSame('Caso resuelto', $report->close_observation);
+        $this->assertNotNull($report->closed_at);
+        $this->assertNotNull($report->taken_at);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/datos?draw=1&start=0&length=10')
+            ->assertOk()
+            ->assertJsonPath('data.0.status_label', 'Cerrado')
+            ->assertJsonPath('data.0.can_take', false)
+            ->assertJsonPath('data.0.can_close', false);
+
+        $this->assertStringNotContainsString(
+            'Ir al chat',
+            $this->actingAs($admin)->getJson('/moderacion/datos?draw=1&start=0&length=10')->json('data.0.actions')
+        );
+    }
+
+    public function test_las_acciones_de_caso_exigen_el_modulo_de_moderacion(): void
+    {
+        [$conversation] = $this->conversationWithReport();
+
+        $user = $this->makeUser('Curioso', UserRole::Participant, ['chat']);
+        $report = ChatReport::query()->firstOrFail();
+
+        $this->actingAs($user)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar')
+            ->assertForbidden();
+
+        $this->actingAs($user)
+            ->postJson('/moderacion/reportes/'.$report->id.'/cerrar', [
+                'close_observation' => 'No debería',
+                'confirmed' => 1,
+            ])
+            ->assertForbidden();
     }
 
     public function test_las_rutas_de_reporte_siguen_siendo_de_solo_lectura(): void

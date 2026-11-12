@@ -363,6 +363,9 @@
                             : '';
 
                         return '<button type="button" class="chat-media chat-media-open" data-index="' + index + '"' +
+                            ' data-message-id="' + message.id + '"' +
+                            ' data-attachment-id="' + (item.id || '') + '"' +
+                            ' data-can-delete="' + (message.can_delete ? '1' : '0') + '"' +
                             ' data-src="' + item.url + '" data-type="' + item.type + '" data-name="' + escape(item.name || '') + '">' +
                             (item.type === 'image'
                                 ? '<img src="' + item.url + '" alt="Imagen adjunta">'
@@ -373,11 +376,15 @@
 
                 if (item.type === 'pdf') {
                     attachment = '<div class="chat-attachment__pdf chat-media-open" data-lightbox="pdf" data-src="' + item.url +
+                        '" data-message-id="' + message.id + '" data-attachment-id="' + (item.id || '') +
+                        '" data-can-delete="' + (message.can_delete ? '1' : '0') +
                         '" data-name="' + escape(item.name) + '"><i class="fa-regular fa-file-pdf" aria-hidden="true"></i> ' +
                         escape(item.name) + '</div>';
                 } else if (item.type === 'audio') {
                     attachment = '<div class="chat-audio">' +
                         '<canvas class="chat-wave chat-audio-open" width="220" height="40" data-url="' + item.url +
+                        '" data-message-id="' + message.id + '" data-attachment-id="' + (item.id || '') +
+                        '" data-can-delete="' + (message.can_delete ? '1' : '0') +
                         '" data-name="' + escape(item.name) + '"></canvas>' +
                         '<audio class="chat-attachment__audio" controls src="' + item.url + '"></audio>' +
                         '</div>';
@@ -801,6 +808,20 @@
             drawWaveforms();
         }
 
+        // Vuelve a cargar la conversación desde cero. Necesario tras «vaciar»:
+        // con el sondeo incremental las burbujas viejas no se retiraban solas.
+        function reloadConversationMessages() {
+            if (!currentId) {
+                return;
+            }
+
+            forgetPaintedMessages();
+            lastData = { messages: [], new_count: 0 };
+            galleryItems = [];
+            $('#chat-messages').html('<p class="chat-hint">Cargando mensajes...</p>');
+            loadMessages();
+        }
+
         // Refresca solo las burbujas indicadas (tras editar, borrar o reaccionar)
         // sin pedir el historial ni repintar el resto de la conversación.
         function refreshMessages(ids) {
@@ -848,6 +869,7 @@
 
                     if (!painted) {
                         lastData = response;
+                        applyReadOnly(response.conversation);
                         setMentionCatalog(response.mentionables || []);
                         renderMessages();
                         return;
@@ -952,6 +974,14 @@
             }
 
             return 'offline';
+        }
+
+        // Chat del evento: sin cuadro de escritura, solo avisos.
+        function applyReadOnly(conversation) {
+            var readOnly = !!(conversation && conversation.read_only);
+
+            $('#chat-widget').toggleClass('is-read-only', readOnly);
+            $('#chat-readonly').prop('hidden', !readOnly);
         }
 
         function openConversation(id, title, subtitle, moderation) {
@@ -1302,6 +1332,30 @@
         }
 
         /**
+         * Coloca un menú contextual junto al puntero sin que se salga de la
+         * pantalla. Si no cabe hacia abajo, se abre hacia arriba del clic.
+         */
+        function placeMenu($menu, event) {
+            var margin = 8;
+            var width = $menu.outerWidth();
+            var height = $menu.outerHeight();
+            var maxLeft = Math.max(margin, window.innerWidth - width - margin);
+            var left = Math.max(margin, Math.min(event.clientX, maxLeft));
+            var top = event.clientY;
+
+            if (top + height + margin > window.innerHeight) {
+                top = event.clientY - height;
+            }
+
+            top = Math.max(margin, Math.min(top, window.innerHeight - height - margin));
+
+            $menu.css({
+                top: top + 'px',
+                left: left + 'px'
+            });
+        }
+
+        /**
          * Menú de una persona de la pestaña Usuarios:
          * silenciar, bloquear/desbloquear y reportar.
          */
@@ -1330,11 +1384,7 @@
             $menu.find('[data-user-action="unblock"]').prop('hidden', !activeUser.blocked);
 
             $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
-
-            $menu.css({
-                top: Math.max(8, Math.min(event.clientY, window.innerHeight - $menu.outerHeight() - 8)) + 'px',
-                left: Math.max(8, Math.min(event.clientX, window.innerWidth - $menu.outerWidth() - 8)) + 'px'
-            });
+            placeMenu($menu, event);
         }
 
         function showListMenu(event, $item) {
@@ -1397,15 +1447,7 @@
             $menu.find('[data-list-action="banned"]').prop('hidden', !canManage);
 
             $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
-
-            // Mantener el menú dentro de la ventana, aunque el clic sea al borde.
-            var width = $menu.outerWidth();
-            var height = $menu.outerHeight();
-
-            $menu.css({
-                top: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8)) + 'px',
-                left: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)) + 'px'
-            });
+            placeMenu($menu, event);
         }
 
         function showContextMenu(event, $message) {
@@ -1448,10 +1490,8 @@
             $menu.find('[data-action="pin"]').prop('hidden', !canPin || messageId === pinnedId);
             $menu.find('[data-action="unpin"]').prop('hidden', !canPin || messageId !== pinnedId);
 
-            $menu.prop('hidden', false).css({
-                top: event.clientY + 'px',
-                left: event.clientX + 'px'
-            });
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+            placeMenu($menu, event);
         }
 
         function buildEmojiPalette(mode) {
@@ -1631,11 +1671,7 @@
             var $menu = $('#chat-pin-menu');
 
             $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
-
-            $menu.css({
-                top: Math.max(8, Math.min(event.clientY, window.innerHeight - $menu.outerHeight() - 8)) + 'px',
-                left: Math.max(8, Math.min(event.clientX, window.innerWidth - $menu.outerWidth() - 8)) + 'px'
-            });
+            placeMenu($menu, event);
         });
 
         $('#chat-pin-menu').on('click', '[data-pin-action="unpin"]', function () {
@@ -1774,7 +1810,7 @@
                         post(chatBase + '/' + target.id + '/vaciar', {})
                             .done(function () {
                                 if (currentId === target.id) {
-                                    loadMessages();
+                                    reloadConversationMessages();
                                 }
 
                                 refresh();
@@ -2159,6 +2195,32 @@
             }
         });
 
+        // Pegar (Ctrl+V) archivos o capturas en la barra del mensaje: se
+        // adjuntan a la bandeja con la misma vista previa que al elegirlos o
+        // arrastrarlos, y admite varios de una sola vez.
+        $('#chat-conversation').on('paste', function (event) {
+            if (!currentId) {
+                return;
+            }
+
+            var $target = $(event.target);
+
+            // Los demás campos del panel conservan el pegado normal.
+            if ($target.is('input, textarea') && !$target.is('#chat-input')) {
+                return;
+            }
+
+            var files = normalizePastedFiles(clipboardFiles(event));
+
+            if (!files.length) {
+                return;
+            }
+
+            // Evita que el navegador inserte la imagen dentro del editor.
+            event.preventDefault();
+            addTrayFiles(files);
+        });
+
         $('#chat-form').on('submit', function (event) {
             event.preventDefault();
 
@@ -2277,11 +2339,26 @@
            ------------------------------------------------------------------ */
 
         var invitationToken = $widget.attr('data-invitation') || '';
+        var invitationNotice = $widget.attr('data-invitation-notice') || '';
         var inviteModalElement = document.getElementById('modal-chat-invite');
         var inviteModal = inviteModalElement && window.bootstrap && window.bootstrap.Modal
             ? window.bootstrap.Modal.getOrCreateInstance(inviteModalElement)
             : null;
         var invitationGroup = 'Grupo';
+
+        function showInvitationNotice(message) {
+            invitationToken = '';
+
+            $('#chat-invite-text').text(message || 'Este enlace ya no está disponible.');
+            $('#chat-invite-group').text('');
+            $('#chat-invite-error').text('');
+            $('#chat-invite-accept').prop('hidden', true);
+            $('#chat-invite-reject').text('Cerrar');
+
+            if (inviteModal) {
+                inviteModal.show();
+            }
+        }
 
         function openInvitation() {
             if (!invitationToken || !inviteModal) {
@@ -2297,12 +2374,14 @@
                         (response.inviter ? response.inviter + ' te invitó' : 'Te invitaron') + ' al grupo:'
                     );
                     $('#chat-invite-error').text('');
+                    $('#chat-invite-accept').prop('hidden', false);
+                    $('#chat-invite-reject').text('Rechazar');
 
                     inviteModal.show();
                 })
-                .fail(function () {
-                    // Invitación vencida o ya usada: no se vuelve a ofrecer.
-                    invitationToken = '';
+                .fail(function (xhr) {
+                    // El enlace pudo expirar, usarse o eliminarse después de abrirlo.
+                    showInvitationNotice((xhr.responseJSON || {}).message);
                 });
         }
 
@@ -2355,7 +2434,11 @@
                 });
         });
 
-        openInvitation();
+        if (invitationToken) {
+            openInvitation();
+        } else if (invitationNotice) {
+            showInvitationNotice(invitationNotice);
+        }
 
         function sendPending(pending) {
             if (!currentId) {
@@ -2536,6 +2619,18 @@
                 return;
             }
 
+            var capacity = 6 - pendingFiles.length;
+
+            if (capacity <= 0) {
+                alertDialog('Ya tienes 6 archivos adjuntos. Quita alguno para añadir otro.');
+                return;
+            }
+
+            if (list.length > capacity) {
+                list = list.slice(0, capacity);
+                alertDialog('Se adjuntaron ' + capacity + ' archivos: el máximo por mensaje es 6.');
+            }
+
             var currentHasMedia = pendingFiles.some(fileIsMedia);
             var currentHasOther = pendingFiles.some(function (file) { return !fileIsMedia(file); });
             var incomingHasMedia = list.some(fileIsMedia);
@@ -2581,17 +2676,103 @@
             });
         }
 
-        $('#chat-tray-items').on('click', '.chat-tray__item', function () {
-            var index = parseInt($(this).data('index'), 10) || 0;
-            var items = pendingFiles.map(function (file) {
+        /**
+         * Archivos que trae el portapapeles (copiar archivos del explorador,
+         * capturas de pantalla, imágenes copiadas de otra web...).
+         */
+        function clipboardFiles(event) {
+            var clipboard = event.clipboardData || (event.originalEvent && event.originalEvent.clipboardData);
+
+            if (!clipboard) {
+                return [];
+            }
+
+            var files = clipboard.files && clipboard.files.length
+                ? Array.prototype.slice.call(clipboard.files)
+                : [];
+
+            if (!files.length && clipboard.items && clipboard.items.length) {
+                Array.prototype.forEach.call(clipboard.items, function (item) {
+                    if (!item || item.kind !== 'file' || typeof item.getAsFile !== 'function') {
+                        return;
+                    }
+
+                    var file = item.getAsFile();
+
+                    if (file) {
+                        files.push(file);
+                    }
+                });
+            }
+
+            return files.filter(function (file) {
+                return file && file.size > 0;
+            });
+        }
+
+        /**
+         * Las capturas y las imágenes copiadas suelen llegar sin nombre útil
+         * (o todas como «image.png»); se les da uno distinto a cada una.
+         */
+        function pastedFileName(file, index) {
+            var name = String(file.name || '').trim();
+            var base = name.replace(/\.[^.]+$/, '');
+
+            if (base && !/^(image|imagen|blob|untitled|archivo|clipboard)$/i.test(base)) {
+                return name;
+            }
+
+            var extension = String(file.type || '').split('/')[1] || '';
+
+            extension = extension.split('+')[0].replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '');
+
+            return 'pegado-' + (index + 1) + '-' + Date.now().toString(36) + '.' + (extension || 'bin');
+        }
+
+        function normalizePastedFiles(files) {
+            return (files || []).map(function (file, index) {
+                var name = pastedFileName(file, index);
+
+                if (name === file.name) {
+                    return file;
+                }
+
+                try {
+                    return new File([file], name, {
+                        type: file.type,
+                        lastModified: file.lastModified || Date.now()
+                    });
+                } catch (error) {
+                    return file;
+                }
+            });
+        }
+
+        // Ítems del carrusel para los archivos aún sin enviar (bandeja).
+        function trayCarouselItems() {
+            return pendingFiles.map(function (file, position) {
+                var kind = file.type.startsWith('image/')
+                    ? 'image'
+                    : (file.type.startsWith('video/')
+                        ? 'video'
+                        : (file.type.startsWith('audio/') ? 'audio' : 'file'));
+
                 return {
                     url: URL.createObjectURL(file),
-                    type: file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : 'file')),
-                    name: file.name
+                    type: kind,
+                    kind: kind,
+                    name: file.name,
+                    local: true,
+                    file_index: position,
+                    can_delete: true
                 };
             });
+        }
 
-            openCarousel(items, index);
+        $('#chat-tray-items').on('click', '.chat-tray__item', function () {
+            var index = parseInt($(this).data('index'), 10) || 0;
+
+            openCarousel(trayCarouselItems(), index);
         });
 
         $('#chat-tray-clear').on('click', clearTray);
@@ -2605,6 +2786,7 @@
 
         function convertToWebp(file, callback) {
             var reader = new FileReader();
+            var name = String(file.name || 'foto').replace(/\.[^.]+$/, '') || 'foto';
 
             reader.onload = function () {
                 var image = new Image();
@@ -2616,11 +2798,28 @@
                     canvas.getContext('2d').drawImage(image, 0, 0);
 
                     canvas.toBlob(function (blob) {
-                        callback(new File([blob], 'foto.webp', { type: 'image/webp' }));
+                        if (!blob) {
+                            callback(file);
+
+                            return;
+                        }
+
+                        callback(new File([blob], name + '.webp', {
+                            type: 'image/webp',
+                            lastModified: Date.now()
+                        }));
                     }, 'image/webp', 0.82);
                 };
 
+                image.onerror = function () {
+                    callback(file);
+                };
+
                 image.src = reader.result;
+            };
+
+            reader.onerror = function () {
+                callback(file);
             };
 
             reader.readAsDataURL(file);
@@ -2649,6 +2848,20 @@
 
         function currentLightboxItem() {
             return singleLightbox || carousel.items[carousel.index] || null;
+        }
+
+        // ¿Se puede borrar el contenido que muestra el carrusel? Los archivos
+        // todavía sin enviar (bandeja) también se pueden quitar.
+        function lightboxCanDelete(item) {
+            if (!item) {
+                return false;
+            }
+
+            if (item.local) {
+                return true;
+            }
+
+            return item.can_delete === true && Boolean(item.attachment_id || item.message_id);
         }
 
         function hideLightboxMenu() {
@@ -2690,6 +2903,7 @@
 
             $('#chat-lightbox-name').text(name);
             $('#chat-lightbox-download').attr('href', url).attr('download', name || 'archivo');
+            $('#chat-lightbox-delete').prop('hidden', !lightboxCanDelete(item));
 
             lightboxScale = 1;
             lightboxDrag = null;
@@ -2746,10 +2960,14 @@
             $('#chat-lightbox').prop('hidden', false);
         }
 
-        function openLightbox(type, src, name) {
+        function openLightbox(type, src, name, meta) {
             carousel.items = [];
             carousel.index = 0;
-            singleLightbox = { url: src, type: type || 'audio', name: name };
+            singleLightbox = $.extend({}, meta || {}, {
+                url: src,
+                type: type || 'audio',
+                name: name
+            });
             hideLightboxMenu();
             paintLightboxItem();
             $('#chat-lightbox').prop('hidden', false);
@@ -2821,19 +3039,33 @@
 
             if ($grid.length) {
                 var items = $grid.find('.chat-media-open').map(function () {
-                    return {
-                        url: $(this).data('src'),
-                        type: $(this).data('type'),
-                        name: $(this).data('name')
-                    };
+                    return lightboxItemFrom($(this));
                 }).get();
 
                 openCarousel(items, $(this).data('index') || 0);
                 return;
             }
 
-            openLightbox($(this).data('lightbox') || $(this).data('type'), $(this).data('src'), $(this).data('name'));
+            openLightbox(
+                $(this).data('lightbox') || $(this).data('type'),
+                $(this).data('src'),
+                $(this).data('name'),
+                lightboxItemFrom($(this))
+            );
         });
+
+        // Metadatos del contenido que se abre en el carrusel: permiten
+        // descargarlo, copiarlo o eliminarlo desde ahí.
+        function lightboxItemFrom($node) {
+            return {
+                url: $node.data('src'),
+                type: $node.data('type') || $node.data('lightbox'),
+                name: $node.data('name'),
+                message_id: parseInt($node.attr('data-message-id'), 10) || null,
+                attachment_id: parseInt($node.attr('data-attachment-id'), 10) || null,
+                can_delete: String($node.attr('data-can-delete')) === '1'
+            };
+        }
 
         $(document).on('keydown', function (event) {
             if ($('#chat-lightbox').prop('hidden')) {
@@ -2898,14 +3130,20 @@
             });
         }
 
-        function copyLightboxItem() {
-            var item = currentLightboxItem();
+        function contentKind(item) {
+            if (!item) {
+                return 'file';
+            }
 
+            return String(item.kind || item.type || 'file');
+        }
+
+        function copyImageContent(item) {
             if (!item) {
                 return;
             }
 
-            if (item.type !== 'image') {
+            if (contentKind(item) !== 'image') {
                 copyLightboxText(absoluteUrl(item.url));
                 return;
             }
@@ -2927,18 +3165,8 @@
                 });
         }
 
-        function copyLightboxLink() {
-            var item = currentLightboxItem();
-
-            if (item) {
-                copyLightboxText(absoluteUrl(item.url));
-            }
-        }
-
-        function downloadLightboxItem() {
-            var item = currentLightboxItem();
-
-            if (!item) {
+        function downloadContent(item) {
+            if (!item || !item.url) {
                 return;
             }
 
@@ -2952,6 +3180,184 @@
             document.body.removeChild(link);
         }
 
+        function copyLightboxItem() {
+            copyImageContent(currentLightboxItem());
+        }
+
+        function copyLightboxLink() {
+            var item = currentLightboxItem();
+
+            if (item) {
+                copyLightboxText(absoluteUrl(item.url));
+            }
+        }
+
+        function downloadLightboxItem() {
+            downloadContent(currentLightboxItem());
+        }
+
+        // Acciones que ofrece el clic derecho según el tipo de contenido.
+        var CONTENT_MENU_ACTIONS = {
+            image: ['copy-image', 'copy-link', 'download', 'delete'],
+            video: ['copy-link', 'download', 'delete'],
+            audio: ['copy-link', 'download', 'delete'],
+            pdf: ['download', 'delete'],
+            file: ['download', 'delete'],
+            link: ['copy-link', 'delete']
+        };
+
+        var contentTarget = null;
+
+        function hideContentMenu() {
+            $('#chat-content-menu').prop('hidden', true).css({ top: '', left: '' });
+            contentTarget = null;
+        }
+
+        function contentCanDelete(item) {
+            if (!item) {
+                return false;
+            }
+
+            if (item.local) {
+                return true;
+            }
+
+            return item.can_delete !== false && Boolean(item.attachment_id || item.message_id);
+        }
+
+        function showContentMenu(event, item) {
+            var $menu = $('#chat-content-menu');
+
+            if (!item || !$menu.length) {
+                return;
+            }
+
+            var allowed = CONTENT_MENU_ACTIONS[contentKind(item)] || CONTENT_MENU_ACTIONS.file;
+
+            contentTarget = item;
+
+            $menu.find('[data-content-action]').each(function () {
+                var action = $(this).attr('data-content-action');
+                var visible = allowed.indexOf(action) !== -1;
+
+                if (action === 'delete') {
+                    visible = visible && contentCanDelete(item);
+                }
+
+                $(this).prop('hidden', !visible);
+            });
+
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+            placeMenu($menu, event);
+        }
+
+        // Quita de la bandeja un archivo todavía sin enviar.
+        function removeLocalContent(item) {
+            var index = parseInt(item.file_index, 10);
+
+            if (isNaN(index) || !pendingFiles[index]) {
+                return;
+            }
+
+            pendingFiles.splice(index, 1);
+            renderTray();
+
+            var items = trayCarouselItems();
+
+            if (!items.length) {
+                closeLightbox();
+                return;
+            }
+
+            openCarousel(items, Math.min(index, items.length - 1));
+        }
+
+        function afterContentDeleted(item, response) {
+            var messageDeleted = response.message_deleted === true
+                || (!item.attachment_id && Boolean(item.message_id));
+
+            function belongs(entry) {
+                if (!entry) {
+                    return false;
+                }
+
+                if (messageDeleted && item.message_id) {
+                    return String(entry.message_id) === String(item.message_id);
+                }
+
+                if (item.attachment_id) {
+                    return String(entry.id) === String(item.attachment_id);
+                }
+
+                return String(entry.message_id) === String(item.message_id) && entry.url === item.url;
+            }
+
+            galleryItems = galleryItems.filter(function (entry) { return !belongs(entry); });
+            profileMedia = profileMedia.filter(function (entry) { return !belongs(entry); });
+
+            if (profileData) {
+                renderProfileMedia();
+            }
+
+            if (!$('#chat-gallery-panel').prop('hidden')) {
+                var tab = $('#chat-gallery-panel [data-gallery].is-active').attr('data-gallery') || 'multimedia';
+
+                renderGallery(tab);
+            }
+
+            if (item.message_id) {
+                refreshMessages([item.message_id]);
+            }
+
+            refresh();
+
+            if (!$('#chat-lightbox').prop('hidden') && carousel.items.length) {
+                carousel.items = carousel.items.filter(function (entry) { return !belongs(entry); });
+
+                if (!carousel.items.length) {
+                    closeLightbox();
+                    return;
+                }
+
+                carousel.index = Math.min(carousel.index, carousel.items.length - 1);
+                paintLightboxItem();
+            }
+        }
+
+        // Borra el contenido (adjunto o enlace) y, si el servidor lo indica,
+        // también el mensaje que lo contenía.
+        function deleteContentItem(item) {
+            if (!item) {
+                return;
+            }
+
+            if (item.local) {
+                removeLocalContent(item);
+                return;
+            }
+
+            var endpoint = item.attachment_id
+                ? chatBase + '/adjuntos/' + item.attachment_id + '/eliminar'
+                : (item.message_id ? chatBase + '/mensajes/' + item.message_id + '/eliminar' : null);
+
+            if (!endpoint) {
+                return;
+            }
+
+            var question = item.attachment_id
+                ? '¿Eliminar este contenido? Si es el último adjunto del mensaje, también se eliminará el mensaje.'
+                : '¿Eliminar el mensaje con este contenido?';
+
+            confirmDialog(question, function () {
+                post(endpoint, {}).done(function (response) {
+                    hideContentMenu();
+                    afterContentDeleted(item, response || {});
+                }).fail(function (xhr) {
+                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo eliminar el contenido.');
+                });
+            });
+        }
+
         function showLightboxMenu(event) {
             var item = currentLightboxItem();
             var $menu = $('#chat-lightbox-menu');
@@ -2961,18 +3367,9 @@
             }
 
             $menu.find('[data-lightbox-action="copy"]').text(item.type === 'image' ? 'Copiar imagen' : 'Copiar');
-            $menu.prop('hidden', false);
-
-            var margin = 8;
-            var width = $menu.outerWidth() || 176;
-            var height = $menu.outerHeight() || 132;
-            var left = Math.min(event.clientX, window.innerWidth - width - margin);
-            var top = Math.min(event.clientY, window.innerHeight - height - margin);
-
-            $menu.css({
-                left: Math.max(margin, left) + 'px',
-                top: Math.max(margin, top) + 'px'
-            });
+            $menu.find('[data-lightbox-action="delete"]').prop('hidden', !lightboxCanDelete(item));
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+            placeMenu($menu, event);
         }
 
         $('#chat-lightbox').on('contextmenu', function (event) {
@@ -2998,10 +3395,58 @@
                 downloadLightboxItem();
             } else if (action === 'link') {
                 copyLightboxLink();
+            } else if (action === 'delete') {
+                deleteContentItem(currentLightboxItem());
             }
         });
 
         $('#chat-lightbox-copy').on('click', copyLightboxItem);
+
+        $('#chat-lightbox-delete').on('click', function () {
+            deleteContentItem(currentLightboxItem());
+        });
+
+        // Clic derecho en cualquier contenido de las galerías.
+        $(document).on('contextmenu', '[data-content-menu]', function (event) {
+            var item = $(this).data('content');
+
+            if (!item) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            showContentMenu(event, item);
+        });
+
+        $(document).on('click', function (event) {
+            if (!$(event.target).closest('#chat-content-menu').length) {
+                hideContentMenu();
+            }
+        });
+
+        $('#chat-content-menu').on('click', '.chat-context-item', function (event) {
+            var action = $(this).attr('data-content-action');
+            var item = contentTarget;
+
+            event.preventDefault();
+            event.stopPropagation();
+            hideContentMenu();
+
+            if (!item) {
+                return;
+            }
+
+            if (action === 'copy-image') {
+                copyImageContent(item);
+            } else if (action === 'copy-link') {
+                copyLightboxText(absoluteUrl(item.url));
+            } else if (action === 'download') {
+                downloadContent(item);
+            } else if (action === 'delete') {
+                deleteContentItem(item);
+            }
+        });
 
         $('#chat-attach').on('click', function (event) {
             event.stopPropagation();
@@ -3317,11 +3762,11 @@
             event.preventDefault();
             event.stopPropagation();
 
-            openCarousel([{
+            openCarousel([$.extend(lightboxItemFrom($(this)), {
                 url: $(this).data('url'),
                 type: 'audio',
                 name: $(this).data('name')
-            }], 0);
+            })], 0);
         });
 
         function drawWaveforms() {
@@ -3394,6 +3839,27 @@
             });
         }
 
+        // Pinta la galería y asocia cada nodo con su contenido para el clic
+        // derecho (copiar, descargar, eliminar).
+        function paintGalleryList(html, list) {
+            var $list = $('#chat-gallery-list');
+
+            $list.html(html);
+
+            $list.find('[data-content-index]').each(function () {
+                var item = list[parseInt($(this).attr('data-content-index'), 10)];
+
+                if (item) {
+                    $(this).data('content', $.extend({}, item, {
+                        kind: item.kind,
+                        attachment_id: item.id || null,
+                        message_id: item.message_id || null,
+                        can_delete: item.can_delete !== false
+                    }));
+                }
+            });
+        }
+
         function renderGallery(filter) {
             var items = galleryItems.filter(function (item) {
                 if (filter === 'multimedia') {
@@ -3414,31 +3880,33 @@
             }
 
             if (filter === 'multimedia') {
-                $('#chat-gallery-list').html('<div class="chat-gallery-grid">' + items.map(function (item, index) {
+                paintGalleryList('<div class="chat-gallery-grid">' + items.map(function (item, index) {
                     var preview = item.kind === 'video'
                         ? '<video src="' + item.url + '"></video>'
                         : '<img src="' + item.url + '" alt="">';
 
                     return '<button type="button" class="chat-gallery-thumb gallery-item" title="' + escape(item.name || '') + '"' +
+                        ' data-content-menu="1" data-content-index="' + index + '"' +
                         ' data-index="' + index + '" data-kind="' + item.kind + '" data-src="' + item.url + '"' +
                         ' data-name="' + escape(item.name || '') + '">' + preview + '</button>';
-                }).join('') + '</div>');
+                }).join('') + '</div>', items);
 
                 return;
             }
 
             if (filter === 'audios') {
-                $('#chat-gallery-list').html('<div class="chat-gallery-grid">' + items.map(function (item, index) {
+                paintGalleryList('<div class="chat-gallery-grid">' + items.map(function (item, index) {
                     return '<button type="button" class="chat-gallery-audio gallery-item" title="' + escape(item.name || '') + '"' +
+                        ' data-content-menu="1" data-content-index="' + index + '"' +
                         ' data-index="' + index + '" data-kind="audio" data-src="' + item.url + '"' +
                         ' data-name="' + escape(item.name || '') + '">' +
                         '<i class="fa-solid fa-microphone-lines" aria-hidden="true"></i></button>';
-                }).join('') + '</div>');
+                }).join('') + '</div>', items);
 
                 return;
             }
 
-            $('#chat-gallery-list').html(items.map(function (item) {
+            paintGalleryList(items.map(function (item, index) {
                 var icon = item.kind === 'link'
                     ? 'fa-link'
                     : (item.kind === 'audio' ? 'fa-microphone' : fileIcon(item.name));
@@ -3455,13 +3923,13 @@
                     : '<a class="chat-gallery-row__name" href="' + item.url + '" download' +
                         ' title="' + escape(item.name || '') + '">' + escape(item.name || 'Archivo') + '</a>';
 
-                return '<div class="chat-gallery-row">' +
+                return '<div class="chat-gallery-row" data-content-menu="1" data-content-index="' + index + '">' +
                     '<div class="chat-gallery-row__main">' +
                     '<i class="fa-solid ' + icon + '" aria-hidden="true"></i>' +
                     nameLink +
                     '<span class="chat-gallery-row__meta">' + escape(meta) + '</span>' +
                     '</div></div>';
-            }).join(''));
+            }).join(''), items);
         }
 
         function profileInitials(name) {
@@ -3544,11 +4012,36 @@
         }
 
         function renderProfileMedia() {
+            var $grid = $('#chat-profile-media-grid');
+            var $link = $('#chat-profile-main .chat-profile__section-head [data-profile-action="gallery"]');
+
             var media = (profileMedia || []).filter(function (item) {
                 return item && (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio');
-            }).slice(0, 5);
+            }).sort(function (first, second) {
+                // Orden cronológico por el mensaje en que se envió, sin
+                // agrupar por tipo: imágenes, vídeos y audios se mezclan.
+                var byMessage = Number(first.message_id || 0) - Number(second.message_id || 0);
 
-            var html = media.map(function (item) {
+                if (byMessage !== 0) {
+                    return byMessage;
+                }
+
+                return Number(first.position || 0) - Number(second.position || 0);
+            }).slice(-5);
+
+            // Sin contenido multimedia la sección se queda solo con el título:
+            // nada de recuadros vacíos ni acceso a una galería vacía.
+            if (!media.length) {
+                $grid.prop('hidden', true).empty();
+                $link.prop('hidden', true);
+
+                return;
+            }
+
+            $grid.prop('hidden', false);
+            $link.prop('hidden', false);
+
+            $grid.html(media.map(function (item, index) {
                 var tab = item.kind === 'audio' ? 'audios' : 'multimedia';
                 var inner = '';
 
@@ -3563,14 +4056,23 @@
                 return '<button type="button" class="chat-profile__tile'
                     + (item.kind === 'audio' ? ' chat-profile__tile--audio' : '')
                     + '" data-profile-action="gallery" data-gallery-tab="' + tab + '"'
+                    + ' data-content-menu="1" data-content-index="' + index + '"'
                     + ' title="' + escape(item.name || 'Contenido') + '">' + inner + '</button>';
-            }).join('');
+            }).join(''));
 
-            for (var index = media.length; index < 5; index += 1) {
-                html += '<span class="chat-profile__tile chat-profile__tile--empty"><i class="fa-regular fa-image" aria-hidden="true"></i></span>';
-            }
+            // Cada miniatura guarda su contenido para el clic derecho.
+            $grid.find('[data-content-index]').each(function () {
+                var item = media[parseInt($(this).attr('data-content-index'), 10)];
 
-            $('#chat-profile-media-grid').html(html);
+                if (item) {
+                    $(this).data('content', $.extend({}, item, {
+                        kind: item.kind,
+                        attachment_id: item.id || null,
+                        message_id: item.message_id || null,
+                        can_delete: item.can_delete !== false
+                    }));
+                }
+            });
         }
 
         function profileOption(action, icon, label, variant) {
@@ -3858,7 +4360,7 @@
                         post(chatBase + '/' + currentId + '/vaciar', {})
                             .done(function () {
                                 closeChatProfile();
-                                loadMessages();
+                                reloadConversationMessages();
                                 refresh();
                             })
                             .fail(profileError);
@@ -3991,7 +4493,11 @@
                         return {
                             url: item.url,
                             type: isAudio ? 'audio' : item.kind,
-                            name: item.name
+                            kind: item.kind,
+                            name: item.name,
+                            message_id: item.message_id || null,
+                            attachment_id: item.id || null,
+                            can_delete: item.can_delete !== false
                         };
                     });
 
@@ -3999,16 +4505,24 @@
                 return;
             }
 
-            openLightbox($(this).data('kind'), $(this).data('src'), $(this).data('name'));
+            var content = $(this).data('content') || {};
+
+            openLightbox($(this).data('kind'), $(this).data('src'), $(this).data('name'), content);
         });
 
         $('#chat-input').on('contextmenu', function (event) {
             event.preventDefault();
             event.stopPropagation();
-            $('#chat-text-menu').prop('hidden', false).css({
-                top: event.clientY + 'px',
-                left: event.clientX + 'px'
-            });
+
+            hideContextMenu();
+            hideListMenu();
+            hideUserMenu();
+            hideContentMenu();
+
+            var $menu = $('#chat-text-menu');
+
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+            placeMenu($menu, event);
         });
 
         $('#chat-text-menu').on('click', '[data-text]', function (event) {
@@ -4027,21 +4541,91 @@
             $('#chat-input').focus();
 
             if (action === 'paste') {
-                if (navigator.clipboard && navigator.clipboard.readText) {
-                    navigator.clipboard.readText().then(function (text) {
-                        document.execCommand('insertText', false, text);
-                    }).catch(function () {
-                        alertDialog('No se pudo pegar. Usa Ctrl+V.');
-                    });
-                } else {
-                    alertDialog('Usa Ctrl+V para pegar.');
-                }
+                pasteFromClipboard();
 
                 return;
             }
 
             document.execCommand(action, false, null);
         });
+
+        /**
+         * «Pegar» del menú contextual: si el portapapeles trae imágenes o
+         * archivos los adjunta a la bandeja (con su vista previa) y, si trae
+         * texto, lo escribe en la barra.
+         */
+        function pasteFromClipboard() {
+            function pasteText() {
+                if (!navigator.clipboard || !navigator.clipboard.readText) {
+                    alertDialog('Usa Ctrl+V para pegar.');
+
+                    return;
+                }
+
+                navigator.clipboard.readText().then(function (text) {
+                    if (text) {
+                        document.execCommand('insertText', false, text);
+                    }
+                }).catch(function () {
+                    alertDialog('No se pudo pegar. Usa Ctrl+V.');
+                });
+            }
+
+            if (!navigator.clipboard || !navigator.clipboard.read) {
+                pasteText();
+
+                return;
+            }
+
+            navigator.clipboard.read().then(function (items) {
+                var files = [];
+                var text = null;
+                var tasks = [];
+
+                items.forEach(function (item) {
+                    var types = item.types || [];
+                    var imageType = types.filter(function (type) {
+                        return type.indexOf('image/') === 0;
+                    })[0];
+
+                    if (imageType) {
+                        tasks.push(item.getType(imageType).then(function (blob) {
+                            files.push(new File([blob], 'pegado-' + (files.length + 1) + '.' + (imageType.split('/')[1] || 'png'), {
+                                type: imageType
+                            }));
+                        }));
+
+                        return;
+                    }
+
+                    if (types.indexOf('text/plain') !== -1) {
+                        tasks.push(item.getType('text/plain').then(function (blob) {
+                            return blob.text();
+                        }).then(function (value) {
+                            if (text === null && value) {
+                                text = value;
+                            }
+                        }));
+                    }
+                });
+
+                return Promise.all(tasks).then(function () {
+                    if (files.length) {
+                        addTrayFiles(normalizePastedFiles(files));
+                    }
+
+                    if (text) {
+                        document.execCommand('insertText', false, text);
+                    }
+
+                    if (!files.length && !text) {
+                        alertDialog('No hay nada que pegar.');
+                    }
+                });
+            }).catch(function () {
+                pasteText();
+            });
+        }
 
         $(document).on('click', function (event) {
             if (!$(event.target).closest('#chat-text-menu').length) {

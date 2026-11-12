@@ -72,6 +72,14 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // Bitácora del restablecimiento de la dinámica (proceso batch).
+        'dinamica' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/dinamica.log'),
+            'level' => 'debug',
+            'replace_placeholders' => true,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),

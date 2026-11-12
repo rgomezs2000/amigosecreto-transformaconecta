@@ -140,6 +140,63 @@ class ModulosTest extends TestCase
             ->assertJsonPath('data.0.name', 'Reportes');
     }
 
+    public function test_datos_filtra_por_categoria(): void
+    {
+        $admin = $this->adminWithModulosModule();
+
+        $maestros = Category::query()->where('name', 'Maestros')->firstOrFail();
+
+        // «Mensajes» ya viene entre las categorías del sistema.
+        $mensajes = Category::query()->where('name', 'Mensajes')->firstOrFail();
+
+        Module::create([
+            'name' => 'Chat de prueba',
+            'slug' => 'chat-prueba',
+            'category_id' => $mensajes->id,
+            'group' => 'Mensajes',
+            'is_active' => true,
+        ]);
+
+        $esperados = Module::query()->where('category_id', $maestros->id)->count();
+
+        $this->assertGreaterThan(0, $esperados);
+
+        $query = http_build_query([
+            'draw' => 1,
+            'start' => 0,
+            'length' => 50,
+            'search' => ['value' => ''],
+            'order' => [['column' => 2, 'dir' => 'asc']],
+            'filter_type' => 'category',
+            'filter_category' => $maestros->id,
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/modulos/datos?'.$query)
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', $esperados);
+
+        $this->assertFalse(
+            collect($response->json('data'))->pluck('name')->contains('Chat de prueba')
+        );
+
+        // Con «Todos los módulos» el filtro de categoría no se aplica.
+        $sinFiltro = http_build_query([
+            'draw' => 2,
+            'start' => 0,
+            'length' => 50,
+            'search' => ['value' => ''],
+            'order' => [['column' => 2, 'dir' => 'asc']],
+            'filter_type' => 'all',
+            'filter_category' => $maestros->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->getJson('/modulos/datos?'.$sinFiltro)
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', Module::query()->count());
+    }
+
     public function test_crear_modulo_con_categoria_y_slug(): void
     {
         $admin = $this->adminWithModulosModule();

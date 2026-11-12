@@ -37,6 +37,16 @@ class ModeracionBloqueosController extends Controller
 
         $query = User::query()->with('profile')->search($search);
 
+        $filterType = (string) $request->input('filter_type', 'all');
+
+        if ($filterType === 'role') {
+            $role = (string) $request->input('role', '');
+
+            if (in_array($role, ['admin', 'participant'], true)) {
+                $query->where('role', $role);
+            }
+        }
+
         $recordsFiltered = (clone $query)->count();
 
         $direction = $request->input('order.0.dir') === 'desc' ? 'desc' : 'asc';

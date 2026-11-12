@@ -90,6 +90,16 @@
                         <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
                         <span>Reiniciar</span>
                     </button>
+
+                    @if ($event->drawIsOpen())
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-evento-reiniciar-sorteo"
+                                data-id="{{ $event->id }}"
+                                title="Borrar las parejas y volver a sortear"
+                                aria-label="Reiniciar el sorteo ciego">
+                            <i class="fa-solid fa-dice" aria-hidden="true"></i>
+                            <span>Reiniciar sorteo</span>
+                        </button>
+                    @endif
                 </footer>
             </article>
         @endforeach

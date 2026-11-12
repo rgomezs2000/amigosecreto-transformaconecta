@@ -51,10 +51,16 @@ class ModulosController extends Controller
         $start = max(0, (int) $request->input('start', 0));
         $length = (int) $request->input('length', 10);
         $search = (string) $request->input('search.value', '');
+        $filterType = (string) $request->input('filter_type', 'all');
+        $filterCategory = (int) $request->input('filter_category', 0);
 
         $recordsTotal = Module::query()->count();
 
         $filtered = Module::query()->with('category')->search($search);
+
+        if ($filterType === 'category' && $filterCategory > 0) {
+            $filtered->where('category_id', $filterCategory);
+        }
 
         $recordsFiltered = (clone $filtered)->count();
 

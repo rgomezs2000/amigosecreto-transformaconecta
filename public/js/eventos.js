@@ -335,6 +335,20 @@
             });
         });
 
+        // Reiniciar el sorteo ciego (caso extremo, solo administración) -----
+        $('#eventos-lista').on('click', '.btn-evento-reiniciar-sorteo', function () {
+            var id = $(this).data('id');
+
+            confirmDialog(
+                '¿Reiniciar el sorteo? Se borran las parejas y los chats de amigo secreto, y todos vuelven a elegir.',
+                function () {
+                    post(participantesBase + '/' + id + '/sorteo/reiniciar', {})
+                        .done(redirect)
+                        .fail(showError);
+                }
+            );
+        });
+
         // Suspender --------------------------------------------------------
         $('#eventos-lista').on('click', '.btn-evento-suspender', function () {
             $('#evento-suspender-reason').val('');

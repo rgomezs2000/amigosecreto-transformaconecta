@@ -10,6 +10,7 @@
      data-in-app="{{ ($shell['notificationPreferences']['in_app'] ?? true) ? '1' : '0' }}"
      data-is-admin="{{ $shell['user']->role === \App\Enums\UserRole::Admin ? '1' : '0' }}"
      data-invitation="{{ $shell['chatInvitation'] ?? '' }}"
+     data-invitation-notice="{{ $shell['chatInvitationNotice'] ?? '' }}"
      data-csrf="{{ csrf_token() }}">
     <button type="button" class="chat-toggle" id="chat-toggle"
             aria-expanded="false" aria-controls="chat-panel" aria-label="Abrir mensajes">
@@ -155,6 +156,11 @@
             <div class="chat-mentions" id="chat-mentions" role="listbox"
                  aria-label="Etiquetas disponibles" hidden></div>
 
+            <p class="chat-readonly" id="chat-readonly" hidden>
+                <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                <span>Chat del evento: solo lectura.</span>
+            </p>
+
             <form class="chat-form" id="chat-form">
                 <input type="file" id="chat-file" hidden multiple>
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-attach" aria-label="Adjuntar archivo" title="Adjuntar">
@@ -264,6 +270,9 @@
                     <a class="chat-lightbox__icon" id="chat-lightbox-download" download aria-label="Descargar" title="Descargar">
                         <i class="fa-solid fa-download" aria-hidden="true"></i>
                     </a>
+                    <button type="button" class="chat-lightbox__icon" id="chat-lightbox-delete" aria-label="Eliminar" title="Eliminar" hidden>
+                        <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                    </button>
                     <button type="button" class="chat-lightbox__icon" id="chat-lightbox-close" aria-label="Cerrar" title="Cerrar">
                         <i class="fa-solid fa-xmark" aria-hidden="true"></i>
                     </button>
@@ -274,7 +283,16 @@
                 <button type="button" class="chat-context-item" data-lightbox-action="copy">Copiar imagen</button>
                 <button type="button" class="chat-context-item" data-lightbox-action="download">Descargar</button>
                 <button type="button" class="chat-context-item" data-lightbox-action="link">Copiar enlace</button>
+                <button type="button" class="chat-context-item chat-context-item--danger" data-lightbox-action="delete">Eliminar</button>
             </div>
+        </div>
+
+        {{-- Acciones del contenido de la galería (imágenes, documentos, audios y enlaces). --}}
+        <div class="chat-context-menu chat-content-menu" id="chat-content-menu" hidden>
+            <button type="button" class="chat-context-item" data-content-action="copy-image">Copiar imagen</button>
+            <button type="button" class="chat-context-item" data-content-action="copy-link">Copiar enlace</button>
+            <button type="button" class="chat-context-item" data-content-action="download">Descargar</button>
+            <button type="button" class="chat-context-item chat-context-item--danger" data-content-action="delete">Eliminar</button>
         </div>
 
         <div class="chat-context-menu" id="chat-context-menu" hidden>
@@ -373,18 +391,25 @@
     </x-slot:footer>
 </x-app-modal>
 
-{{-- Invitación a un grupo pendiente: se muestra al entrar al sistema. --}}
-@if (! empty($shell['chatInvitation']))
+{{-- Invitación pendiente o aviso de enlace expirado/usado/eliminado. --}}
+@if (! empty($shell['chatInvitation']) || ! empty($shell['chatInvitationNotice']))
     <x-app-modal id="modal-chat-invite" title="Invitación a un grupo">
         <x-slot:body>
-            <p class="chat-hint" id="chat-invite-text">Te invitaron a un grupo.</p>
+            <p class="chat-hint" id="chat-invite-text">
+                {{ $shell['chatInvitationNotice'] ?? 'Te invitaron a un grupo.' }}
+            </p>
             <p class="chat-invite__group" id="chat-invite-group"></p>
             <p class="chat-hint" id="chat-invite-error" role="status" aria-live="polite"></p>
         </x-slot:body>
 
         <x-slot:footer>
-            <button type="button" class="btn btn-primary" id="chat-invite-accept">Aceptar e ingresar</button>
-            <button type="button" class="btn btn-outline-secondary" id="chat-invite-reject">Rechazar</button>
+            <button type="button" class="btn btn-primary" id="chat-invite-accept"
+                    @if (empty($shell['chatInvitation'])) hidden @endif>
+                Aceptar e ingresar
+            </button>
+            <button type="button" class="btn btn-outline-secondary" id="chat-invite-reject">
+                {{ empty($shell['chatInvitation']) ? 'Cerrar' : 'Rechazar' }}
+            </button>
         </x-slot:footer>
     </x-app-modal>
 @endif

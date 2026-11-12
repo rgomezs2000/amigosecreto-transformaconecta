@@ -35,6 +35,7 @@ class Event extends Model
         'registration_closes_at',
         'dynamic_starts_at',
         'exchange_at',
+        'draw_closed_at',
         'started_at',
         'suspended_at',
         'postponed_at',
@@ -55,6 +56,7 @@ class Event extends Model
             'registration_closes_at' => 'datetime',
             'dynamic_starts_at' => 'datetime',
             'exchange_at' => 'datetime',
+            'draw_closed_at' => 'datetime',
             'started_at' => 'datetime',
             'suspended_at' => 'datetime',
             'postponed_at' => 'datetime',
@@ -136,6 +138,32 @@ class Event extends Model
             EventStatus::Closed,
             EventStatus::Revealed,
         ], true);
+    }
+
+    /**
+     * El sorteo está abierto: el evento arrancó y todavía no se cerró ni se
+     * avanzó a la siguiente fase.
+     */
+    public function drawIsOpen(): bool
+    {
+        return $this->status === EventStatus::DrawEnabled;
+    }
+
+    /**
+     * El sorteo ya concluyó (eligieron todos o el administrador avanzó).
+     */
+    public function drawIsClosed(): bool
+    {
+        return in_array($this->status, [
+            EventStatus::Drawn,
+            EventStatus::Closed,
+            EventStatus::Revealed,
+        ], true);
+    }
+
+    public function isPostponed(): bool
+    {
+        return $this->postponed_at !== null;
     }
 
     /**

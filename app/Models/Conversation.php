@@ -18,6 +18,7 @@ class Conversation extends Model
         'event_id',
         'assignment_id',
         'is_moderated',
+        'is_read_only',
         'pinned_message_id',
     ];
 
@@ -25,6 +26,7 @@ class Conversation extends Model
     {
         return [
             'is_moderated' => 'boolean',
+            'is_read_only' => 'boolean',
         ];
     }
 
@@ -120,6 +122,19 @@ class Conversation extends Model
     }
 
     /**
+     * Chat del evento: solo avisos de la organización, nadie escribe.
+     */
+    public function isEventChannel(): bool
+    {
+        return $this->type === 'event';
+    }
+
+    public function isReadOnly(): bool
+    {
+        return $this->is_read_only;
+    }
+
+    /**
      * Papel del usuario en la asignación del amigo secreto.
      *
      * `giver` es quien regala (sabe a quién le tocó); `receiver` es quien
@@ -164,6 +179,10 @@ class Conversation extends Model
 
         if ($this->isGroup()) {
             return $this->name ?: 'Grupo';
+        }
+
+        if ($this->isEventChannel()) {
+            return $this->name ?: 'Evento';
         }
 
         $other = $this->users->firstWhere('id', '!=', $user->id);

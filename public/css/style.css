@@ -17,6 +17,10 @@
     --accent: #2F6F62;
     --accent-strong: #245A4F;
     --accent-soft: #E6F2EF;
+    /* Alias que usan los componentes del perfil del chat. */
+    --primary: #2F6F62;
+    --primary-soft: #E6F2EF;
+    --surface-2: #F1F5F9;
     --error: #B42318;
     --error-soft: #FEF3F2;
     --warning: #8A6D3B;
@@ -3966,14 +3970,19 @@ table.dataTable tbody td {
     gap: .35rem;
 }
 
+/* Solo el icono: botón cuadrado, grande y con la etiqueta accesible. */
 .moderacion-actions .btn {
-    min-height: 2.25rem;
-    padding: .25rem .6rem;
-    font-size: .8125rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0;
+    font-size: .9375rem;
 }
 
 #moderacion-table .roles-actions {
-    width: 13rem;
+    width: 8rem;
 }
 
 /* --------------------------------------------------------------------------
@@ -4521,8 +4530,12 @@ div.dt-processing {
     object-fit: cover;
 }
 
+/* Audio en la minigalería del perfil: amarillo con icono negro, igual que
+   la galería, para que se lea bien. */
 .chat-profile__tile--audio {
-    background: var(--primary);
+    background: #FACC15;
+    border: 1px solid #EAB308;
+    color: #111827;
     font-size: 1.1rem;
 }
 
@@ -4726,5 +4739,518 @@ div.dt-processing {
     padding: .9rem .75rem;
     color: var(--muted);
     font-size: .8125rem;
+    text-align: center;
+}
+
+/* Estados del caso de reporte */
+.moderacion-status {
+    display: inline-flex;
+    align-items: center;
+    padding: .18rem .5rem;
+    border-radius: 999px;
+    font-size: .75rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.moderacion-status--pendiente {
+    background: #FEF3C7;
+    color: #92400E;
+}
+
+.moderacion-status--atendiendo {
+    background: #DBEAFE;
+    color: #1D4ED8;
+}
+
+.moderacion-status--cerrado {
+    background: #DCFCE7;
+    color: #166534;
+}
+
+#moderacion-detail-attention,
+#moderacion-detail-close-observation {
+    white-space: pre-wrap;
+}
+
+/* Contadores por estado dentro del resumen de reportes */
+.moderacion-summary__counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin: .35rem 0 .5rem;
+}
+
+.moderacion-summary__count {
+    display: inline-flex;
+    align-items: baseline;
+    gap: .35rem;
+    padding: .25rem .55rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: .75rem;
+    font-weight: 600;
+}
+
+.moderacion-summary__count strong {
+    color: var(--ink);
+    font-size: .95rem;
+    font-weight: 700;
+}
+
+/* Filtros de Moderación */
+.moderacion-filter {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: .5rem;
+    margin-top: .85rem;
+}
+
+.moderacion-filter > .form-label {
+    margin-bottom: 0;
+}
+
+/* El selector de tipo va a la izquierda, con la misma medida que el filtro
+   de Usuarios: no ocupa todo el ancho de la tarjeta. */
+.moderacion-filter > .form-select {
+    width: 14rem;
+    max-width: 100%;
+    min-height: 48px;
+    border-color: var(--border);
+    border-radius: 10px;
+    font-size: 1.0625rem;
+}
+
+.moderacion-filter__panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    max-width: 40rem;
+}
+
+.moderacion-filter__panel[hidden] {
+    display: none;
+}
+
+.moderacion-filter__field {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: .25rem;
+    min-width: 12rem;
+    margin: 0;
+    color: var(--muted);
+    font-size: .8125rem;
+    font-weight: 600;
+}
+
+/* ==========================================================================
+   Restablecer dinámica (solo superadministrador)
+   ========================================================================== */
+
+.btn-dinamica {
+    background: var(--error);
+    border-color: var(--error);
+    color: #FFFFFF;
+}
+
+.btn-dinamica:hover,
+.btn-dinamica:focus-visible {
+    background: #912018;
+    border-color: #912018;
+    color: #FFFFFF;
+}
+
+.btn-dinamica:disabled {
+    background: #C8A9A6;
+    border-color: #C8A9A6;
+    color: #FFFFFF;
+}
+
+.dinamica-page {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.dinamica-card {
+    padding: 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.dinamica-card__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.dinamica-card__icon {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 3rem;
+    height: 3rem;
+    background: var(--error-soft);
+    border-radius: var(--radius-sm);
+    color: var(--error);
+    font-size: 1.25rem;
+}
+
+.dinamica-card__title {
+    margin: 0 0 .35rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.dinamica-card__text {
+    max-width: 60rem;
+    margin: 0;
+    color: var(--muted);
+}
+
+.dinamica-columns {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    margin-bottom: 1.25rem;
+}
+
+.dinamica-list {
+    padding: 1rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.dinamica-list--danger {
+    background: var(--error-soft);
+    border-color: #E7C9C5;
+}
+
+.dinamica-list__title {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 0 0 .5rem;
+    font-size: .8125rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.dinamica-list--danger .dinamica-list__title {
+    color: var(--error);
+}
+
+.dinamica-list__items {
+    margin: 0;
+    padding-left: 1.15rem;
+    color: var(--muted);
+}
+
+.dinamica-list__items li + li {
+    margin-top: .25rem;
+}
+
+.dinamica-note {
+    display: flex;
+    align-items: flex-start;
+    gap: .5rem;
+    margin: 0 0 1.25rem;
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
+.dinamica-note code {
+    color: var(--ink);
+    word-break: break-all;
+}
+
+.dinamica-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+
+.dinamica-modal__lead {
+    margin: 0 0 .5rem;
+    font-weight: 700;
+}
+
+.dinamica-modal__text {
+    color: var(--muted);
+}
+
+.dinamica-modal__warn {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 0 0 .5rem;
+    padding: .75rem 1rem;
+    background: var(--error-soft);
+    border: 1px solid #E7C9C5;
+    border-radius: var(--radius-sm);
+    color: var(--error);
+    font-weight: 600;
+}
+
+.dinamica-modal__meta {
+    margin: 0 0 .75rem;
+    color: var(--muted);
+    font-size: .875rem;
+}
+
+.dinamica-modal__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: .5rem;
+    margin-top: .75rem;
+}
+
+.dinamica-progress {
+    height: .6rem;
+    margin: 0 0 .75rem;
+}
+
+.dinamica-log {
+    max-height: 16rem;
+    margin: 0;
+    padding: .75rem;
+    overflow: auto;
+    background: #0F172A;
+    border-radius: 8px;
+    color: #E2E8F0;
+    font-size: .8rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.table-actions__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    padding: 0 .35rem;
+    color: var(--muted);
+    font-size: .875rem;
+}
+
+.dinamica-last {
+    margin: 0 0 1.25rem;
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
+/* ==========================================================================
+   Sorteo ciego y Ver tu amigo
+   ========================================================================== */
+
+.sorteo-page {
+    display: grid;
+    gap: 1.25rem;
+    max-width: 44rem;
+    margin: 0 auto;
+}
+
+.sorteo-card {
+    padding: 1.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.sorteo-card__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.sorteo-card__icon {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 3rem;
+    height: 3rem;
+    background: var(--accent-soft);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    font-size: 1.25rem;
+}
+
+.sorteo-card__icon--calm {
+    background: var(--surface-2);
+    color: var(--muted);
+}
+
+.sorteo-card__title {
+    margin: 0 0 .35rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.sorteo-card__text {
+    margin: 0;
+    color: var(--muted);
+}
+
+.sorteo-progress {
+    margin: 0 0 1rem;
+    padding: .6rem .9rem;
+    background: var(--accent-soft);
+    border-radius: var(--radius-sm);
+    color: var(--accent-strong);
+    font-size: .9375rem;
+}
+
+.sorteo-note {
+    display: flex;
+    align-items: flex-start;
+    gap: .5rem;
+    margin: 0 0 1.25rem;
+    color: var(--muted);
+}
+
+.sorteo-cta {
+    display: flex;
+    justify-content: center;
+    margin: 1.5rem 0 .5rem;
+}
+
+.sorteo-cta .btn {
+    min-width: 18rem;
+    justify-content: center;
+}
+
+.sorteo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-top: 1rem;
+}
+
+.sorteo-error {
+    margin: 1rem 0 0;
+    padding: .75rem 1rem;
+    background: var(--error-soft);
+    border: 1px solid #E7C9C5;
+    border-radius: var(--radius-sm);
+    color: var(--error);
+}
+
+.amigo-card {
+    padding: 1.75rem 1.5rem;
+    text-align: center;
+    background: var(--accent-soft);
+    border: 1px solid #C9E0DA;
+    border-radius: var(--radius);
+}
+
+.amigo-card__eyebrow {
+    margin: 0 0 .35rem;
+    color: var(--accent-strong);
+    font-size: .8125rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.amigo-card__name {
+    margin: 0;
+    color: var(--ink);
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.amigo-card__user {
+    margin: .25rem 0 0;
+    color: var(--muted);
+}
+
+.amigo-card__notes {
+    margin: 1rem 0 0;
+    padding-top: .75rem;
+    border-top: 1px solid #C9E0DA;
+    color: var(--muted);
+    font-size: .9375rem;
+    text-align: left;
+}
+
+.amigo-card__label {
+    display: block;
+    color: var(--accent-strong);
+    font-size: .8125rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.amigo-clues {
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+}
+
+.amigo-clues__title {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 0 0 .75rem;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.amigo-clues__list {
+    display: grid;
+    gap: .5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.amigo-clue {
+    padding: .75rem 1rem;
+    background: var(--surface-2);
+    border-radius: var(--radius-sm);
+}
+
+.amigo-clue--empty {
+    color: var(--muted);
+}
+
+.amigo-clue__body {
+    margin: 0;
+}
+
+.amigo-clue__date {
+    margin: .25rem 0 0;
+    color: var(--muted);
+    font-size: .8125rem;
+}
+
+/* Chat del evento: solo lectura, sin cuadro de escritura. */
+.chat-widget.is-read-only .chat-form,
+.chat-widget.is-read-only .chat-tray,
+.chat-widget.is-read-only .chat-recorder {
+    display: none;
+}
+
+.chat-readonly {
+    margin: .5rem 0;
+    padding: .6rem .9rem;
+    background: var(--accent-soft);
+    border-top: 1px solid #C9E0DA;
+    border-bottom: 1px solid #C9E0DA;
+    color: var(--accent-strong);
+    font-size: .875rem;
     text-align: center;
 }

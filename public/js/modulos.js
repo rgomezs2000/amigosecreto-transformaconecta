@@ -139,7 +139,11 @@
             autoWidth: true,
             ajax: {
                 url: datosUrl,
-                type: 'GET'
+                type: 'GET',
+                data: function (d) {
+                    d.filter_type = $('#modulos-filter-type').val();
+                    d.filter_category = $('#modulos-filter-category').val();
+                }
             },
             columns: [
                 { data: 'check', orderable: false, searchable: false, className: 'roles-check' },
@@ -189,11 +193,34 @@
             }, 300);
         });
 
+        // «Filtrar por»: todos los módulos o por categoría.
+        function syncFilter() {
+            var type = $('#modulos-filter-type').val();
+
+            $('#modulos-filter-category-wrap').toggleClass('d-none', type !== 'category');
+        }
+
+        $('#modulos-filter-type').on('change', function () {
+            syncFilter();
+            table.ajax.reload();
+        });
+
+        $('#modulos-filter-category').on('change', function () {
+            table.ajax.reload();
+        });
+
+        // «Limpiar» deja el formulario como al entrar y recarga el listado.
         $('#modulos-clear').on('click', function () {
+            window.clearTimeout(searchTimer);
             $('#modulos-search').val('');
+            $('#modulos-filter-type').val('all');
+            $('#modulos-filter-category').prop('selectedIndex', 0);
+            syncFilter();
             table.search('').draw();
             $('#modulos-search').trigger('focus');
         });
+
+        syncFilter();
 
         function clearErrors() {
             $nameError.text('').removeAttr('data-kind');

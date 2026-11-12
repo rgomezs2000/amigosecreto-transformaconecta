@@ -9,6 +9,9 @@ use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\Module;
 use App\Models\User;
+use App\Services\EventoChat;
+use App\Services\PushNotifier;
+use App\Services\SorteoService;
 use Carbon\Carbon;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
@@ -20,6 +23,12 @@ use Throwable;
 
 class EventosController extends Controller
 {
+    public function __construct(
+        private readonly SorteoService $sorteo,
+        private readonly EventoChat $chat,
+        private readonly PushNotifier $push,
+    ) {}
+
     private function ensureAccess(): void
     {
         $module = Module::query()
@@ -184,7 +193,27 @@ class EventosController extends Controller
                 'previous_status' => null,
                 'started_at' => now(),
                 'suspended_at' => null,
+                'draw_closed_at' => null,
             ]);
+
+            // Chat fijo del evento: solo lectura, con el aviso de apertura.
+            $this->chat->anunciar(
+                $event,
+                'El evento «'.$event->name.'» ha comenzado. El sorteo está abierto: entra a «Sorteo ciego» y descubre a tu amigo secreto.'
+            );
+
+            // Aviso en pantalla (push) para cada participante.
+            foreach ($participants as $participant) {
+                $this->push->send(
+                    $participant,
+                    'evento.iniciado',
+                    'El sorteo está abierto',
+                    'El evento ha comenzado. Ya puedes elegir a tu amigo secreto.',
+                    ['event_id' => $event->id],
+                    route('sorteo.index'),
+                    'evento'
+                );
+            }
 
             $this->sendToParticipants(
                 $participants,
@@ -193,10 +222,11 @@ class EventosController extends Controller
                 [
                     'Hola, {name}.',
                     'El evento «'.$event->name.'» ha comenzado.',
-                    'Se da paso al sorteo: ya puedes descubrir a tu amigo secreto.',
+                    'Ha llegado el momento de elegir a tu amigo secreto: el sorteo está disponible y abierto.',
+                    'Entra a «Sorteo ciego» y pulsa «Descubrir a mi Amigo Secreto».',
                     'Fecha del intercambio: '.$event->exchange_at?->format('d/m/Y').'.',
                 ],
-                ['label' => 'Entrar al sistema', 'url' => route('login')]
+                ['label' => 'Descubrir a mi amigo secreto', 'url' => route('sorteo.index')]
             );
 
             $request->session()->flash('eventos_status', 'Evento iniciado. Se enviaron las notificaciones.');
@@ -416,7 +446,50 @@ class EventosController extends Controller
         return api_success('Participantes encontrados.', [
             'participants' => $participants,
             'count' => $participants->count(),
+            'sorteo' => [
+                'pares' => $event->assignments()->count(),
+                'elegidos' => $event->assignments()->whereNotNull('drawn_at')->count(),
+                'abierto' => $event->drawIsOpen(),
+            ],
         ]);
+    }
+
+    /**
+     * Reinicia el sorteo del evento: borra las parejas y los chats secretos
+     * para que todos vuelvan a elegir. Queda en auditoría.
+     */
+    public function reiniciarSorteo(Request $request, Event $event): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($event->status->isFinished()) {
+            return api_error('El evento ya finalizó; el sorteo no se puede reiniciar.', 409);
+        }
+
+        if ($event->isSuspended()) {
+            return api_error('El evento está suspendido. Reactívalo antes de reiniciar el sorteo.', 409);
+        }
+
+        if (in_array($event->status, [EventStatus::Draft, EventStatus::Registration], true)) {
+            return api_error('El evento aún no ha comenzado; todavía no hay sorteo que reiniciar.', 409);
+        }
+
+        try {
+            $this->sorteo->reiniciar($event, $request->user());
+
+            $request->session()->flash('eventos_status', 'Sorteo reiniciado. Los participantes pueden volver a elegir.');
+
+            return api_success('Sorteo reiniciado correctamente.', [
+                'redirect' => route('eventos.index'),
+            ]);
+        } catch (Throwable $exception) {
+            Log::error('Error al reiniciar el sorteo', [
+                'event_id' => $event->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return api_error('No se pudo reiniciar el sorteo. Intenta de nuevo.', 500);
+        }
     }
 
     /**

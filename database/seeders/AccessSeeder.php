@@ -33,6 +33,8 @@ class AccessSeeder extends Seeder
             'eventos' => ['view', 'edit', 'open', 'postpone', 'cancel', 'suspend', 'reset', 'reset_draw'],
             'control-notificaciones' => ['view', 'edit'],
             'moderacion' => ['view'],
+            // Sin perfil: el SuperAdminAccessSeeder lo concede al usuario.
+            'restablecer-dinamica' => ['view'],
             'chat' => ['view'],
 
             'asignar-amigo' => ['assign'],
@@ -40,7 +42,7 @@ class AccessSeeder extends Seeder
             'obsequios' => ['gifts'],
             'lista-de-deseos' => ['wishlist'],
             'intercambio-de-pista' => ['clues'],
-            'revelacion' => ['reveal'],
+            'gran-revelacion' => ['reveal'],
             'notificaciones' => ['notifications'],
 
             'participantes' => ['view'],
@@ -92,7 +94,7 @@ class AccessSeeder extends Seeder
             'ver-tu-amigo',
             'lista-de-deseos',
             'intercambio-de-pista',
-            'revelacion',
+            'gran-revelacion',
             'notificaciones',
             'login',
             'logout',

@@ -101,6 +101,45 @@ class User extends Authenticatable
         return $this->role === UserRole::Admin;
     }
 
+    /**
+     * Cuenta del superadministrador del sistema: la única intocable.
+     *
+     * Es el usuario con el nombre de acceso configurado (ADMIN_USERNAME). Si
+     * no existe —por ejemplo si le cambiaron el usuario— se toma el
+     * administrador más antiguo. Devuelve null solo si no queda ninguna
+     * cuenta de administración.
+     */
+    public static function superAdmin(): ?self
+    {
+        $username = mb_strtolower(trim((string) config('amigosecreto.admin.username', '')));
+
+        if ($username !== '') {
+            $user = static::query()
+                ->whereRaw('LOWER(username) = ?', [$username])
+                ->first();
+
+            if ($user !== null) {
+                return $user;
+            }
+        }
+
+        return static::query()
+            ->admins()
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * ¿Esta cuenta es el superadministrador? Se usa para el módulo de
+     * restablecer la dinámica y para impedir borrarla o bloquearla.
+     */
+    public function isSuperAdmin(): bool
+    {
+        $superAdmin = static::superAdmin();
+
+        return $superAdmin !== null && $superAdmin->id === $this->id;
+    }
+
     public function hasPassword(): bool
     {
         return filled($this->password);

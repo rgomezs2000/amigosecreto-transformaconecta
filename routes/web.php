@@ -3,6 +3,7 @@
 use App\Http\Controllers\CategoriasController;
 use App\Http\Controllers\AmigoSecretoController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\DinamicaController;
 use App\Http\Controllers\EventoReinicioController;
 use App\Http\Controllers\EventosController;
 use App\Http\Controllers\GroupModerationController;
@@ -20,8 +21,10 @@ use App\Http\Controllers\NotificacionesController;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\PermisosController;
 use App\Http\Controllers\RolesController;
+use App\Http\Controllers\SorteoCiegoController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\UsuariosController;
+use App\Http\Controllers\VerTuAmigoController;
 use Illuminate\Support\Facades\Route;
 
 // Punto de entrada: sin sesión manda al login; con sesión muestra el panel.
@@ -102,6 +105,20 @@ Route::post('/notificaciones/{notification}/leer', [NotificacionesController::cl
     ->middleware('auth')
     ->name('notificaciones.leer');
 
+// Restablecer la dinámica: proceso batch que deja el sistema en cero.
+// Solo lo abre el superadministrador; el middleware lo comprueba.
+Route::get('/administracion/restablecer-dinamica', [DinamicaController::class, 'index'])
+    ->middleware(['auth', 'superadmin'])
+    ->name('dinamica.index');
+
+Route::post('/administracion/restablecer-dinamica', [DinamicaController::class, 'iniciar'])
+    ->middleware(['auth', 'superadmin'])
+    ->name('dinamica.iniciar');
+
+Route::get('/administracion/restablecer-dinamica/progreso', [DinamicaController::class, 'progreso'])
+    ->middleware(['auth', 'superadmin'])
+    ->name('dinamica.progreso');
+
 // Moderación: pestaña de reportes (solo lectura, con acceso directo al chat),
 // pestaña de bloqueos entre usuarios y pestaña de vetados de grupo.
 Route::get('/administracion/moderacion', [ModeracionController::class, 'index'])
@@ -115,6 +132,14 @@ Route::get('/moderacion/datos', [ModeracionController::class, 'datos'])
 Route::get('/moderacion/contadores', [ModeracionController::class, 'contadores'])
     ->middleware('auth')
     ->name('moderacion.contadores');
+
+Route::post('/moderacion/reportes/{report}/tomar', [ModeracionController::class, 'tomar'])
+    ->middleware('auth')
+    ->name('moderacion.reportes.tomar');
+
+Route::post('/moderacion/reportes/{report}/cerrar', [ModeracionController::class, 'cerrar'])
+    ->middleware('auth')
+    ->name('moderacion.reportes.cerrar');
 
 // Bloqueos entre usuarios: listado con estado, detalle y sincronización.
 Route::get('/moderacion/bloqueos/usuarios', [ModeracionBloqueosController::class, 'usuarios'])
@@ -308,6 +333,12 @@ Route::post('/chat/mensajes/{message}/eliminar', [ChatController::class, 'elimin
     ->middleware('auth')
     ->name('chat.eliminar');
 
+// Elimina un adjunto concreto; si era el último del mensaje, se borra también
+// el mensaje para no dejar una burbuja vacía.
+Route::post('/chat/adjuntos/{attachment}/eliminar', [ChatController::class, 'eliminarAdjunto'])
+    ->middleware('auth')
+    ->name('chat.adjuntos.eliminar');
+
 Route::post('/chat/mensajes/{message}/reaccionar', [ChatController::class, 'reaccionar'])
     ->middleware('auth')
     ->name('chat.reaccionar');
@@ -335,6 +366,28 @@ Route::get('/chat/{conversation}/media', [ChatController::class, 'media'])
 Route::get('/chat/{conversation}/perfil', [ChatController::class, 'perfil'])
     ->middleware('auth')
     ->name('chat.perfil');
+
+// Sorteo ciego del participante: descubrir, volver a ver y avanzar.
+Route::get('/amigo-secreto/asignar-amigo', [SorteoCiegoController::class, 'index'])
+    ->middleware('auth')
+    ->name('sorteo.index');
+
+Route::post('/amigo-secreto/asignar-amigo/descubrir', [SorteoCiegoController::class, 'descubrir'])
+    ->middleware('auth')
+    ->name('sorteo.descubrir');
+
+Route::get('/amigo-secreto/asignar-amigo/amigo', [SorteoCiegoController::class, 'ver'])
+    ->middleware('auth')
+    ->name('sorteo.ver');
+
+// Ver tu amigo: consulta libre del amigo secreto y sus pistas.
+Route::get('/amigo-secreto/ver-tu-amigo', [VerTuAmigoController::class, 'index'])
+    ->middleware('auth')
+    ->name('ver-tu-amigo.index');
+
+Route::get('/amigo-secreto/ver-tu-amigo/datos', [VerTuAmigoController::class, 'datos'])
+    ->middleware('auth')
+    ->name('ver-tu-amigo.datos');
 
 // Eventos (tarjetas, planificación y ciclo de vida).
 Route::get('/eventos/eventos', [EventosController::class, 'index'])
@@ -372,6 +425,11 @@ Route::post('/eventos/reiniciar', [EventoReinicioController::class, 'reiniciar']
 Route::post('/eventos/{event}/cancelar', [EventosController::class, 'cancelar'])
     ->middleware('auth')
     ->name('eventos.cancelar');
+
+// Reiniciar el sorteo del evento (solo administración, queda en auditoría).
+Route::post('/eventos/{event}/sorteo/reiniciar', [EventosController::class, 'reiniciarSorteo'])
+    ->middleware('auth')
+    ->name('eventos.sorteo.reiniciar');
 
 // Usuarios (gestión de cuentas).
 Route::get('/usuarios/usuarios', [UsuariosController::class, 'index'])

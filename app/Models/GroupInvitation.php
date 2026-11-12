@@ -16,6 +16,7 @@ class GroupInvitation extends Model
         'token',
         'accepted_at',
         'rejected_at',
+        'expires_at',
     ];
 
     protected function casts(): array
@@ -23,6 +24,7 @@ class GroupInvitation extends Model
         return [
             'accepted_at' => 'datetime',
             'rejected_at' => 'datetime',
+            'expires_at' => 'datetime',
         ];
     }
 

@@ -1,3 +1,5 @@
+@php($isSuperAdmin = $user->isSuperAdmin())
+
 <div class="table-actions">
     <button type="button" class="btn btn-sm btn-outline-secondary btn-user-edit"
             data-id="{{ $user->id }}" title="Modificar" aria-label="Modificar">
@@ -12,22 +14,31 @@
             title="Restablecer contraseña" aria-label="Restablecer contraseña">
         <i class="fa-solid fa-key" aria-hidden="true"></i>
     </button>
-    @if ($user->is_active && $user->locked_until === null)
-        <button type="button" class="btn btn-sm btn-outline-secondary btn-user-block"
-                data-id="{{ $user->id }}" data-name="{{ $user->name }}"
-                title="Bloquear" aria-label="Bloquear">
-            <i class="fa-solid fa-lock" aria-hidden="true"></i>
-        </button>
+
+    @if ($isSuperAdmin)
+        {{-- El superadministrador es intocable: sin bloquear ni eliminar. --}}
+        <span class="table-actions__badge" title="Superadministrador: cuenta intocable">
+            <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+            <span class="visually-hidden">Cuenta intocable</span>
+        </span>
     @else
-        <button type="button" class="btn btn-sm btn-outline-secondary btn-user-unlock"
+        @if ($user->is_active && $user->locked_until === null)
+            <button type="button" class="btn btn-sm btn-outline-secondary btn-user-block"
+                    data-id="{{ $user->id }}" data-name="{{ $user->name }}"
+                    title="Bloquear" aria-label="Bloquear">
+                <i class="fa-solid fa-lock" aria-hidden="true"></i>
+            </button>
+        @else
+            <button type="button" class="btn btn-sm btn-outline-secondary btn-user-unlock"
+                    data-id="{{ $user->id }}" data-name="{{ $user->name }}"
+                    title="Desbloquear" aria-label="Desbloquear">
+                <i class="fa-solid fa-lock-open" aria-hidden="true"></i>
+            </button>
+        @endif
+        <button type="button" class="btn btn-sm btn-outline-secondary btn-user-delete"
                 data-id="{{ $user->id }}" data-name="{{ $user->name }}"
-                title="Desbloquear" aria-label="Desbloquear">
-            <i class="fa-solid fa-lock-open" aria-hidden="true"></i>
+                title="Eliminar" aria-label="Eliminar">
+            <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
         </button>
     @endif
-    <button type="button" class="btn btn-sm btn-outline-secondary btn-user-delete"
-            data-id="{{ $user->id }}" data-name="{{ $user->name }}"
-            title="Eliminar" aria-label="Eliminar">
-        <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
-    </button>
 </div>
