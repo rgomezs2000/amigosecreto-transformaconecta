@@ -54,6 +54,46 @@ In order to ensure that the Laravel community is welcoming to all, please review
 
 If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
 
+## Despliegue (CI/CD)
+
+Cada push a `main` ejecuta [deploy.yml](.github/workflows/deploy.yml): primero las
+pruebas en Ubuntu y, si pasan, el despliegue por SSH al servidor Windows
+(XAMPP + Apache). Las migraciones son manuales
+([migrate.yml](.github/workflows/migrate.yml)).
+
+El script que se ejecuta en el servidor está versionado en
+[deploy-remote.ps1](.github/scripts/deploy-remote.ps1), así que se puede revisar y
+probar en local sin pasar por Actions:
+
+```powershell
+pwsh -NoProfile -File .github/scripts/deploy-remote.ps1
+```
+
+### Variables del repositorio
+
+| Variable | Obligatoria | Uso |
+| --- | --- | --- |
+| `SSH_HOST` | sí | Host del servidor |
+| `SSH_PORT` | no | Puerto SSH (por defecto `22`) |
+| `SSH_USER` | sí | Usuario SSH |
+| `DEPLOY_PATH` | sí | Ruta del proyecto en el servidor |
+| `PHP_BIN` | no | Ruta completa de `php.exe` si no está en el PATH de la sesión SSH |
+| `COMPOSER_BIN` | no | Ruta completa de `composer.bat`/`composer.phar` si no está en el PATH |
+
+`SSH_PASSWORD` va como *secret*.
+
+### Diagnóstico
+
+El log del despliegue muestra la versión de PHP, las extensiones cargadas y la
+versión de Composer antes de tocar nada. Cualquier comando que falle se registra
+con su ruta, sus argumentos, su salida y su código de salida, seguido de una
+línea `ERROR: ...` con la causa. El `stderr` del servidor se fusiona en el log,
+así que un fallo de PHP o de Composer ya no aparece como un `ExitStatus 1` mudo.
+
+Si el servidor tiene varios PHP, define `PHP_BIN` para fijar el que usa Composer
+y `php artisan`; el workflow avisa cuando la versión detectada no cumple el
+`^8.2` que exige [composer.json](composer.json).
+
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).

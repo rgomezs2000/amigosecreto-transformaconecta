@@ -11,17 +11,20 @@ permissions:
 
 # Mismo grupo que el despliegue: no se pisan.
 concurrency:
-  group: produccion
+  group: produccion-v2
   cancel-in-progress: false
 
 jobs:
   migrar:
     name: Migraciones en producción
-    runs-on: windows-2025
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
 
     steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
       - name: Instalar Posh-SSH
         shell: pwsh
         run: |
@@ -38,6 +41,7 @@ jobs:
           SSH_USER: ${{ vars.SSH_USER }}
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          PHP_BIN: ${{ vars.PHP_BIN }}
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module Posh-SSH
@@ -48,6 +52,29 @@ jobs:
               [string]::IsNullOrWhiteSpace($env:DEPLOY_PATH)) {
             throw 'Faltan datos: SSH_HOST, SSH_USER, SSH_PASSWORD o DEPLOY_PATH.'
           }
+
+          # ---- Script que se ejecutará en el servidor -------------------------
+          $scriptPath = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/migrate-remote.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath)) {
+            throw "No se encontró el script remoto: $scriptPath"
+          }
+
+          $remoteScript = (Get-Content -LiteralPath $scriptPath -Raw).
+            Replace('__DEPLOY_PATH__', ($env:DEPLOY_PATH -replace "'", "''")).
+            Replace('__PHP_BIN__', ("$env:PHP_BIN" -replace "'", "''"))
+
+          # Valida la sintaxis ANTES de conectar: un error de PowerShell en el
+          # servidor se vería como un simple "ExitStatus 1" sin explicación.
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($remoteScript, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors -and $parseErrors.Count -gt 0) {
+            throw "El script remoto tiene errores de sintaxis: $($parseErrors[0].Message)"
+          }
+
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
+          # 2>&1 fusiona stderr con stdout para que los errores de PHP se vean en el log.
+          $command = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1"
 
           $securePassword = ConvertTo-SecureString $env:SSH_PASSWORD -AsPlainText -Force
           $credential = [pscredential]::new($env:SSH_USER, $securePassword)
@@ -61,36 +88,6 @@ jobs:
             -AcceptKey
 
           try {
-            $safeDeployPath = $env:DEPLOY_PATH -replace "'", "''"
-
-            $remoteLines = @(
-              '$ErrorActionPreference = ''Stop''',
-              'function Step([string]$m) { Write-Host ""; Write-Host "==> $m" }',
-              'function Check([string]$what) { if ($LASTEXITCODE -ne 0) { throw "$what falló con código $LASTEXITCODE" } }',
-              ('$deployPath = ''{0}''' -f $safeDeployPath),
-              'if (-not (Test-Path -LiteralPath $deployPath)) { throw "No existe la ruta: $deployPath" }',
-              'Set-Location -LiteralPath $deployPath',
-              '$envFile = Join-Path $deployPath ''.env''',
-              'if (-not (Test-Path -LiteralPath $envFile)) { throw "Falta .env en $deployPath." }',
-              'if (-not (Select-String -Path $envFile -Pattern ''^DB_CONNECTION=(mysql|mariadb)'' -Quiet)) { throw "DB_CONNECTION debe ser mysql o mariadb en .env." }',
-              'Step ''[1/3] Configuración''',
-              'php artisan config:clear',
-              'Check ''config:clear''',
-              'Step ''[2/3] Migraciones pendientes''',
-              'php artisan migrate --force',
-              'Check ''migrate''',
-              'Step ''[3/3] Seeders''',
-              'php artisan db:seed --force',
-              'Check ''db:seed''',
-              'php artisan config:cache',
-              'Check ''config:cache''',
-              'Write-Host ''Migraciones y seeders al día.'''
-            )
-
-            $remoteScript = $remoteLines -join "`n"
-            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
-            $command = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
-
             Write-Host 'Ejecutando migraciones...'
             $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $command -TimeOut 900
 
@@ -98,8 +95,13 @@ jobs:
               $result.Output | ForEach-Object { Write-Host $_ }
             }
 
+            if ($result.Error) {
+              Write-Host '--- stderr del servidor ---'
+              $result.Error | ForEach-Object { Write-Host $_ }
+            }
+
             if ($result.ExitStatus -ne 0) {
-              throw "Las migraciones fallaron con ExitStatus $($result.ExitStatus)."
+              throw "Las migraciones fallaron con ExitStatus $($result.ExitStatus). Revisa las líneas 'ERROR:' del log anterior."
             }
 
             Write-Host 'Migraciones y seeders aplicados correctamente.'

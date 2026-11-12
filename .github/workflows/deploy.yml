@@ -10,6 +10,7 @@ permissions:
 
 # Un solo despliegue a la vez: un push nuevo cancela el anterior en cola.
 # Grupo v2: crea una cola limpia para destrabar ejecuciones antiguas.
+# El workflow de migraciones usa el mismo grupo: no se pisan.
 concurrency:
   group: produccion-v2
   cancel-in-progress: true
@@ -74,6 +75,9 @@ jobs:
     environment: production
 
     steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
       - name: Instalar Posh-SSH
         shell: pwsh
         run: |
@@ -90,6 +94,8 @@ jobs:
           SSH_USER: ${{ vars.SSH_USER }}
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          PHP_BIN: ${{ vars.PHP_BIN }}
+          COMPOSER_BIN: ${{ vars.COMPOSER_BIN }}
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module Posh-SSH
@@ -100,6 +106,31 @@ jobs:
               [string]::IsNullOrWhiteSpace($env:DEPLOY_PATH)) {
             throw 'Faltan datos: SSH_HOST, SSH_USER, SSH_PASSWORD o DEPLOY_PATH.'
           }
+
+          # ---- Script que se ejecutará en el servidor -------------------------
+          $scriptPath = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/deploy-remote.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath)) {
+            throw "No se encontró el script remoto: $scriptPath"
+          }
+
+          $remoteScript = (Get-Content -LiteralPath $scriptPath -Raw).
+            Replace('__DEPLOY_PATH__', ($env:DEPLOY_PATH -replace "'", "''")).
+            Replace('__PHP_BIN__', ("$env:PHP_BIN" -replace "'", "''")).
+            Replace('__COMPOSER_BIN__', ("$env:COMPOSER_BIN" -replace "'", "''"))
+
+          # Valida la sintaxis ANTES de conectar: un error de PowerShell en el
+          # servidor se vería como un simple "ExitStatus 1" sin explicación.
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($remoteScript, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors -and $parseErrors.Count -gt 0) {
+            throw "El script remoto tiene errores de sintaxis: $($parseErrors[0].Message)"
+          }
+
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
+          # 2>&1 fusiona stderr con stdout. Sin esto, los errores de PHP y Composer
+          # viajan por $result.Error y el log de Actions no muestra la causa real.
+          $command = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1"
 
           $securePassword = ConvertTo-SecureString $env:SSH_PASSWORD -AsPlainText -Force
           $credential = [pscredential]::new($env:SSH_USER, $securePassword)
@@ -113,62 +144,6 @@ jobs:
             -AcceptKey
 
           try {
-            $safeDeployPath = $env:DEPLOY_PATH -replace "'", "''"
-
-            $remoteLines = @(
-              '$ErrorActionPreference = ''Stop''',
-              'function Step([string]$m) { Write-Host ""; Write-Host "==> $m" }',
-              'function Check([string]$what) { if ($LASTEXITCODE -ne 0) { throw "$what falló con código $LASTEXITCODE" } }',
-              ('$deployPath = ''{0}''' -f $safeDeployPath),
-              'if (-not (Test-Path -LiteralPath $deployPath)) { throw "No existe la ruta: $deployPath" }',
-              'Set-Location -LiteralPath $deployPath',
-              'if (-not (Test-Path -LiteralPath ''.git'')) { throw "No es un repositorio Git: $deployPath" }',
-              'Write-Host "Ruta: $deployPath"',
-              '$envFile = Join-Path $deployPath ''.env''',
-              'if (-not (Test-Path -LiteralPath $envFile)) { throw "Falta .env en $deployPath. Créalo a partir de .env.example antes del primer despliegue." }',
-              'if (-not (Select-String -Path $envFile -Pattern ''^APP_KEY=base64:'' -Quiet)) { throw "APP_KEY no está generada en .env. Ejecuta: php artisan key:generate" }',
-              'if (-not (Select-String -Path $envFile -Pattern ''^DB_CONNECTION=(mysql|mariadb)'' -Quiet)) { throw "DB_CONNECTION debe ser mysql o mariadb en .env; ahora apunta a sqlite o falta." }',
-              'Step ''[1/6] Pull del repositorio''',
-              'git fetch origin main --prune',
-              'Check ''git fetch''',
-              'git checkout --force main',
-              'Check ''git checkout''',
-              'git reset --hard origin/main',
-              'Check ''git reset''',
-              'git clean -fd',
-              'Check ''git clean''',
-              'git pull --ff-only origin main',
-              'Check ''git pull''',
-              'Write-Host "Commit desplegado: $(git rev-parse --short HEAD)"',
-              'Step ''[2/6] Composer''',
-              'composer install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader',
-              'Check ''composer install''',
-              'Step ''[3/6] Limpieza de cachés''',
-              'php artisan route:clear',
-              'Check ''route:clear''',
-              'php artisan config:clear',
-              'Check ''config:clear''',
-              'php artisan view:clear',
-              'Check ''view:clear''',
-              'php artisan optimize:clear',
-              'Check ''optimize:clear''',
-              'Step ''[4/6] Regeneración de cachés''',
-              '# route:cache deshabilitado: en Apache/Windows provoca 405 en "/" (Supported methods: HEAD)',
-              'php artisan config:cache',
-              'Check ''config:cache''',
-              'php artisan view:cache',
-              'Check ''view:cache''',
-              'Step ''[5/6] Enlace de almacenamiento''',
-              'if (-not (Test-Path -LiteralPath (Join-Path $deployPath ''public\storage''))) { php artisan storage:link; Check ''storage:link''; Write-Host ''Enlace public/storage creado.'' } else { Write-Host ''public/storage ya existe.'' }',
-              'Step ''[6/6] Apache''',
-              'if (Get-Service -Name ''Apache2.4'' -ErrorAction SilentlyContinue) { Restart-Service -Name ''Apache2.4''; Write-Host ''Apache reiniciado.'' } else { Write-Host ''Apache no está instalado como servicio; se omite el reinicio.'' }',
-              'Write-Host ''Despliegue completado.'''
-            )
-
-            $remoteScript = $remoteLines -join "`n"
-            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
-            $command = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
-
             Write-Host 'Ejecutando despliegue remoto...'
             $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $command -TimeOut 1800
 
@@ -176,8 +151,13 @@ jobs:
               $result.Output | ForEach-Object { Write-Host $_ }
             }
 
+            if ($result.Error) {
+              Write-Host '--- stderr del servidor ---'
+              $result.Error | ForEach-Object { Write-Host $_ }
+            }
+
             if ($result.ExitStatus -ne 0) {
-              throw "El despliegue remoto falló con ExitStatus $($result.ExitStatus)."
+              throw "El despliegue remoto falló con ExitStatus $($result.ExitStatus). Revisa las líneas 'ERROR:' del log anterior."
             }
 
             Write-Host 'Despliegue completado correctamente.'
