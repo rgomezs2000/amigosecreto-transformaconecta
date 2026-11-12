@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Enums\EventStatus;
 use App\Models\Event;
 use App\Models\Module;
+use App\Models\NotificationSetting;
 use App\Services\ExchangeRateService;
 use Closure;
 use Illuminate\Http\Request;
@@ -22,10 +23,15 @@ class ShareAppShell
     {
         if (Auth::check()) {
             $user = Auth::user();
+            $user->forceFill(['last_seen_at' => now()])->save();
+
+            $event = Event::query()->orderByDesc('year')->first();
+            $frozen = $event?->isSuspended() ?? false;
 
             $menuModules = $user->accessibleModules()
                 ->whereNotIn('slug', ['login', 'logout', 'notificaciones'])
                 ->load('category')
+                ->reject(fn (Module $module) => $frozen && $module->category?->slug === 'amigo-secreto')
                 ->sortBy(fn (Module $module) => [
                     $module->category?->sort_order ?? 9999,
                     $module->order,
@@ -70,6 +76,7 @@ class ShareAppShell
                 'showNotifications' => $showNotifications,
                 'notifications' => $notifications,
                 'notificationsCount' => $notificationsCount,
+                'notificationSettings' => NotificationSetting::current(),
                 'dollarRate' => $dollarRate,
             ]);
         }

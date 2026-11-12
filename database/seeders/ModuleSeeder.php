@@ -10,11 +10,6 @@ class ModuleSeeder extends Seeder
 {
     public function run(): void
     {
-        // Solo primera instalación: si ya hay módulos, no se tocan.
-        if (Module::query()->exists()) {
-            return;
-        }
-
         $categories = Category::query()->pluck('id', 'name');
 
         $modules = [
@@ -27,14 +22,17 @@ class ModuleSeeder extends Seeder
             ['name' => 'Matriz de perfiles', 'slug' => 'matriz', 'group' => 'Maestros', 'icon' => 'fa-table-cells', 'order' => 35],
             ['name' => 'Usuarios', 'slug' => 'usuarios', 'group' => 'Usuarios', 'icon' => 'fa-users', 'order' => 40],
             ['name' => 'Eventos', 'slug' => 'eventos', 'group' => 'Eventos', 'icon' => 'fa-calendar-days', 'order' => 50],
+            ['name' => 'Control de Notificaciones', 'slug' => 'control-notificaciones', 'group' => 'Administración', 'icon' => 'fa-bell-slash', 'order' => 55],
+            ['name' => 'Chat', 'slug' => 'chat', 'group' => 'Mensajes', 'icon' => 'fa-comments', 'order' => 56],
 
             // Participantes: todos cuelgan del grupo Amigo secreto.
-            ['name' => 'Asignar amigo', 'slug' => 'asignar-amigo', 'group' => 'Amigo secreto', 'icon' => 'fa-handshake', 'order' => 60],
+            ['name' => 'Sorteo ciego', 'slug' => 'asignar-amigo', 'group' => 'Amigo secreto', 'icon' => 'fa-handshake', 'order' => 60],
             ['name' => 'Ver tu amigo', 'slug' => 'ver-tu-amigo', 'group' => 'Amigo secreto', 'icon' => 'fa-user-secret', 'order' => 70],
             ['name' => 'Obsequios', 'slug' => 'obsequios', 'group' => 'Amigo secreto', 'icon' => 'fa-gift', 'order' => 80],
             ['name' => 'Lista de deseos', 'slug' => 'lista-de-deseos', 'group' => 'Amigo secreto', 'icon' => 'fa-list', 'order' => 90],
             ['name' => 'Intercambio de pista', 'slug' => 'intercambio-de-pista', 'group' => 'Amigo secreto', 'icon' => 'fa-comments', 'order' => 95],
-            ['name' => 'Revelación', 'slug' => 'revelacion', 'group' => 'Amigo secreto', 'icon' => 'fa-star', 'order' => 96],
+            ['name' => 'Gran revelación', 'slug' => 'revelacion', 'group' => 'Amigo secreto', 'icon' => 'fa-star', 'order' => 96],
+            ['name' => 'Pistas', 'slug' => 'pistas', 'group' => 'Amigo secreto', 'icon' => 'fa-lightbulb', 'order' => 97],
             ['name' => 'Notificaciones', 'slug' => 'notificaciones', 'group' => 'Notificaciones', 'icon' => 'fa-bell', 'order' => 100],
 
             // Administradores: reportes y gestión del amigo secreto.
@@ -47,10 +45,13 @@ class ModuleSeeder extends Seeder
         ];
 
         foreach ($modules as $module) {
-            Module::create($module + [
-                'category_id' => $categories[$module['group']] ?? null,
-                'is_active' => true,
-            ]);
+            Module::query()->firstOrCreate(
+                ['slug' => $module['slug']],
+                $module + [
+                    'category_id' => $categories[$module['group']] ?? null,
+                    'is_active' => true,
+                ]
+            );
         }
     }
 }

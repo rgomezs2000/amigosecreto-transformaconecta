@@ -88,6 +88,7 @@ class User extends Authenticatable
             'reduce_motion' => 'boolean',
             'sound_enabled' => 'boolean',
             'last_login_at' => 'datetime',
+            'last_seen_at' => 'datetime',
             'failed_login_attempts' => 'integer',
             'locked_until' => 'datetime',
         ];
@@ -236,6 +237,91 @@ class User extends Authenticatable
                 'preheader' => 'Tu cuenta ya está disponible.',
             ]
         );
+    }
+
+    /**
+     * Envía al usuario sus datos de acceso: nombre, usuario, correo, rol y clave.
+     */
+    public function sendCredentialsEmail(string $plainPassword, ?Profile $profile = null): bool
+    {
+        $profile ??= $this->profile;
+        $roleName = $profile?->name ?? $this->role->label();
+        $appName = config('app.name', 'Tu Amigo Secreto');
+
+        return send_mail(
+            $this->email,
+            'Tus datos de acceso · ' . $appName,
+            'Tu cuenta está lista',
+            [
+                'Hola, ' . $this->name . '.',
+                'Tu cuenta en ' . $appName . ' fue creada correctamente.',
+                'Nombre: ' . $this->name,
+                'Usuario: ' . $this->username,
+                'Correo: ' . $this->email,
+                'Rol: ' . $roleName,
+                'Clave: ' . $plainPassword,
+                'Puedes cambiar la clave cuando quieras desde tu perfil.',
+            ],
+            [
+                'label' => 'Entrar al sistema',
+                'url' => route('login'),
+            ],
+            [
+                'recipient_name' => $this->name,
+                'eyebrow' => 'Cuenta creada',
+                'preheader' => 'Tus datos de acceso a ' . $appName . '.',
+            ]
+        );
+    }
+
+    /**
+     * Envía la nueva clave al restablecerla.
+     */
+    public function sendPasswordResetEmail(string $plainPassword): bool
+    {
+        $appName = config('app.name', 'Tu Amigo Secreto');
+
+        return send_mail(
+            $this->email,
+            'Tu contraseña fue restablecida · ' . $appName,
+            'Tu contraseña fue restablecida',
+            [
+                'Hola, ' . $this->name . '.',
+                'El administrador restableció tu contraseña.',
+                'Usuario: ' . $this->username,
+                'Nueva clave: ' . $plainPassword,
+                'Al entrar, puedes cambiarla desde tu perfil.',
+            ],
+            [
+                'label' => 'Entrar al sistema',
+                'url' => route('login'),
+            ],
+            [
+                'recipient_name' => $this->name,
+                'eyebrow' => 'Contraseña restablecida',
+                'preheader' => 'Tu nueva clave de acceso.',
+            ]
+        );
+    }
+
+    /**
+     * Búsqueda por nombre, correo o usuario.
+     */
+    public function scopeSearch(Builder $query, ?string $term): Builder
+    {
+        $term = trim((string) $term);
+
+        if ($term === '') {
+            return $query;
+        }
+
+        $like = '%' . $term . '%';
+
+        return $query->where(function (Builder $query) use ($like) {
+            $query->where('name', 'like', $like)
+                ->orWhere('email', 'like', $like)
+                ->orWhere('username', 'like', $like);
+        });
     }
 
     public function profile(): BelongsTo

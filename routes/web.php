@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\CategoriasController;
+use App\Http\Controllers\ChatController;
+use App\Http\Controllers\EventosController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LoginController;
@@ -8,10 +10,12 @@ use App\Http\Controllers\LogoutController;
 use App\Http\Controllers\MatrizPerfilesController;
 use App\Http\Controllers\ModulosController;
 use App\Http\Controllers\ModuleController;
+use App\Http\Controllers\NotificacionesController;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\PermisosController;
 use App\Http\Controllers\RolesController;
 use App\Http\Controllers\UsuarioController;
+use App\Http\Controllers\UsuariosController;
 use Illuminate\Support\Facades\Route;
 
 // Punto de entrada: sin sesión manda al login; con sesión muestra el panel.
@@ -53,6 +57,138 @@ Route::post('/perfil/clave', [PerfilController::class, 'cambiarClave'])
 Route::get('/perfil/consultar-login', [UsuarioController::class, 'consultarLoginExiste'])
     ->middleware('auth')
     ->name('perfil.login-existe');
+
+// Control de Notificaciones (solo administración).
+Route::get('/administracion/notificaciones', [NotificacionesController::class, 'index'])
+    ->middleware('auth')
+    ->name('notificaciones.index');
+
+Route::post('/administracion/notificaciones', [NotificacionesController::class, 'guardar'])
+    ->middleware('auth')
+    ->name('notificaciones.guardar');
+
+// Chat (buzón universal, flotante).
+Route::get('/mensajes/chat', [ChatController::class, 'index'])
+    ->middleware('auth')
+    ->name('chat.index');
+
+Route::get('/chat/resumen', [ChatController::class, 'resumen'])
+    ->middleware('auth')
+    ->name('chat.resumen');
+
+Route::post('/chat/abrir', [ChatController::class, 'abrir'])
+    ->middleware('auth')
+    ->name('chat.abrir');
+
+Route::post('/chat/grupo', [ChatController::class, 'grupo'])
+    ->middleware('auth')
+    ->name('chat.grupo');
+
+Route::get('/chat/{conversation}/mensajes', [ChatController::class, 'mensajes'])
+    ->middleware('auth')
+    ->name('chat.mensajes');
+
+Route::post('/chat/{conversation}/mensajes', [ChatController::class, 'enviar'])
+    ->middleware('auth')
+    ->name('chat.enviar');
+
+Route::post('/chat/{conversation}/leer', [ChatController::class, 'leer'])
+    ->middleware('auth')
+    ->name('chat.leer');
+
+Route::post('/chat/{conversation}/moderar', [ChatController::class, 'moderar'])
+    ->middleware('auth')
+    ->name('chat.moderar');
+
+Route::post('/chat/mensajes/{message}/editar', [ChatController::class, 'editar'])
+    ->middleware('auth')
+    ->name('chat.editar');
+
+Route::post('/chat/mensajes/{message}/eliminar', [ChatController::class, 'eliminar'])
+    ->middleware('auth')
+    ->name('chat.eliminar');
+
+Route::post('/chat/mensajes/{message}/reaccionar', [ChatController::class, 'reaccionar'])
+    ->middleware('auth')
+    ->name('chat.reaccionar');
+
+Route::post('/chat/mensajes/{message}/reportar', [ChatController::class, 'reportar'])
+    ->middleware('auth')
+    ->name('chat.reportar');
+
+// Eventos (tarjetas, planificación y ciclo de vida).
+Route::get('/eventos/eventos', [EventosController::class, 'index'])
+    ->middleware('auth')
+    ->name('eventos.index');
+
+Route::post('/eventos', [EventosController::class, 'crear'])
+    ->middleware('auth')
+    ->name('eventos.crear');
+
+Route::get('/eventos/{event}/participantes', [EventosController::class, 'participantes'])
+    ->middleware('auth')
+    ->name('eventos.participantes');
+
+Route::post('/eventos/{event}/iniciar', [EventosController::class, 'iniciar'])
+    ->middleware('auth')
+    ->name('eventos.iniciar');
+
+Route::post('/eventos/{event}/suspender', [EventosController::class, 'suspender'])
+    ->middleware('auth')
+    ->name('eventos.suspender');
+
+Route::post('/eventos/{event}/posponer', [EventosController::class, 'posponer'])
+    ->middleware('auth')
+    ->name('eventos.posponer');
+
+Route::post('/eventos/{event}/cancelar', [EventosController::class, 'cancelar'])
+    ->middleware('auth')
+    ->name('eventos.cancelar');
+
+// Usuarios (gestión de cuentas).
+Route::get('/usuarios/usuarios', [UsuariosController::class, 'index'])
+    ->middleware('auth')
+    ->name('usuarios.index');
+
+Route::get('/usuarios/datos', [UsuariosController::class, 'datos'])
+    ->middleware('auth')
+    ->name('usuarios.datos');
+
+Route::post('/usuarios', [UsuariosController::class, 'crear'])
+    ->middleware('auth')
+    ->name('usuarios.crear');
+
+Route::post('/usuarios/eliminar-varios', [UsuariosController::class, 'eliminarVarios'])
+    ->middleware('auth')
+    ->name('usuarios.eliminar-varios');
+
+Route::post('/usuarios/{user}/restablecer', [UsuariosController::class, 'restablecer'])
+    ->middleware('auth')
+    ->name('usuarios.restablecer');
+
+Route::post('/usuarios/{user}/bloquear', [UsuariosController::class, 'bloquear'])
+    ->middleware('auth')
+    ->name('usuarios.bloquear');
+
+Route::post('/usuarios/{user}/desbloquear', [UsuariosController::class, 'desbloquear'])
+    ->middleware('auth')
+    ->name('usuarios.desbloquear');
+
+Route::get('/usuarios/{user}', [UsuariosController::class, 'editar'])
+    ->middleware('auth')
+    ->name('usuarios.editar');
+
+Route::get('/usuarios/{user}/ver', [UsuariosController::class, 'ver'])
+    ->middleware('auth')
+    ->name('usuarios.ver');
+
+Route::put('/usuarios/{user}', [UsuariosController::class, 'modificar'])
+    ->middleware('auth')
+    ->name('usuarios.modificar');
+
+Route::delete('/usuarios/{user}', [UsuariosController::class, 'eliminar'])
+    ->middleware('auth')
+    ->name('usuarios.eliminar');
 
 // Roles (maestro de perfiles/roles).
 Route::get('/maestros/roles', [RolesController::class, 'index'])

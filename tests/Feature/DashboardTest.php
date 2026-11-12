@@ -112,7 +112,7 @@ class DashboardTest extends TestCase
             ->get($module->url())
             ->assertForbidden()
             ->assertSee('Error 403')
-            ->assertSee('Menú');
+            ->assertSee('Acceso denegado');
     }
 
     public function test_modulo_inexistente_da_404(): void
@@ -123,7 +123,7 @@ class DashboardTest extends TestCase
             ->get('/no-existe/no-existe')
             ->assertNotFound()
             ->assertSee('Error 404')
-            ->assertSee('Menú');
+            ->assertSee('Página no encontrada');
     }
 
     public function test_ruta_inexistente_sin_sesion_da_404(): void
@@ -142,7 +142,7 @@ class DashboardTest extends TestCase
             ->get('/ruta-inexistente')
             ->assertNotFound()
             ->assertSee('Error 404')
-            ->assertSee('Menú');
+            ->assertSee('Página no encontrada');
     }
 
     public function test_la_pagina_de_error_500_se_puede_renderizar(): void

@@ -113,8 +113,8 @@ class CategoriasTest extends TestCase
         $this->actingAs($admin)
             ->getJson('/categorias/datos?' . $baseQuery)
             ->assertOk()
-            ->assertJsonPath('recordsTotal', 3)
-            ->assertJsonPath('recordsFiltered', 3)
+            ->assertJsonPath('recordsTotal', 5)
+            ->assertJsonPath('recordsFiltered', 5)
             ->assertJsonPath('data.0.name', 'General');
 
         $filteredQuery = http_build_query([

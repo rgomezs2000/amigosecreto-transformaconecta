@@ -32,8 +32,14 @@ class UsuarioController extends Controller
             ], 422);
         }
 
+        $ignoreId = $request->integer('ignore');
+
+        if (! $request->boolean('admin')) {
+            $ignoreId = $ignoreId ?: $request->user()?->id;
+        }
+
         $exists = User::query()
-            ->loginExists($login, $request->user()?->id)
+            ->loginExists($login, $ignoreId ?: null)
             ->exists();
 
         return response()->json([

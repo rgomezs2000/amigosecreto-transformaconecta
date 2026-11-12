@@ -31,6 +31,8 @@ class AccessSeeder extends Seeder
             'categorias' => ['view', 'create', 'edit', 'delete'],
             'usuarios' => ['view', 'create', 'edit', 'delete', 'unlock', 'block'],
             'eventos' => ['view', 'edit', 'open', 'postpone', 'cancel', 'suspend', 'reset', 'reset_draw'],
+            'control-notificaciones' => ['view', 'edit'],
+            'chat' => ['view'],
 
             'asignar-amigo' => ['assign'],
             'ver-tu-amigo' => ['view'],
@@ -69,6 +71,8 @@ class AccessSeeder extends Seeder
             'categorias',
             'usuarios',
             'eventos',
+            'control-notificaciones',
+            'chat',
             'participantes',
             'usuarios-asociados',
             'lista-de-deseos',
@@ -80,6 +84,7 @@ class AccessSeeder extends Seeder
         $participantModuleSlugs = [
             '',
             'perfiles',
+            'chat',
             'asignar-amigo',
             'ver-tu-amigo',
             'lista-de-deseos',

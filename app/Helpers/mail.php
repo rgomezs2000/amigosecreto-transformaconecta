@@ -30,6 +30,15 @@ if (! function_exists('send_mail')) {
             return false;
         }
 
+        if (! \App\Models\NotificationSetting::current()->email_enabled) {
+            Log::info('Correo omitido: las notificaciones por correo están desactivadas.', [
+                'to' => $recipients,
+                'subject' => $subject,
+            ]);
+
+            return false;
+        }
+
         try {
             Mail::to($recipients)->send(
                 new NotificationMail($subject, $title, $mailLines, $action, $options)

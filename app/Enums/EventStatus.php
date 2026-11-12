@@ -10,6 +10,7 @@ enum EventStatus: string
     case Drawn = 'drawn';
     case Closed = 'closed';
     case Revealed = 'revealed';
+    case Suspended = 'suspended';
 
     public function label(): string
     {
@@ -20,6 +21,7 @@ enum EventStatus: string
             self::Drawn => 'Sorteado',
             self::Closed => 'Cerrado',
             self::Revealed => 'Revelado',
+            self::Suspended => 'Suspendido',
         };
     }
 
