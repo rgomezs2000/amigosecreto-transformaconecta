@@ -63,7 +63,7 @@ class ChatTest extends TestCase
 
         return User::factory()->create([
             'name' => $name,
-            'username' => strtolower(str_replace(' ', '-', $name)),
+            'username' => strtolower(str_replace(' ', '-', $name)) . '-' . \Illuminate\Support\Str::lower(\Illuminate\Support\Str::random(5)),
             'profile_id' => $profile->id,
             'role' => $role,
             'is_active' => true,

@@ -23,7 +23,10 @@ class ShareAppShell
     {
         if (Auth::check()) {
             $user = Auth::user();
-            $user->forceFill(['last_seen_at' => now()])->save();
+
+            if ($user->exists) {
+                $user->forceFill(['last_seen_at' => now()])->save();
+            }
 
             $event = Event::query()->orderByDesc('year')->first();
             $frozen = $event?->isSuspended() ?? false;

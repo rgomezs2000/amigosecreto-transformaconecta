@@ -120,8 +120,8 @@ class ModulosTest extends TestCase
         $this->actingAs($admin)
             ->getJson('/modulos/datos?' . $baseQuery)
             ->assertOk()
-            ->assertJsonPath('recordsTotal', 2)
-            ->assertJsonPath('recordsFiltered', 2);
+            ->assertJsonPath('recordsTotal', 4)
+            ->assertJsonPath('recordsFiltered', 4);
 
         $filteredQuery = http_build_query([
             'draw' => 2,

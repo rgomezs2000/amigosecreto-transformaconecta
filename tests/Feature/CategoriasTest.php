@@ -115,7 +115,7 @@ class CategoriasTest extends TestCase
             ->assertOk()
             ->assertJsonPath('recordsTotal', 5)
             ->assertJsonPath('recordsFiltered', 5)
-            ->assertJsonPath('data.0.name', 'General');
+            ->assertJsonPath('data.0.name', 'Administración');
 
         $filteredQuery = http_build_query([
             'draw' => 2,

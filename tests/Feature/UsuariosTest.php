@@ -379,8 +379,8 @@ class UsuariosTest extends TestCase
         $admin = $this->adminWithUsuariosModule();
 
         $user = User::factory()->create([
-            'email' => 'ana@example.com',
-            'username' => 'ana',
+            'email' => 'ana.reset@example.com',
+            'username' => 'ana-reset',
         ]);
 
         $this->actingAs($admin)
