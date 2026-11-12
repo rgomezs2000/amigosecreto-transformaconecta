@@ -3,17 +3,27 @@
 namespace App\Http\Controllers;
 
 use App\Enums\UserRole;
+use App\Models\ChatBlock;
+use App\Models\ChatGroupAudit;
 use App\Models\ChatMessage;
+use App\Models\ChatMessageAttachment;
+use App\Models\ChatModerationRead;
+use App\Models\ChatReaction;
 use App\Models\ChatReport;
 use App\Models\Conversation;
+use App\Models\GroupBan;
+use App\Models\GroupSuspension;
 use App\Models\Module;
 use App\Models\User;
 use App\Services\Firestore\FirestoreService;
 use App\Services\PushNotifier;
+use App\Support\ChatMentions;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -23,6 +33,27 @@ use Throwable;
 
 class ChatController extends Controller
 {
+    /**
+     * Último mensaje ya consultado en esta petición, por conversación.
+     *
+     * @var array<int, ChatMessage|null>
+     */
+    private array $lastMessageCache = [];
+
+    /**
+     * Usuarios bloqueados por el usuario de la petición.
+     *
+     * @var array<int, array<int, int>>|null
+     */
+    private ?array $blockedCache = null;
+
+    /**
+     * Quiénes bloquearon al usuario de la petición.
+     *
+     * @var array<int, array<int, int>>|null
+     */
+    private ?array $blockedByCache = null;
+
     public function __construct(
         private readonly FirestoreService $firestore,
         private readonly PushNotifier $push,
@@ -42,6 +73,13 @@ class ChatController extends Controller
         if (! auth()->user()?->hasModuleAccess($module)) {
             abort(403);
         }
+
+        // Estas memorias valen solo para la petición en curso: el controlador
+        // puede reutilizarse entre peticiones (pruebas u Octane) y los datos
+        // de bloqueos y del último mensaje cambian.
+        $this->blockedCache = null;
+        $this->blockedByCache = null;
+        $this->lastMessageCache = [];
     }
 
     public function index(): View
@@ -60,20 +98,48 @@ class ChatController extends Controller
 
         $conversations = Conversation::query()
             ->whereHas('users', fn ($query) => $query->whereKey($user->id))
-            ->with('users')
+            ->with(['users', 'assignment.receiver', 'pinnedMessage.user'])
             ->orderByDesc('updated_at')
             ->get();
 
         $items = $conversations->map(fn (Conversation $conversation) => $this->conversationData($conversation, $user));
 
+        // Las archivadas van a su propia pestaña; las eliminadas salen de la
+        // lista principal salvo que tengan mensajes nuevos.
+        $archived = $items->filter(fn (array $item) => $item['archived'])->values();
+        $active = $items
+            ->reject(fn (array $item) => $item['archived'])
+            ->filter(fn (array $item) => ! $item['hidden'] || $item['unread'] > 0)
+            ->values();
+
         $moderation = [];
 
         if ($user->role === UserRole::Admin) {
             $moderation = Conversation::query()
-                ->with('users')
+                ->with(['users', 'assignment.receiver', 'pinnedMessage.user'])
+                ->whereDoesntHave('users', fn ($query) => $query->whereNotNull('archived_at'))
                 ->orderByDesc('updated_at')
                 ->get()
                 ->map(fn (Conversation $conversation) => $this->conversationData($conversation, $user, true));
+        }
+
+        // Estado de cada persona para la pestaña Usuarios: si la bloqueé, si me
+        // bloqueó, si su chat está silenciado y en qué conversación va.
+        $blocked = $this->blockedIds($user);
+        $blockedBy = $this->blockedByIds($user);
+
+        $directByUser = [];
+
+        foreach ($conversations as $conversation) {
+            if ($conversation->type !== 'direct' || $conversation->users->count() !== 2) {
+                continue;
+            }
+
+            $other = $conversation->users->firstWhere('id', '!=', $user->id);
+
+            if ($other !== null) {
+                $directByUser[(int) $other->id] = $conversation;
+            }
         }
 
         $users = User::query()
@@ -81,19 +147,103 @@ class ChatController extends Controller
             ->where('is_active', true)
             ->orderBy('name')
             ->get()
-            ->map(fn (User $item) => [
-                'id' => $item->id,
-                'name' => $item->name,
-                'role' => $item->role?->label() ?? 'Usuario',
-                'online' => $item->last_seen_at !== null && $item->last_seen_at->gte(now()->subMinutes(5)),
-            ]);
+            ->map(function (User $item) use ($user, $blocked, $blockedBy, $directByUser) {
+                $conversation = $directByUser[(int) $item->id] ?? null;
+                $pivot = $conversation?->users->firstWhere('id', $user->id)?->pivot;
+
+                return [
+                    'id' => $item->id,
+                    'name' => $item->name,
+                    'role' => $item->role?->label() ?? 'Usuario',
+                    'is_admin' => $item->role === UserRole::Admin,
+                    'online' => $item->last_seen_at !== null && $item->last_seen_at->gte(now()->subMinutes(5)),
+                    'blocked' => in_array((int) $item->id, $blocked, true),
+                    'blocked_by' => in_array((int) $item->id, $blockedBy, true),
+                    'muted' => $pivot?->muted_at !== null,
+                    'conversation_id' => $conversation?->id,
+                ];
+            });
 
         return api_success('Resumen del chat.', [
-            'conversations' => $items,
+            'conversations' => $this->sortedConversations($active),
+            'archived' => $this->sortedConversations($archived),
             'moderation' => $moderation,
             'users' => $users,
-            'unread' => $conversations->sum(fn (Conversation $conversation) => $this->unreadCount($conversation, $user)),
+            'unread' => $active->sum(fn (array $item) => $item['muted'] ? 0 : $item['unread']),
+            'moderation_unread' => collect($moderation)->sum('unread'),
             'is_admin' => $user->role === UserRole::Admin,
+        ]);
+    }
+
+    /**
+     * Orden de la lista: las fijadas primero y, dentro de cada grupo, por
+     * actividad (el favorito solo se destaca, no cambia el orden).
+     *
+     * @param  Collection<int, array<string, mixed>>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function sortedConversations($items): array
+    {
+        return $items
+            ->sort(function (array $first, array $second) {
+                if ($first['pinned'] !== $second['pinned']) {
+                    return $first['pinned'] ? -1 : 1;
+                }
+
+                return strcmp(
+                    (string) ($second['updated_iso'] ?? ''),
+                    (string) ($first['updated_iso'] ?? '')
+                );
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Contador ligero para el botón flotante.
+     *
+     * Se consulta aunque el panel esté cerrado: `unread` son los mensajes
+     * nuevos de mis conversaciones (grupos y directas, nunca silenciadas) y
+     * `moderation` es el conteo aparte de lo que solo superviso.
+     */
+    public function contador(Request $request): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $user = $request->user();
+
+        $unread = 0;
+
+        $conversations = Conversation::query()
+            ->whereHas('users', fn ($query) => $query->whereKey($user->id))
+            ->with('users')
+            ->get();
+
+        foreach ($conversations as $conversation) {
+            $pivot = $this->pivotFor($conversation, $user);
+
+            // Archivadas y silenciadas no cuentan para el botón flotante.
+            if ($pivot?->archived_at !== null || $pivot?->muted_at !== null) {
+                continue;
+            }
+
+            $unread += $this->unreadCount($conversation, $user);
+        }
+
+        $moderation = 0;
+
+        if ($user->role === UserRole::Admin) {
+            $moderation = Conversation::query()
+                ->with('users')
+                // Lo archivado queda fuera del alcance de la moderación.
+                ->whereDoesntHave('users', fn ($query) => $query->whereNotNull('archived_at'))
+                ->get()
+                ->sum(fn (Conversation $conversation) => $this->moderationUnreadCount($conversation, $user));
+        }
+
+        return api_success('Contador del chat.', [
+            'unread' => (int) $unread,
+            'moderation' => (int) $moderation,
         ]);
     }
 
@@ -118,25 +268,30 @@ class ChatController extends Controller
             return api_error('No puedes abrir un chat contigo mismo.', 422);
         }
 
+        if (ChatBlock::existsBetween($user->id, $target->id)) {
+            return api_error('No puedes abrir el chat con esta persona mientras esté bloqueada.', 422);
+        }
+
         try {
-            $conversation = Conversation::query()
-                ->where('type', 'direct')
-                ->whereHas('users', fn ($query) => $query->whereKey($user->id))
-                ->whereHas('users', fn ($query) => $query->whereKey($target->id))
-                ->withCount('users')
-                ->get()
-                ->first(fn (Conversation $item) => $item->users_count === 2);
-
-            if ($conversation === null) {
-                $conversation = Conversation::create([
-                    'type' => 'direct',
-                    'created_by' => $user->id,
-                ]);
-
-                $conversation->users()->attach([$user->id, $target->id]);
-            }
+            $conversation = $this->directConversationWith($user, $target);
 
             $conversation->load('users');
+
+            // Si la había eliminado, al abrirla de nuevo arranca limpia para
+            // mí: la misma conversación, sin duplicarla.
+            $pivot = $conversation->users->firstWhere('id', $user->id)?->pivot;
+
+            if ($pivot !== null && $pivot->hidden_at !== null) {
+                $now = now();
+
+                $conversation->users()->updateExistingPivot($user->id, [
+                    'hidden_at' => null,
+                    'cleared_at' => $now,
+                    'last_read_at' => $now,
+                ]);
+
+                $conversation->load('users');
+            }
 
             $this->firestore->recordConversation($conversation);
 
@@ -154,17 +309,13 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
-        if ($request->user()->role !== UserRole::Admin) {
-            return api_error('Solo un administrador puede crear grupos.', 403);
-        }
-
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:120'],
-            'user_ids' => ['required', 'array', 'min:1'],
+            // Sin integrantes también vale: el grupo se comparte por enlace.
+            'user_ids' => ['nullable', 'array'],
             'user_ids.*' => ['integer', 'exists:users,id'],
         ], [
             'name.required' => 'Escribe el nombre del grupo.',
-            'user_ids.required' => 'Selecciona al menos un usuario.',
         ]);
 
         if ($validator->fails()) {
@@ -181,15 +332,21 @@ class ChatController extends Controller
                 'is_moderated' => true,
             ]);
 
-            $ids = collect($validator->validated()['user_ids'])->map(fn ($id) => (int) $id)->unique()->values();
+            $ids = collect($validator->validated()['user_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values();
 
             $conversation->users()->attach($user->id, ['role' => 'moderator']);
 
-            foreach ($ids->where('!=', $user->id) as $id) {
+            foreach ($ids as $id) {
+                if ((int) $id === (int) $user->id) {
+                    continue;
+                }
+
                 $conversation->users()->attach($id, ['role' => 'member']);
             }
 
             $conversation->load('users');
+
+            ChatGroupAudit::log($conversation, $user, 'grupo_creado', null, 'activo', 'Grupo creado.');
 
             $this->firestore->recordConversation($conversation);
 
@@ -203,6 +360,20 @@ class ChatController extends Controller
         }
     }
 
+    /**
+     * Mensajes de la conversación.
+     *
+     * Con `?after_id=N` responde de forma incremental: solo los mensajes
+     * posteriores a N más una ventana corta con el estado actual de los
+     * últimos, para reflejar ediciones, borrados, reacciones y confirmaciones
+     * de lectura sin repintar todo el historial. Esa es la vía que usa el
+     * sondeo del widget; sin `after_id` se comporta como siempre (historial
+     * completo) y es la que se usa al abrir la conversación.
+     *
+     * Con `?ids[]=1&ids[]=2` devuelve solo esos mensajes (en `recent`), para
+     * refrescar una burbuja concreta tras editarla, borrarla o reaccionar sin
+     * pedir el historial ni escribir marcas de lectura.
+     */
     public function mensajes(Request $request, Conversation $conversation): JsonResponse
     {
         $this->ensureAccess();
@@ -213,104 +384,221 @@ class ChatController extends Controller
             return api_error('No tienes acceso a esta conversación.', 403);
         }
 
-        $conversation->messages()
-            ->where('user_id', '!=', $user->id)
-            ->whereNull('delivered_at')
-            ->update(['delivered_at' => now()]);
+        $patchIds = array_values(array_filter(array_map(
+            'intval',
+            (array) $request->query('ids', [])
+        )));
+        $patchOnly = $patchIds !== [];
+        $afterId = max(0, (int) $request->query('after_id', 0));
+        $full = $afterId === 0 && ! $patchOnly;
 
         $clearedAt = $conversation->users->firstWhere('id', $user->id)?->pivot->cleared_at;
 
-        $messagesQuery = $conversation->messages()
-            ->with(['user', 'attachments'])
-            ->latest('id')
-            ->limit(100);
+        $base = function () use ($conversation, $clearedAt) {
+            $query = $conversation->messages()->with(['user', 'attachments']);
 
-        if ($clearedAt !== null) {
-            $messagesQuery->where('created_at', '>', $clearedAt);
+            if ($clearedAt !== null) {
+                // Se incluye el mismo segundo del borrado para no ocultar mensajes nuevos.
+                $query->where('created_at', '>=', $clearedAt);
+            }
+
+            return $query;
+        };
+
+        if ($full) {
+            $messages = $base()->latest('id')->limit(100)->get()->reverse()->values();
+        } elseif ($patchOnly) {
+            $messages = collect();
+        } else {
+            $messages = $base()->where('id', '>', $afterId)->orderBy('id')->limit(200)->get();
         }
 
-        $messages = $messagesQuery
-            ->get()
-            ->reverse()
-            ->values();
-
-        $others = $conversation->users->where('id', '!=', $user->id);
-
-        $messages = $messages->map(function (ChatMessage $message) use ($user, $others) {
-            $deleted = $message->isDeleted();
-            $read = $others->isNotEmpty() && $others->every(function ($other) use ($message) {
-                $lastRead = $other->pivot->last_read_at;
-
-                return $lastRead !== null
-                    && Carbon::parse($lastRead)->gte($message->created_at);
-            });
-
-            $reactions = $message->reactions()
-                ->selectRaw('emoji, count(*) as total')
-                ->groupBy('emoji')
-                ->orderByDesc('total')
-                ->get()
-                ->map(fn ($reaction) => [
-                    'emoji' => $reaction->emoji,
-                    'count' => (int) $reaction->total,
-                    'mine' => $message->reactions()
-                        ->where('user_id', $user->id)
-                        ->where('emoji', $reaction->emoji)
-                        ->exists(),
-                ]);
-
-            return [
-                'id' => $message->id,
-                'body' => $deleted ? '' : $message->body,
-                'sender' => $message->is_moderation ? 'Moderación' : ($message->user?->name ?? 'Sistema'),
-                'is_moderation' => $message->is_moderation,
-                'mine' => $message->user_id === $user->id,
-                'created_at' => $message->created_at?->format('H:i'),
-                'created_date' => $message->created_at?->format('Y-m-d'),
-                'read' => $read,
-                'delivered' => $message->delivered_at !== null,
-                'latitude' => $message->latitude,
-                'longitude' => $message->longitude,
-                'type' => $message->type,
-                'attachment_url' => $message->attachment_path
-                    ? asset('storage/'.$message->attachment_path)
-                    : null,
-                'attachment_name' => $message->attachment_name,
-                'attachments' => $message->attachments->map(fn ($item) => [
-                    'url' => asset('storage/'.$item->path),
-                    'type' => $item->type,
-                    'name' => $item->name,
-                ])->values(),
-                'link_url' => $message->link_url,
-                'link_title' => $message->link_title,
-                'link_description' => $message->link_description,
-                'link_image' => $message->link_image,
-                'edited' => $message->edited_at !== null,
-                'deleted' => $deleted,
-                'deleted_label' => $deleted
-                    ? ($message->deleted_by_admin ? 'Eliminado por un administrador' : 'Eliminado por el autor')
-                    : null,
-                'reactions' => $reactions,
-                'can_edit' => $message->user_id === $user->id && ! $deleted,
-                'can_delete' => ! $deleted
-                    && ($message->user_id === $user->id || $user->role === UserRole::Admin),
-                'reported' => $message->reports()->where('reporter_id', $user->id)->exists(),
-            ];
-        });
-
-        $conversation->users()->updateExistingPivot($user->id, ['last_read_at' => now()]);
+        // Ventana de estado: el cliente la compara con lo que ya pintó y solo
+        // actualiza las burbujas que cambiaron.
+        if ($full) {
+            $recent = collect();
+        } elseif ($patchOnly) {
+            $recent = $base()->whereIn('id', $patchIds)->orderBy('id')->get();
+        } else {
+            $recent = $base()->latest('id')->limit(10)->get()->reverse()->values();
+        }
 
         $pivot = $conversation->users->firstWhere('id', $user->id)?->pivot;
         $lastRead = $pivot?->last_read_at;
-        $newMessages = $lastRead === null
-            ? collect()
-            : $conversation->messages()->where('created_at', '>', $lastRead)->count();
+        $others = $conversation->users->where('id', '!=', $user->id);
+
+        if (! $patchOnly) {
+            // En reposo no se escribe nada: leer la conversación no debe golpear
+            // la base de datos en cada sondeo.
+            $undelivered = $conversation->messages()
+                ->where('user_id', '!=', $user->id)
+                ->whereNull('delivered_at')
+                ->exists();
+
+            if ($undelivered) {
+                $conversation->messages()
+                    ->where('user_id', '!=', $user->id)
+                    ->whereNull('delivered_at')
+                    ->update(['delivered_at' => now()]);
+            }
+
+            if ($full || $messages->isNotEmpty() || $undelivered) {
+                $conversation->users()->updateExistingPivot($user->id, ['last_read_at' => now()]);
+
+                // El administrador no participa en las conversaciones que modera: su
+                // marca de lectura va aparte para poder contar lo nuevo en silencio.
+                $this->markModerationRead($conversation, $user);
+                $this->markChatNotificationsRead($conversation, $user);
+            }
+        }
+
+        $newCount = 0;
+
+        if ($full && $lastRead !== null) {
+            $newCount = $conversation->messages()
+                ->where('created_at', '>', $lastRead)
+                ->when($clearedAt !== null, fn ($query) => $query->where('created_at', '>=', $clearedAt))
+                ->count();
+        }
+
+        $all = $messages->concat($recent)->unique('id')->values();
+        $reactions = $this->reactionSummary($all, $user);
+        $reported = $this->reportedMessageIds($all, $user);
+
+        $map = fn (ChatMessage $message) => $this->messageData($message, $user, $others, $reactions, $reported);
+
+        $recentPayload = $recent->map($map)->values();
 
         return api_success('Mensajes.', [
-            'conversation' => $this->conversationData($conversation->fresh('users'), $user),
-            'messages' => $messages,
-            'new_count' => $newMessages,
+            'delta' => ! $full,
+            'conversation' => $full ? $this->conversationData($conversation->fresh('users'), $user) : null,
+            'messages' => $messages->map($map)->values(),
+            'recent' => $recentPayload,
+            'recent_hash' => $recentPayload->isEmpty() ? null : md5((string) json_encode($recentPayload)),
+            'latest_id' => (int) (($messages->last() ?? $recent->last())?->id ?? 0),
+            'new_count' => $newCount,
+            'mentionables' => $full ? $this->mentionables($conversation) : [],
         ]);
+    }
+
+    /**
+     * Payload de un mensaje para el widget.
+     *
+     * @param  Collection<int, User>  $others
+     * @param  array<int, array<int, array{emoji:string,count:int,mine:bool}>>  $reactions
+     * @param  array<int, int>  $reported
+     * @return array<string, mixed>
+     */
+    private function messageData(ChatMessage $message, User $user, $others, array $reactions, array $reported): array
+    {
+        $deleted = $message->isDeleted();
+        $read = $others->isNotEmpty() && $others->every(function ($other) use ($message) {
+            $lastRead = $other->pivot->last_read_at;
+
+            return $lastRead !== null
+                && Carbon::parse($lastRead)->gte($message->created_at);
+        });
+
+        return [
+            'id' => $message->id,
+            'body' => $deleted ? '' : $message->body,
+            'sender' => $message->is_moderation ? 'Moderación' : ($message->user?->name ?? 'Sistema'),
+            'is_moderation' => $message->is_moderation,
+            'mine' => $message->user_id === $user->id,
+            'created_at' => $message->created_at?->format('H:i'),
+            'created_date' => $message->created_at?->format('Y-m-d'),
+            'read' => $read,
+            'delivered' => $message->delivered_at !== null,
+            'latitude' => $message->latitude,
+            'longitude' => $message->longitude,
+            'type' => $message->type,
+            'attachment_url' => $message->attachment_path
+                ? asset('storage/'.$message->attachment_path)
+                : null,
+            'attachment_name' => $message->attachment_name,
+            'attachments' => $message->attachments->map(fn ($item) => [
+                'url' => asset('storage/'.$item->path),
+                'type' => $item->type,
+                'name' => $item->name,
+            ])->values(),
+            'link_url' => $message->link_url,
+            'link_title' => $message->link_title,
+            'link_description' => $message->link_description,
+            'link_image' => $message->link_image,
+            'edited' => $message->edited_at !== null,
+            'deleted' => $deleted,
+            'deleted_label' => $deleted
+                ? ($message->deleted_by_admin ? 'Eliminado por un administrador' : 'Eliminado por el autor')
+                : null,
+            'reactions' => $reactions[$message->id] ?? [],
+            'can_edit' => $message->user_id === $user->id && ! $deleted,
+            'can_delete' => ! $deleted
+                && ($message->user_id === $user->id || $user->role === UserRole::Admin),
+            'reported' => in_array((int) $message->id, $reported, true),
+        ];
+    }
+
+    /**
+     * Reacciones de un conjunto de mensajes en dos consultas (no una por mensaje).
+     *
+     * @param  Collection<int, ChatMessage>  $messages
+     * @return array<int, array<int, array{emoji:string,count:int,mine:bool}>>
+     */
+    private function reactionSummary($messages, User $user): array
+    {
+        if ($messages->isEmpty()) {
+            return [];
+        }
+
+        $ids = $messages->pluck('id')->all();
+
+        $totals = ChatReaction::query()
+            ->whereIn('message_id', $ids)
+            ->selectRaw('message_id, emoji, count(*) as total')
+            ->groupBy('message_id', 'emoji')
+            ->orderByDesc('total')
+            ->orderBy('emoji')
+            ->get();
+
+        $mine = ChatReaction::query()
+            ->whereIn('message_id', $ids)
+            ->where('user_id', $user->id)
+            ->get()
+            ->groupBy('message_id');
+
+        $summary = [];
+
+        foreach ($totals->groupBy('message_id') as $messageId => $rows) {
+            $myEmojis = $mine->has($messageId) ? $mine->get($messageId)->pluck('emoji')->all() : [];
+
+            $summary[(int) $messageId] = $rows->map(fn ($row) => [
+                'emoji' => $row->emoji,
+                'count' => (int) $row->total,
+                'mine' => in_array($row->emoji, $myEmojis, true),
+            ])->values()->all();
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Mensajes ya reportados por el usuario, en una sola consulta.
+     *
+     * @param  Collection<int, ChatMessage>  $messages
+     * @return array<int, int>
+     */
+    private function reportedMessageIds($messages, User $user): array
+    {
+        if ($messages->isEmpty()) {
+            return [];
+        }
+
+        return ChatReport::query()
+            ->whereIn('message_id', $messages->pluck('id')->all())
+            ->where('reporter_id', $user->id)
+            ->pluck('message_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     public function enviar(Request $request, Conversation $conversation): JsonResponse
@@ -326,8 +614,23 @@ class ChatController extends Controller
         if ($conversation->type === 'direct') {
             $other = $conversation->users->firstWhere('id', '!=', $user->id);
 
-            if ($other !== null && \App\Models\ChatBlock::existsBetween($user->id, $other->id)) {
+            if ($other !== null && ChatBlock::existsBetween($user->id, $other->id)) {
                 return api_error('No puedes enviar mensajes a este usuario.', 403);
+            }
+        }
+
+        if ($conversation->type === 'group') {
+            $suspension = GroupSuspension::query()
+                ->where('conversation_id', $conversation->id)
+                ->where('user_id', $user->id)
+                ->where('until', '>', now())
+                ->first();
+
+            if ($suspension !== null) {
+                return api_error(
+                    'Estás suspendido en este grupo hasta el '.$suspension->until->format('d/m/Y H:i').'.',
+                    403
+                );
             }
         }
 
@@ -431,6 +734,8 @@ class ChatController extends Controller
                 $message->attachments()->createMany($stored);
             }
 
+            ChatMentions::handle($message, $conversation, $user);
+
             $conversation->touch();
 
             if ($isMember) {
@@ -473,6 +778,12 @@ class ChatController extends Controller
 
         if (! $this->canAccess($message->conversation, $user)) {
             return api_error('No tienes acceso a este mensaje.', 403);
+        }
+
+        $suspended = $this->ensureNotSuspended($message->conversation, $user);
+
+        if ($suspended !== null) {
+            return $suspended;
         }
 
         if ($message->user_id !== $user->id) {
@@ -519,15 +830,19 @@ class ChatController extends Controller
             return api_error('No tienes acceso a este mensaje.', 403);
         }
 
-        if ($message->user_id !== $user->id && $user->role !== UserRole::Admin) {
-            return api_error('Solo el autor o un administrador puede eliminar el mensaje.', 403);
+        $isGroupOwner = $message->conversation->type === 'group'
+            && $message->conversation->created_by === $user->id;
+
+        if ($message->user_id !== $user->id && $user->role !== UserRole::Admin && ! $isGroupOwner) {
+            return api_error('Solo el autor, el dueño del grupo o un administrador puede eliminar el mensaje.', 403);
         }
 
         if ($message->isDeleted()) {
             return api_success('El mensaje ya estaba eliminado.');
         }
 
-        $byAdmin = $user->role === UserRole::Admin && $message->user_id !== $user->id;
+        $byAdmin = $message->user_id !== $user->id
+            && ($user->role === UserRole::Admin || $isGroupOwner);
 
         $message->update([
             'deleted_at' => now(),
@@ -536,6 +851,17 @@ class ChatController extends Controller
         ]);
 
         $this->firestore->recordMessage($message->load('user', 'attachments', 'conversation'));
+
+        if ($message->conversation?->isGroup()) {
+            ChatGroupAudit::log(
+                $message->conversation,
+                $user,
+                'mensaje_eliminado',
+                $message->user,
+                'eliminado',
+                $byAdmin ? 'Mensaje eliminado por moderación.' : 'Mensaje eliminado por su autor.'
+            );
+        }
 
         return api_success('Mensaje eliminado.', [
             'deleted_label' => $byAdmin ? 'Eliminado por un administrador' : 'Eliminado por el autor',
@@ -550,6 +876,12 @@ class ChatController extends Controller
 
         if (! $this->canAccess($message->conversation, $user)) {
             return api_error('No tienes acceso a este mensaje.', 403);
+        }
+
+        $suspended = $this->ensureNotSuspended($message->conversation, $user);
+
+        if ($suspended !== null) {
+            return $suspended;
         }
 
         $validator = Validator::make($request->all(), [
@@ -674,9 +1006,12 @@ class ChatController extends Controller
         }
 
         try {
+            // Quien silenció la conversación no recibe push ni aviso interno:
+            // el mensaje sigue contando en la lista, pero sin interrumpir.
             $recipients = $conversation->users()
                 ->whereKeyNot($sender->id)
-                ->get();
+                ->get()
+                ->reject(fn (User $recipient) => $recipient->pivot?->muted_at !== null);
 
             if ($recipients->isEmpty()) {
                 return;
@@ -759,6 +1094,7 @@ class ChatController extends Controller
 
         $conversation->users()->updateExistingPivot($user->id, ['last_read_at' => now()]);
 
+        $this->markChatNotificationsRead($conversation, $user);
         $this->firestore->recordConversation($conversation->fresh('users'));
 
         return api_success('Conversación marcada como leída.');
@@ -956,9 +1292,51 @@ class ChatController extends Controller
             : null;
     }
 
+    private function ensureNotSuspended(Conversation $conversation, User $user): ?JsonResponse
+    {
+        if ($conversation->type !== 'group') {
+            return null;
+        }
+
+        $suspension = GroupSuspension::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $user->id)
+            ->where('until', '>', now())
+            ->first();
+
+        if ($suspension === null) {
+            return null;
+        }
+
+        return api_error(
+            'Estás suspendido en este grupo hasta el '.$suspension->until->format('d/m/Y H:i').'.',
+            403
+        );
+    }
+
     private function canAccess(Conversation $conversation, User $user): bool
     {
-        return $user->role === UserRole::Admin || $conversation->users()->whereKey($user->id)->exists();
+        $conversation->loadMissing('users');
+
+        if (! $conversation->users->contains('id', $user->id)) {
+            if ($user->role !== UserRole::Admin) {
+                return false;
+            }
+
+            // Lo archivado queda fuera del alcance de la moderación.
+            return ! $conversation->isArchivedForAnyUser();
+        }
+
+        // Un bloqueo entre las dos personas corta el acceso al chat directo.
+        if ($conversation->type === 'direct') {
+            $other = $conversation->users->firstWhere('id', '!=', $user->id);
+
+            if ($other !== null && ChatBlock::existsBetween($user->id, $other->id)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public function silenciar(Request $request, Conversation $conversation): JsonResponse
@@ -971,8 +1349,13 @@ class ChatController extends Controller
             return api_error('No tienes acceso a esta conversación.', 403);
         }
 
-        $pivot = $conversation->users->firstWhere('id', $user->id)?->pivot;
-        $muted = $pivot === null || $pivot->muted_at === null;
+        $pivot = $this->pivotFor($conversation, $user);
+
+        if ($pivot === null) {
+            return api_error('Solo los participantes pueden silenciar la conversación.', 403);
+        }
+
+        $muted = $pivot->muted_at === null;
 
         $conversation->users()->updateExistingPivot($user->id, [
             'muted_at' => $muted ? now() : null,
@@ -991,9 +1374,233 @@ class ChatController extends Controller
             return api_error('No tienes acceso a esta conversación.', 403);
         }
 
+        if ($this->pivotFor($conversation, $user) === null) {
+            return api_error('Solo los participantes pueden borrar la conversación de su lado.', 403);
+        }
+
         $conversation->users()->updateExistingPivot($user->id, ['cleared_at' => now()]);
 
         return api_success('Conversación borrada de tu lado.');
+    }
+
+    /**
+     * «Vaciar chat»: limpia mensajes, enlaces y adjuntos de mi lado, pero la
+     * conversación sigue en la lista.
+     */
+    public function vaciar(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        $conversation->users()->updateExistingPivot($request->user()->id, ['cleared_at' => now()]);
+
+        if ($conversation->isGroup()) {
+            ChatGroupAudit::log(
+                $conversation,
+                $request->user(),
+                'vaciar_sala',
+                $request->user(),
+                'vaciado',
+                'El miembro vació la sala de su lado.'
+            );
+        }
+
+        return api_success('Chat vaciado. Se limpiaron los mensajes, enlaces y adjuntos.');
+    }
+
+    /**
+     * «Eliminar»: saca la conversación de mi lista. Al volver a abrirla con la
+     * misma persona se reinicia mi vista, sin duplicar la conversación.
+     */
+    public function eliminarPropia(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        $now = now();
+
+        $conversation->users()->updateExistingPivot($request->user()->id, [
+            'cleared_at' => $now,
+            'hidden_at' => $now,
+            'last_read_at' => $now,
+            'archived_at' => null,
+            'favorite_at' => null,
+            'pinned_at' => null,
+        ]);
+
+        return api_success('Conversación eliminada de tu lista.');
+    }
+
+    /**
+     * «Archivar»: pasa a la pestaña Archivadas y queda fuera de la moderación
+     * mientras esté archivada. Solo las conversaciones directas.
+     */
+    public function archivar(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        if ($conversation->type !== 'direct') {
+            return api_error('Solo las conversaciones directas se pueden archivar.', 422);
+        }
+
+        $conversation->users()->updateExistingPivot($request->user()->id, ['archived_at' => now()]);
+
+        return api_success('Conversación archivada. Mientras esté archivada queda fuera de la moderación.');
+    }
+
+    /**
+     * «Deshacer archivo»: vuelve a Conversaciones y a la moderación.
+     */
+    public function desarchivar(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        if (! $conversation->canBeUnarchived()) {
+            return api_error('Este chat de amigo secreto queda archivado al terminar el evento.', 422);
+        }
+
+        $conversation->users()->updateExistingPivot($request->user()->id, ['archived_at' => null]);
+
+        return api_success('Conversación devuelta a la lista.');
+    }
+
+    /**
+     * Destacar o quitar de favoritos: solo cambia para mí y sigue el orden
+     * por mensaje.
+     */
+    public function favorito(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        $favorite = $this->pivotFor($conversation, $request->user())?->favorite_at === null;
+
+        $conversation->users()->updateExistingPivot($request->user()->id, [
+            'favorite_at' => $favorite ? now() : null,
+        ]);
+
+        return api_success(
+            $favorite ? 'Conversación destacada en favoritos.' : 'Conversación quitada de favoritos.',
+            ['favorite' => $favorite]
+        );
+    }
+
+    /**
+     * Fijar o desfijar la conversación: las fijadas van primero en la lista y
+     * no se mueven aunque lleguen mensajes.
+     */
+    public function fijar(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        $pinned = $this->pivotFor($conversation, $request->user())?->pinned_at === null;
+
+        $conversation->users()->updateExistingPivot($request->user()->id, [
+            'pinned_at' => $pinned ? now() : null,
+        ]);
+
+        return api_success(
+            $pinned ? 'Conversación fijada arriba.' : 'Conversación desfijada.',
+            ['pinned' => $pinned]
+        );
+    }
+
+    /**
+     * Marcar como no leído: se revierte la lectura de toda la conversación.
+     */
+    public function noLeido(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        $conversation->users()->updateExistingPivot($request->user()->id, ['last_read_at' => null]);
+
+        return api_success('Conversación marcada como no leída.', ['unread' => true]);
+    }
+
+    /**
+     * Fijar un mensaje dentro del chat (cintillo bajo el título). Solo los
+     * participantes: la moderación no fija mensajes.
+     */
+    public function fijarMensaje(Request $request, Conversation $conversation, ChatMessage $message): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        if ((int) $message->conversation_id !== (int) $conversation->id) {
+            return api_error('Ese mensaje no pertenece a la conversación.', 422);
+        }
+
+        if ($message->isDeleted()) {
+            return api_error('No puedes fijar un mensaje eliminado.', 422);
+        }
+
+        $conversation->forceFill(['pinned_message_id' => $message->id])->save();
+
+        return api_success('Mensaje fijado.', [
+            'pinned_message' => $this->pinnedMessageData($conversation->fresh('pinnedMessage.user')),
+        ]);
+    }
+
+    /**
+     * Quitar el mensaje fijado (desde el cintillo del chat).
+     */
+    public function desfijarMensaje(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($error = $this->ensureMember($conversation, $request->user())) {
+            return $error;
+        }
+
+        $conversation->forceFill(['pinned_message_id' => null])->save();
+
+        return api_success('Mensaje desfijado.', ['pinned_message' => null]);
+    }
+
+    /**
+     * Solo los participantes pueden cambiar el estado de la conversación.
+     */
+    private function ensureMember(Conversation $conversation, User $user): ?JsonResponse
+    {
+        $conversation->loadMissing('users');
+
+        if ($conversation->users->contains('id', $user->id)) {
+            return null;
+        }
+
+        if ($user->role === UserRole::Admin && $this->canAccess($conversation, $user)) {
+            return api_error('La moderación no puede cambiar esta conversación.', 403);
+        }
+
+        return api_error('No tienes acceso a esta conversación.', 403);
     }
 
     public function bloquear(Request $request, User $user): JsonResponse
@@ -1010,7 +1617,7 @@ class ChatController extends Controller
             return api_error('No puedes bloquear a un administrador.', 422);
         }
 
-        \App\Models\ChatBlock::query()->firstOrCreate([
+        ChatBlock::query()->firstOrCreate([
             'blocker_id' => $current->id,
             'blocked_id' => $user->id,
         ]);
@@ -1022,7 +1629,7 @@ class ChatController extends Controller
     {
         $this->ensureAccess();
 
-        \App\Models\ChatBlock::query()
+        ChatBlock::query()
             ->where('blocker_id', $request->user()->id)
             ->where('blocked_id', $user->id)
             ->delete();
@@ -1030,15 +1637,652 @@ class ChatController extends Controller
         return api_success('Usuario desbloqueado.', ['blocked' => false]);
     }
 
+    public function salir(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $user = $request->user();
+
+        if ($conversation->type !== 'group') {
+            return api_error('Solo puedes salir de un grupo.', 422);
+        }
+
+        if (! $this->canAccess($conversation, $user)) {
+            return api_error('No perteneces a este grupo.', 403);
+        }
+
+        if ($conversation->created_by === $user->id) {
+            return api_error('El dueño del grupo no puede salir: puede eliminar el grupo o expulsar miembros.', 422);
+        }
+
+        $conversation->users()->detach($user->id);
+        $conversation->touch();
+
+        ChatGroupAudit::log($conversation, $user, 'salida', $user, 'salida', 'El miembro salió del grupo.');
+
+        return api_success('Saliste del grupo.');
+    }
+
+    public function reportarConversacion(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $user = $request->user();
+
+        if (! $this->canAccess($conversation, $user)) {
+            return api_error('No tienes acceso a esta conversación.', 403);
+        }
+
+        $lastMessageId = $conversation->messages()->latest('id')->value('id');
+
+        if ($lastMessageId !== null) {
+            ChatReport::query()->firstOrCreate(
+                ['message_id' => $lastMessageId, 'reporter_id' => $user->id],
+                ['reason' => 'Reporte de la conversación: '.($conversation->name ?: 'sin nombre')]
+            );
+        }
+
+        User::query()
+            ->where('role', UserRole::Admin)
+            ->where('is_active', true)
+            ->get()
+            ->each(function (User $admin) use ($conversation, $user) {
+                $admin->notifications()->create([
+                    'id' => (string) Str::uuid(),
+                    'type' => 'chat.report',
+                    'data' => [
+                        'title' => 'Conversación reportada',
+                        'body' => $user->name.' reportó una conversación.',
+                        'conversation_id' => $conversation->id,
+                    ],
+                    'sound' => true,
+                    'visual' => true,
+                ]);
+            });
+
+        return api_success('Reporte enviado a la administración.');
+    }
+
+    public function expulsar(Request $request, Conversation $conversation, User $user): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $current = $request->user();
+
+        $isOwner = $conversation->type === 'group' && $conversation->created_by === $current->id;
+
+        if ($current->role !== UserRole::Admin && ! $isOwner) {
+            abort(403);
+        }
+
+        $conversation->users()->detach($user->id);
+
+        ChatGroupAudit::log(
+            $conversation,
+            $current,
+            'expulsion',
+            $user,
+            'expulsado',
+            'Miembro expulsado del grupo.'
+        );
+
+        return api_success('Miembro expulsado del grupo.');
+    }
+
+    /**
+     * Perfil de la conversación para el panel del chat: identidad, miembros,
+     * auditoría del grupo y estado de las opciones del usuario.
+     */
+    public function perfil(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $user = $request->user();
+
+        if (! $this->canAccess($conversation, $user)) {
+            return api_error('No tienes acceso a esta conversación.', 403);
+        }
+
+        $conversation->loadMissing('users', 'assignment.receiver');
+
+        $isGroup = $conversation->isGroup();
+        $isAdmin = $user->role === UserRole::Admin;
+        $pivot = $this->pivotFor($conversation, $user);
+        $isParticipant = $pivot !== null;
+        $isOwner = $isGroup && (int) $conversation->created_by === (int) $user->id;
+        $canManage = $isAdmin || $isOwner;
+        $isSecret = $conversation->type === 'secret';
+        $secretRole = $conversation->secretRoleFor($user);
+        $other = $isGroup
+            ? null
+            : ($conversation->users->firstWhere('id', '!=', $user->id)
+                ?? $conversation->users->first());
+
+        $showOther = ! $isSecret || $isAdmin || $secretRole === 'giver';
+
+        $suspensions = $canManage
+            ? GroupSuspension::query()
+                ->where('conversation_id', $conversation->id)
+                ->where('until', '>', now())
+                ->get()
+                ->keyBy('user_id')
+            : collect();
+
+        $bans = $canManage
+            ? GroupBan::query()
+                ->where('conversation_id', $conversation->id)
+                ->whereNull('revoked_at')
+                ->get()
+                ->keyBy('user_id')
+            : collect();
+
+        $members = $conversation->users->map(function (User $member) use ($conversation, $canManage, $suspensions, $bans) {
+            $status = null;
+
+            if ($canManage) {
+                $status = $bans->has($member->id)
+                    ? 'Vetado'
+                    : ($suspensions->has($member->id) ? 'Suspendido' : 'Activo');
+            }
+
+            return [
+                'id' => $member->id,
+                'name' => $member->name,
+                'username' => $member->username,
+                'is_owner' => (int) $member->id === (int) $conversation->created_by,
+                'online' => $member->last_seen_at !== null && $member->last_seen_at->gte(now()->subMinutes(5)),
+                'status' => $status,
+            ];
+        })->values();
+
+        $blocked = ! $isGroup && $isParticipant && $other !== null
+            && in_array((int) $other->id, $this->blockedIds($user), true);
+        $blockedByThem = ! $isGroup && $isParticipant && $other !== null
+            && in_array((int) $other->id, $this->blockedByIds($user), true);
+
+        $audit = [];
+
+        if ($isGroup && $canManage) {
+            $audit = ChatGroupAudit::query()
+                ->where('conversation_id', $conversation->id)
+                ->with(['actor:id,name', 'target:id,name'])
+                ->latest('id')
+                ->limit(50)
+                ->get()
+                ->map(fn (ChatGroupAudit $entry) => [
+                    'id' => $entry->id,
+                    'action' => $entry->action,
+                    'label' => $entry->label(),
+                    'status' => $entry->status,
+                    'details' => $entry->details,
+                    'actor' => $entry->actor?->name,
+                    'target' => $entry->target?->name,
+                    'created_at' => $entry->created_at?->format('d/m/Y H:i'),
+                ])
+                ->values()
+                ->all();
+        }
+
+        return api_success('Perfil de la conversación.', [
+            'id' => $conversation->id,
+            'type' => $conversation->type,
+            'is_group' => $isGroup,
+            'is_secret' => $isSecret,
+            'secret_role' => $secretRole,
+            'title' => $conversation->titleFor($user),
+            'name' => $conversation->name,
+            'is_owner' => $isOwner,
+            'is_admin' => $isAdmin,
+            'is_participant' => $isParticipant,
+            'is_moderating' => $isAdmin && ! $isParticipant,
+            'can_manage' => $canManage,
+            'can_leave' => $isGroup && $isParticipant && ! $isOwner && ! $isAdmin,
+            'can_delete' => $isGroup && $canManage,
+            'can_block' => ! $isGroup && $isParticipant && $other !== null
+                && $other->role !== UserRole::Admin,
+            'can_report' => $isParticipant,
+            'members_count' => $conversation->users->count(),
+            'members' => $members,
+            'other' => $other !== null && $showOther ? [
+                'id' => $other->id,
+                'name' => $other->name,
+                'username' => $other->username,
+                'email' => $other->email,
+                'online' => $other->last_seen_at !== null && $other->last_seen_at->gte(now()->subMinutes(5)),
+            ] : null,
+            'favorite' => $isParticipant && $pivot?->favorite_at !== null,
+            'muted' => $isParticipant && $pivot?->muted_at !== null,
+            'blocked' => $blocked,
+            'blocked_by_them' => $blockedByThem,
+            'audit' => $audit,
+        ]);
+    }
+
+    public function miembros(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $current = $request->user();
+        $isOwner = $conversation->type === 'group' && $conversation->created_by === $current->id;
+
+        if ($current->role !== UserRole::Admin && ! $isOwner) {
+            abort(403);
+        }
+
+        $suspensions = GroupSuspension::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('until', '>', now())
+            ->get()
+            ->keyBy('user_id');
+
+        $bans = GroupBan::query()
+            ->where('conversation_id', $conversation->id)
+            ->whereNull('revoked_at')
+            ->get()
+            ->keyBy('user_id');
+
+        $items = $conversation->users->map(fn (User $member) => [
+            'id' => $member->id,
+            'name' => $member->name,
+            'is_owner' => $member->id === $conversation->created_by,
+            'suspended_until' => $suspensions->get($member->id)?->until?->format('d/m/Y H:i'),
+            'banned' => $bans->has($member->id),
+        ])->values();
+
+        return api_success('Miembros del grupo.', ['items' => $items]);
+    }
+
+    public function eliminarConversacion(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $current = $request->user();
+
+        $isOwner = $conversation->type === 'group' && $conversation->created_by === $current->id;
+
+        if ($current->role !== UserRole::Admin && ! $isOwner) {
+            abort(403);
+        }
+
+        $messageIds = $conversation->messages()->pluck('id');
+
+        if ($messageIds->isNotEmpty()) {
+            ChatMessageAttachment::query()->whereIn('message_id', $messageIds)->delete();
+        }
+
+        $conversation->messages()->delete();
+        DB::table('chat_conversation_user')
+            ->where('conversation_id', $conversation->id)
+            ->delete();
+
+        $conversation->delete();
+
+        return api_success('Conversación eliminada.');
+    }
+
+    /**
+     * Pivote del usuario en la conversación (silencio, limpieza, lectura).
+     */
+    private function pivotFor(Conversation $conversation, User $user): mixed
+    {
+        $conversation->loadMissing('users');
+
+        return $conversation->users->firstWhere('id', $user->id)?->pivot;
+    }
+
+    private function isMuted(Conversation $conversation, User $user): bool
+    {
+        return $this->pivotFor($conversation, $user)?->muted_at !== null;
+    }
+
     private function unreadCount(Conversation $conversation, User $user): int
     {
-        $pivot = $conversation->users->firstWhere('id', $user->id)?->pivot;
+        $pivot = $this->pivotFor($conversation, $user);
         $lastRead = $pivot?->last_read_at;
+        $clearedAt = $pivot?->cleared_at;
 
         return $conversation->messages()
             ->where('user_id', '!=', $user->id)
             ->when($lastRead !== null, fn ($query) => $query->where('created_at', '>', $lastRead))
+            // La columna guarda segundos: se compara con >= para no perder un
+            // mensaje nuevo enviado en el mismo segundo en que se borró.
+            ->when($clearedAt !== null, fn ($query) => $query->where('created_at', '>=', $clearedAt))
             ->count();
+    }
+
+    /**
+     * Mensajes nuevos de una conversación que el administrador solo modera.
+     *
+     * Se cuentan desde su marca de lectura de moderación y, si todavía no
+     * tiene una, desde su último inicio de sesión. Nunca se suman al contador
+     * propio: van aparte y en silencio.
+     */
+    private function moderationUnreadCount(Conversation $conversation, User $user): int
+    {
+        if ($user->role !== UserRole::Admin) {
+            return 0;
+        }
+
+        $conversation->loadMissing('users');
+
+        // Lo que el administrador sí juega se cuenta como propio, en su lista
+        // de conversaciones; aquí solo va lo que supervisa sin participar.
+        if ($conversation->users->contains('id', $user->id)) {
+            return 0;
+        }
+
+        $since = ChatModerationRead::query()
+            ->where('user_id', $user->id)
+            ->where('conversation_id', $conversation->id)
+            ->value('last_read_at');
+
+        $since = $since !== null ? Carbon::parse($since) : $user->last_login_at;
+
+        if ($since === null) {
+            return 0;
+        }
+
+        return $conversation->messages()
+            ->where('user_id', '!=', $user->id)
+            ->where('created_at', '>', $since)
+            ->count();
+    }
+
+    /**
+     * Guarda hasta dónde llegó el administrador en una conversación que modera.
+     *
+     * Se escribe como mucho una vez por minuto para no golpear la base en cada
+     * sondeo de mensajes.
+     */
+    private function markModerationRead(Conversation $conversation, User $user): void
+    {
+        if ($user->role !== UserRole::Admin) {
+            return;
+        }
+
+        $conversation->loadMissing('users');
+
+        if ($conversation->users->contains('id', $user->id)) {
+            return;
+        }
+
+        $read = ChatModerationRead::query()->firstOrNew([
+            'user_id' => $user->id,
+            'conversation_id' => $conversation->id,
+        ]);
+
+        if ($read->last_read_at !== null && $read->last_read_at->gt(now()->subMinute())) {
+            return;
+        }
+
+        $read->last_read_at = now();
+        $read->save();
+    }
+
+    /**
+     * Al leer una conversación, sus notificaciones de chat dejan de contar
+     * como nuevas. Así la campana y la burbuja del chat muestran lo mismo.
+     */
+    private function markChatNotificationsRead(Conversation $conversation, User $user): void
+    {
+        $unread = $user->unreadNotifications()
+            ->whereIn('type', ['chat.mensaje', 'chat.mention'])
+            ->get()
+            ->filter(fn ($notification) => (int) ($notification->data['conversation_id'] ?? 0) === (int) $conversation->id);
+
+        if ($unread->isEmpty()) {
+            return;
+        }
+
+        $user->unreadNotifications()
+            ->whereIn('id', $unread->pluck('id')->all())
+            ->update(['read_at' => now()]);
+
+        $this->firestore->markPushesRead($unread);
+    }
+
+    /**
+     * Etiquetas disponibles en una conversación.
+     *
+     * Solo los miembros de la conversación (más los atajos propios del tipo de
+     * conversación). `kind` decide el color con el que se resalta la etiqueta
+     * en el chat: azul para participantes, púrpura para el dueño del grupo y
+     * rojo para el rol de administrador.
+     *
+     * @return array<int, array{token:string,text?:string,name:string,label:string,kind:string}>
+     */
+    private function mentionables(Conversation $conversation): array
+    {
+        $conversation->loadMissing('users');
+
+        $isGroup = $conversation->isGroup();
+        $items = [];
+
+        // En el amigo secreto no se revela quién es el otro: solo se puede
+        // etiquetar el seudónimo, igual que el título de la conversación.
+        if ($conversation->type === 'secret') {
+            return [[
+                'token' => 'amigosecreto',
+                'text' => 'AmigoSecreto',
+                'name' => 'Amigo secreto',
+                'label' => 'Amigo secreto',
+                'kind' => 'secret',
+            ]];
+        }
+
+        foreach ($conversation->users as $member) {
+            $token = mb_strtolower(trim((string) $member->username));
+
+            if ($token === '') {
+                continue;
+            }
+
+            if ($member->role === UserRole::Admin) {
+                $kind = 'admin';
+                $label = 'Administrador';
+            } elseif ($isGroup && $conversation->created_by === $member->id) {
+                $kind = 'owner';
+                $label = 'Dueño del grupo';
+            } else {
+                $kind = 'member';
+                $label = 'Participante';
+            }
+
+            $items[$token] = [
+                'token' => $token,
+                'name' => $member->name,
+                'label' => $label,
+                'kind' => $kind,
+            ];
+        }
+
+        if ($isGroup) {
+            $items['everyone'] = ['token' => 'everyone', 'name' => 'Todos', 'label' => 'Todos', 'kind' => 'broadcast'];
+            $items['here'] = ['token' => 'here', 'name' => 'En línea', 'label' => 'En línea', 'kind' => 'broadcast'];
+        }
+
+        if ($conversation->type === 'secret') {
+            $items['amigosecreto'] = [
+                'token' => 'amigosecreto',
+                'name' => 'Amigo secreto',
+                'label' => 'Amigo secreto',
+                'kind' => 'secret',
+            ];
+        }
+
+        return array_values($items);
+    }
+
+    /**
+     * Último mensaje de la conversación, cacheado durante la petición.
+     */
+    private function lastMessageFor(Conversation $conversation): ?ChatMessage
+    {
+        if (! array_key_exists($conversation->id, $this->lastMessageCache)) {
+            $this->lastMessageCache[$conversation->id] = $conversation->messages()->latest('id')->first();
+        }
+
+        return $this->lastMessageCache[$conversation->id];
+    }
+
+    /**
+     * Ids de los usuarios que bloqueó quien hace la petición.
+     *
+     * @return array<int, int>
+     */
+    private function blockedIds(User $user): array
+    {
+        $this->blockedCache ??= [];
+
+        if (! array_key_exists($user->id, $this->blockedCache)) {
+            $this->blockedCache[$user->id] = ChatBlock::query()
+                ->where('blocker_id', $user->id)
+                ->pluck('blocked_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+
+        return $this->blockedCache[$user->id];
+    }
+
+    /**
+     * Ids de quienes bloquearon a este usuario.
+     *
+     * @return array<int, int>
+     */
+    private function blockedByIds(User $user): array
+    {
+        $this->blockedByCache ??= [];
+
+        if (! array_key_exists($user->id, $this->blockedByCache)) {
+            $this->blockedByCache[$user->id] = ChatBlock::query()
+                ->where('blocked_id', $user->id)
+                ->pluck('blocker_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+
+        return $this->blockedByCache[$user->id];
+    }
+
+    /**
+     * Conversación directa entre dos personas: la reutiliza si existe y la
+     * crea si es la primera vez.
+     */
+    private function directConversationWith(User $current, User $other): Conversation
+    {
+        $conversation = Conversation::query()
+            ->where('type', 'direct')
+            ->whereHas('users', fn ($query) => $query->whereKey($current->id))
+            ->whereHas('users', fn ($query) => $query->whereKey($other->id))
+            ->with('users')
+            ->get()
+            ->first(fn (Conversation $item) => $item->users->count() === 2);
+
+        if ($conversation === null) {
+            $conversation = Conversation::create([
+                'type' => 'direct',
+                'created_by' => $current->id,
+            ]);
+
+            $conversation->users()->attach([$current->id, $other->id]);
+            $conversation->load('users');
+        }
+
+        return $conversation;
+    }
+
+    /**
+     * Silenciar a una persona desde la pestaña Usuarios.
+     *
+     * Mientras esté silenciada, sus mensajes no suman avisos ni en el
+     * contador. Volver a pulsar quita el silencio.
+     */
+    public function silenciarUsuario(Request $request, User $user): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $current = $request->user();
+
+        if ((int) $current->id === (int) $user->id) {
+            return api_error('No puedes silenciarte a ti mismo.', 422);
+        }
+
+        $conversation = $this->directConversationWith($current, $user);
+        $pivot = $this->pivotFor($conversation, $current);
+        $muted = $pivot?->muted_at === null;
+
+        $conversation->users()->updateExistingPivot($current->id, [
+            'muted_at' => $muted ? now() : null,
+        ]);
+
+        return api_success($muted ? 'Usuario silenciado.' : 'Silencio quitado.', [
+            'muted' => $muted,
+            'conversation_id' => $conversation->id,
+        ]);
+    }
+
+    /**
+     * Reportar a una persona desde la pestaña Usuarios.
+     *
+     * Si ya hay mensajes con ella, el reporte se enlaza al último para que la
+     * moderación vea el contexto. Con la persona bloqueada no se puede
+     * reportar: primero hay que desbloquearla.
+     */
+    public function reportarUsuario(Request $request, User $user): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $current = $request->user();
+
+        if ((int) $current->id === (int) $user->id) {
+            return api_error('No puedes reportarte a ti mismo.', 422);
+        }
+
+        if (ChatBlock::existsBetween($current->id, $user->id)) {
+            return api_error('Desbloquea a la persona antes de reportarla.', 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $conversation = $this->directConversationWith($current, $user);
+        $lastMessageId = $conversation->messages()->latest('id')->value('id');
+        $reason = trim((string) ($validator->validated()['reason'] ?? ''));
+
+        if ($reason === '') {
+            $reason = 'Reporte del usuario '.$user->name;
+        }
+
+        ChatReport::query()->firstOrCreate(
+            ['message_id' => $lastMessageId, 'reporter_id' => $current->id],
+            ['reason' => $reason]
+        );
+
+        User::query()
+            ->where('role', UserRole::Admin)
+            ->where('is_active', true)
+            ->get()
+            ->each(function (User $admin) use ($current, $user, $reason, $conversation) {
+                $admin->notifications()->create([
+                    'id' => (string) Str::uuid(),
+                    'type' => 'chat.report',
+                    'data' => [
+                        'title' => 'Usuario reportado',
+                        'body' => $current->name.' reportó a '.$user->name.' por: '.$reason,
+                        'conversation_id' => $conversation->id,
+                    ],
+                    'sound' => true,
+                    'visual' => true,
+                ]);
+            });
+
+        return api_success('Reporte enviado a la administración.');
     }
 
     /**
@@ -1046,7 +2290,17 @@ class ChatController extends Controller
      */
     private function conversationData(Conversation $conversation, User $user, bool $forModeration = false): array
     {
-        $last = $conversation->messages()->latest('id')->first();
+        $pivot = $this->pivotFor($conversation, $user);
+        $clearedAt = $pivot?->cleared_at;
+        // Se consulta una sola vez por conversación y petición: el resumen del
+        // administrador pinta la misma conversación en dos pestañas.
+        $last = $this->lastMessageFor($conversation);
+
+        // Lo que borró de su lado no se le vuelve a mostrar como vista previa.
+        if ($last !== null && $clearedAt !== null && $last->created_at !== null && $last->created_at->lt($clearedAt)) {
+            $last = null;
+        }
+
         $lastPreview = null;
 
         if ($last !== null) {
@@ -1086,13 +2340,28 @@ class ChatController extends Controller
             }
         }
 
-        $unread = $forModeration ? 0 : $this->unreadCount($conversation, $user);
+        $unread = $forModeration
+            ? $this->moderationUnreadCount($conversation, $user)
+            : $this->unreadCount($conversation, $user);
+        $muted = $pivot !== null && $pivot->muted_at !== null;
         $others = $conversation->users->where('id', '!=', $user->id);
         $other = $others->first();
+        $blocked = ! $forModeration
+            && ! $conversation->isGroup()
+            && $other !== null
+            && in_array((int) $other->id, $this->blockedIds($user), true);
+        $blockedByThem = ! $forModeration
+            && ! $conversation->isGroup()
+            && $other !== null
+            && in_array((int) $other->id, $this->blockedByIds($user), true);
         $onlineUsers = $conversation->users->filter(fn (User $item) => $item->last_seen_at !== null && $item->last_seen_at->gte(now()->subMinutes(5)))->count();
 
         if ($conversation->isGroup()) {
             $subtitle = $onlineUsers.' en línea';
+        } elseif ($conversation->type === 'secret') {
+            $subtitle = $conversation->secretRoleFor($user) === 'giver'
+                ? 'Tu amigo secreto asignado'
+                : 'Amigo secreto incógnito';
         } elseif ($other === null) {
             $subtitle = 'Conversación';
         } elseif ($other->last_seen_at !== null && $other->last_seen_at->gte(now()->subMinutes(5))) {
@@ -1115,7 +2384,51 @@ class ChatController extends Controller
             'last_message' => $lastPreview,
             'last_sender' => $last?->is_moderation ? 'Moderación' : $last?->user?->name,
             'unread' => $unread,
+            'muted' => $muted,
+            'blocked' => $blocked,
+            'blocked_by' => $blockedByThem,
+            'is_owner' => $conversation->created_by === $user->id,
+            'other_user_id' => ! $forModeration && ! $conversation->isGroup() ? $other?->id : null,
             'updated_at' => $conversation->updated_at?->diffForHumans(),
+            'updated_iso' => $conversation->updated_at?->toIso8601String(),
+            'favorite' => $pivot?->favorite_at !== null,
+            'pinned' => $pivot?->pinned_at !== null,
+            'archived' => $pivot?->archived_at !== null,
+            'hidden' => $pivot?->hidden_at !== null,
+            'is_moderation' => $forModeration,
+            'can_archive' => ! $forModeration && $conversation->type === 'direct',
+            'can_unarchive' => ! $forModeration && $conversation->canBeUnarchived(),
+            'pinned_message' => $this->pinnedMessageData($conversation),
+        ];
+    }
+
+    /**
+     * Mensaje fijado dentro de la conversación, para el cintillo.
+     *
+     * @return array{id:int,body:string,sender:string}|null
+     */
+    private function pinnedMessageData(Conversation $conversation): ?array
+    {
+        if ($conversation->pinned_message_id === null) {
+            return null;
+        }
+
+        $message = $conversation->pinnedMessage;
+
+        if ($message === null || $message->isDeleted()) {
+            return null;
+        }
+
+        $body = trim(strip_tags((string) $message->body));
+
+        if ($body === '') {
+            $body = $message->attachment_name ?: 'Mensaje adjunto';
+        }
+
+        return [
+            'id' => (int) $message->id,
+            'body' => Str::limit($body, 160),
+            'sender' => $message->is_moderation ? 'Moderación' : ($message->user?->name ?? 'Sistema'),
         ];
     }
 }

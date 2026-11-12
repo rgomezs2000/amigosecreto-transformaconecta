@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Notifications\DatabaseNotificationCollection;
+use Illuminate\Support\Facades\Route;
 
 /**
  * Notificación push/visual de un usuario.
@@ -48,5 +49,29 @@ class Notification extends DatabaseNotification
         $data = is_array($this->data) ? $this->data : [];
 
         return (string) ($data['body'] ?? '');
+    }
+
+    /**
+     * Enlace al que lleva la notificación.
+     *
+     * Si quien la creó no guardó `url` (por ejemplo, las menciones del chat),
+     * se usa la conversación del payload para abrir el chat directamente.
+     */
+    public function link(): ?string
+    {
+        if (filled($this->url)) {
+            return $this->url;
+        }
+
+        $data = is_array($this->data) ? $this->data : [];
+        $conversationId = $data['conversation_id'] ?? null;
+
+        if (! is_numeric($conversationId) || (int) $conversationId <= 0) {
+            return null;
+        }
+
+        return Route::has('chat.index')
+            ? route('chat.index').'?conversacion='.(int) $conversationId
+            : null;
     }
 }

@@ -96,6 +96,19 @@ Las notificaciones nuevas se cuentan en la campana. Al abrir una se marca como
 leída; «Marcar todas como leídas» limpia el contador. El sonido es opcional y
 está apagado por defecto, para evitar estímulos auditivos inesperados.
 
+La campana muestra un punto rojo cuando hay un solo aviso, el número cuando hay
+entre 2 y 99, y `+99` cuando hay más. Al pulsar un aviso se abre un modal con su
+detalle (sin recargar la página) y el aviso queda marcado como leído tanto en el
+modal como en la lista. El chat usa el mismo criterio de conteo (`+99`).
+
+La lista y el contador se actualizan por AJAX cada 10 segundos, solo si la
+pestaña está visible y solo cuando hay cambios; nunca recargan la página ni
+repintan la lista sin necesidad.
+
+Abrir una notificación **no recarga la página**: solo la marca como leída. Si el
+aviso es del chat, el botón «Abrir» muestra la conversación en el chat flotante;
+para otros enlaces, «Abrir» navega de forma explícita.
+
 ## Moderación
 
 Ruta: **Administración → Moderación** (`/administracion/moderacion`).

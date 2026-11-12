@@ -243,7 +243,7 @@
             $('#evento-modal-participants-next').prop('disabled', modalParticipantsPage >= pages - 1);
         }
 
-        $('.btn-evento-participantes').on('click', function () {
+        $('#eventos-lista').on('click', '.btn-evento-participantes', function () {
             var id = eventId(this);
 
             $.getJSON(participantesBase + '/' + id + '/participantes')
@@ -275,7 +275,7 @@
         });
 
         // Reiniciar --------------------------------------------------------
-        $('.btn-evento-reiniciar').on('click', function () {
+        $('#eventos-lista').on('click', '.btn-evento-reiniciar', function () {
             var year = $(this).data('year');
 
             $('#evento-reiniciar-log').text('');
@@ -325,7 +325,7 @@
                 $button.prop('disabled', false);
             });
         });
-        $('.btn-evento-iniciar').on('click', function () {
+        $('#eventos-lista').on('click', '.btn-evento-iniciar', function () {
             var id = eventId(this);
 
             confirmDialog('¿Desea iniciar el evento? Se enviará un correo a los participantes.', function () {
@@ -336,7 +336,7 @@
         });
 
         // Suspender --------------------------------------------------------
-        $('.btn-evento-suspender').on('click', function () {
+        $('#eventos-lista').on('click', '.btn-evento-suspender', function () {
             $('#evento-suspender-reason').val('');
             $('#evento-suspender-error').text('').removeAttr('data-kind');
             $('#modal-evento-suspender').data('evento-id', eventId(this));
@@ -363,7 +363,7 @@
         });
 
         // Posponer ---------------------------------------------------------
-        $('.btn-evento-posponer').on('click', function () {
+        $('#eventos-lista').on('click', '.btn-evento-posponer', function () {
             var card = cardOf(this);
 
             $('#evento-posponer-date').val('');
@@ -404,7 +404,7 @@
         });
 
         // Cancelar ---------------------------------------------------------
-        $('.btn-evento-cancelar').on('click', function () {
+        $('#eventos-lista').on('click', '.btn-evento-cancelar', function () {
             $('#evento-cancelar-reason').val('');
             $('#evento-cancelar-error').text('').removeAttr('data-kind');
             $('#modal-evento-cancelar').data('evento-id', eventId(this));
@@ -429,5 +429,103 @@
                     .fail(showError);
             });
         });
+
+        /* ------------------------------------------------------------------
+           Tarjetas de eventos: refresco en reposo, sin tocar formularios.
+           ------------------------------------------------------------------ */
+
+        var $live = $('#eventos-live');
+        var estadoUrl = $live.length ? $live.attr('data-url-estado') : '';
+        var liveTimer = null;
+
+        function canRefreshEvents() {
+            if (!estadoUrl || document.hidden) {
+                return false;
+            }
+
+            if ($.active > 0) {
+                return false;
+            }
+
+            if (document.querySelector('.modal.show, .bootbox')) {
+                return false;
+            }
+
+            var active = document.activeElement;
+
+            return !(active && (active.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName)));
+        }
+
+        function refreshEvents() {
+            if (!canRefreshEvents()) {
+                return;
+            }
+
+            $.getJSON(estadoUrl).done(function (response) {
+                var events = response.events || [];
+                var currentIds = $('.evento-card').map(function () {
+                    return String($(this).data('evento-id'));
+                }).get();
+                var nextIds = events.map(function (event) {
+                    return String(event.id);
+                });
+                var structuralChange = JSON.stringify(currentIds) !== JSON.stringify(nextIds);
+
+                events.forEach(function (event) {
+                    var $card = $('.evento-card[data-evento-id="' + event.id + '"]');
+
+                    if (!$card.length) {
+                        return;
+                    }
+
+                    var previousStatus = $card.find('[data-evento-field="status"]').first().text().trim();
+
+                    if (previousStatus && previousStatus !== event.status) {
+                        structuralChange = true;
+                    }
+
+                    $card.find('.status-badge')
+                        .removeClass('status-badge--active status-badge--blocked status-badge--inactive')
+                        .addClass('status-badge--' + event.badge)
+                        .text(event.status);
+                    $card.find('[data-evento-field="status"]').text(event.status);
+                    $card.find('[data-evento-field="exchange"]').text(event.exchange);
+                    $card.find('[data-evento-field="participants"]').text(event.participants);
+                    $card.find('[data-evento-field="created"]').text(event.created);
+                    $card.find('[data-evento-field="name"]').text(event.name);
+                    $card.attr('data-evento-name', event.name);
+                });
+
+                if (structuralChange && response.html) {
+                    // Reemplazo por AJAX del bloque de tarjetas, sin recargar
+                    // la página; los manejadores están delegados en #eventos-lista.
+                    $('#eventos-lista').html(response.html);
+                }
+
+                if (typeof response.can_create !== 'undefined') {
+                    var $new = $('#eventos-new');
+
+                    $new.prop('disabled', !response.can_create);
+                    $new.attr('title', response.can_create
+                        ? 'Crear un evento nuevo.'
+                        : 'Ya existe un evento para el año actual. Solo se permite uno por año.');
+                }
+            });
+        }
+
+        if (estadoUrl) {
+            liveTimer = window.setInterval(function () {
+                if (!document.hidden) {
+                    refreshEvents();
+                }
+            }, 25000);
+
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) {
+                    refreshEvents();
+                }
+            });
+        }
     });
 })(window.jQuery);
+

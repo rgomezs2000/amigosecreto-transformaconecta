@@ -2,51 +2,56 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\AuthorizesModeracion;
+use App\Models\ChatBlock;
 use App\Models\ChatReport;
 use App\Models\Conversation;
-use App\Models\Module;
+use App\Models\GroupBan;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 /**
- * Reportes del chat para la administración.
+ * Pantalla del módulo de Moderación y sus reportes del chat.
  *
- * Es un módulo de solo lectura: muestra los reportes recopilados y enlaza al
- * chat para que el administrador revise la conversación. No crea, edita ni
- * elimina nada.
+ * La pantalla tiene tres pestañas: Reportes (solo lectura: muestra los
+ * reportes recopilados y enlaza al chat para revisar la conversación),
+ * Bloqueos entre usuarios y Vetados de grupo. Los dos últimos apartados
+ * viven en sus propios controladores.
  */
 class ModeracionController extends Controller
 {
-    private function ensureAccess(): void
-    {
-        $module = Module::query()
-            ->where('slug', 'moderacion')
-            ->where('is_active', true)
-            ->first();
-
-        if ($module === null) {
-            abort(404);
-        }
-
-        if (! auth()->user()?->hasModuleAccess($module)) {
-            abort(403);
-        }
-    }
+    use AuthorizesModeracion;
 
     public function index(): View
     {
-        $this->ensureAccess();
+        $this->ensureModeracionAccess();
 
         return view('moderacion.index', [
             'total' => ChatReport::query()->count(),
+            'usuarios' => ChatBlock::query()->count(),
+            'grupos' => GroupBan::query()->count(),
+        ]);
+    }
+
+    /**
+     * Contadores de las tres pestañas para actualizarlos sin recargar.
+     */
+    public function contadores(): JsonResponse
+    {
+        $this->ensureModeracionAccess();
+
+        return api_success('Contadores de moderación.', [
+            'reports' => ChatReport::query()->count(),
+            'blocks' => ChatBlock::query()->count(),
+            'bans' => GroupBan::query()->count(),
         ]);
     }
 
     public function datos(Request $request): JsonResponse
     {
-        $this->ensureAccess();
+        $this->ensureModeracionAccess();
 
         $draw = (int) $request->input('draw', 1);
         $start = max(0, (int) $request->input('start', 0));

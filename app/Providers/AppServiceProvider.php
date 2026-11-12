@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Models\Event;
+use App\Observers\EventObserver;
 use App\Services\Firestore\FirestoreGateway;
 use App\Services\Firestore\FirestoreService;
 use App\Services\Firestore\NullFirestoreGateway;
@@ -93,6 +95,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Al terminar el evento, sus chats de amigo secreto quedan archivados.
+        Event::observe(EventObserver::class);
     }
 }

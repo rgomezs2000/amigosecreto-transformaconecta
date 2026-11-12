@@ -35,26 +35,26 @@
 
             <div class="traffic-grid">
                 @foreach ($trafficCards as $card)
-                    <article class="traffic-card">
+                    <article class="traffic-card" data-traffic-card="{{ $card['key'] }}">
                         <p class="traffic-card__head">
                             <i class="fa-solid {{ $card['icon'] }}" aria-hidden="true"></i>
                             <span>{{ $card['title'] }}</span>
                         </p>
-                        <p class="traffic-card__today">{{ format_count($traffic[$card['key']]['today']) }}</p>
+                        <p class="traffic-card__today" data-traffic-today>{{ format_count($traffic[$card['key']]['today']) }}</p>
                         <p class="traffic-card__label">Hoy</p>
                         <dl class="traffic-card__stats">
                             <div>
                                 <dt>Últimos 7 días</dt>
-                                <dd>{{ format_count($traffic[$card['key']]['week']) }}</dd>
+                                <dd data-traffic-week>{{ format_count($traffic[$card['key']]['week']) }}</dd>
                             </div>
                             <div>
                                 <dt>Total</dt>
-                                <dd>{{ format_count($traffic[$card['key']]['total']) }}</dd>
+                                <dd data-traffic-total>{{ format_count($traffic[$card['key']]['total']) }}</dd>
                             </div>
                         </dl>
 
                         @if ($card['key'] === 'emails')
-                            <p class="traffic-card__extra">
+                            <p class="traffic-card__extra" data-traffic-extra>
                                 {{ format_count($traffic['emails']['failed']) }} fallidos ·
                                 {{ format_count($traffic['emails']['skipped']) }} omitidos
                             </p>
@@ -64,9 +64,9 @@
             </div>
 
             <p class="traffic-note">
-                Conversaciones: {{ format_count($traffic['conversations']['direct']) }} directas ·
-                {{ format_count($traffic['conversations']['group']) }} grupos ·
-                {{ format_count($traffic['conversations']['reports']) }} canal de reportes.
+                Conversaciones: <span data-conversations="direct">{{ format_count($traffic['conversations']['direct']) }}</span> directas ·
+                <span data-conversations="group">{{ format_count($traffic['conversations']['group']) }}</span> grupos ·
+                <span data-conversations="reports">{{ format_count($traffic['conversations']['reports']) }}</span> canal de reportes.
             </p>
         </section>
 
@@ -238,6 +238,9 @@
         </section>
 
         <input type="hidden" id="notificaciones-csrf" value="{{ csrf_token() }}">
+        <div id="notificaciones-live"
+             data-url-contadores="{{ route('notificaciones.contadores') }}"
+             hidden></div>
     </section>
 @endsection
 

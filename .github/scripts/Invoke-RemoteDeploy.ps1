@@ -63,7 +63,8 @@ if (-not (Test-Path -LiteralPath $RemoteScriptPath)) {
 $remoteScript = (Get-Content -LiteralPath $RemoteScriptPath -Raw).
   Replace('__DEPLOY_PATH__', (ConvertTo-PsLiteral $deployPath)).
   Replace('__PHP_BIN__', (ConvertTo-PsLiteral $env:PHP_BIN)).
-  Replace('__COMPOSER_BIN__', (ConvertTo-PsLiteral $env:COMPOSER_BIN))
+  Replace('__COMPOSER_BIN__', (ConvertTo-PsLiteral $env:COMPOSER_BIN)).
+  Replace('__PHP_EXTENSION__', (ConvertTo-PsLiteral $env:PHP_EXTENSION))
 
 # ---- 3. Validar la sintaxis ANTES de conectar ------------------------------
 # Un error de PowerShell en el servidor se vería como un "ExitStatus 1" mudo.
@@ -94,9 +95,11 @@ if ($payload.Length -gt $limiteSeguro) {
 Write-Host ("Script remoto: {0} caracteres, {1} comprimido." -f $remoteScript.Length, $payload.Length)
 
 # Descompone en memoria y ejecuta. Add-Type es necesario en Windows PowerShell
-# 5.1, que no trae cargado System.IO.Compression.
+# 5.1, que no trae cargado System.IO.Compression. La primera línea fuerza UTF-8
+# al escribir en la tubería de SSH; si no, los acentos salen como "fall�".
 $decodificador = @(
   'try { Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop } catch { }'
+  'try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }'
   "`$m = [IO.MemoryStream]::new([Convert]::FromBase64String('$payload'))"
   '$g = [IO.Compression.GZipStream]::new($m, [IO.Compression.CompressionMode]::Decompress)'
   'Invoke-Expression ([IO.StreamReader]::new($g)).ReadToEnd()'

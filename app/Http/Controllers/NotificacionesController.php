@@ -104,6 +104,19 @@ class NotificacionesController extends Controller
     }
 
     /**
+     * Contadores de tráfico para actualizar el panel sin recargarlo.
+     */
+    public function contadores(): JsonResponse
+    {
+        $this->ensureAccess();
+
+        return api_success('Contadores de notificaciones.', [
+            'traffic' => $this->traffic->summary(),
+            'firestore' => $this->firestore->status(),
+        ]);
+    }
+
+    /**
      * Guarda la configuración global de notificaciones.
      */
     public function guardar(Request $request): JsonResponse
@@ -185,6 +198,34 @@ class NotificacionesController extends Controller
     }
 
     /**
+     * Listado para refrescar la campana sin recargar la página.
+     */
+    public function lista(Request $request): JsonResponse
+    {
+        $this->ensureBellAccess();
+
+        $user = $request->user();
+
+        $notifications = $user->notifications()
+            ->limit(20)
+            ->get()
+            ->map(fn (Notification $notification) => [
+                'id' => $notification->id,
+                'title' => $notification->title(),
+                'body' => $notification->body(),
+                'date' => $notification->created_at?->format('d/m/Y H:i') ?? '',
+                'url' => $notification->link(),
+                'read' => $notification->read_at !== null,
+            ])
+            ->values();
+
+        return api_success('Notificaciones.', [
+            'count' => $user->unreadNotifications()->count(),
+            'notifications' => $notifications,
+        ]);
+    }
+
+    /**
      * Marca una notificación propia como leída.
      */
     public function leer(Request $request, Notification $notification): JsonResponse
@@ -205,7 +246,7 @@ class NotificacionesController extends Controller
 
         return api_success('Notificación leída.', [
             'id' => $notification->id,
-            'url' => $notification->url,
+            'url' => $notification->link(),
             'count' => $user->unreadNotifications()->count(),
         ]);
     }

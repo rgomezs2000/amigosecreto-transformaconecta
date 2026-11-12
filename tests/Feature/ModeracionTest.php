@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\ChatBlock;
 use App\Models\ChatMessage;
 use App\Models\ChatReport;
 use App\Models\Conversation;
+use App\Models\GroupBan;
 use App\Models\Notification;
 use App\Models\User;
 use App\Services\Firestore\FirestoreGateway;
@@ -169,15 +171,418 @@ class ModeracionTest extends TestCase
         $this->assertTrue($this->firestore->has(FirestoreService::REPORTS, (string) $report->id));
     }
 
-    public function test_el_modulo_de_moderacion_no_expone_rutas_de_escritura(): void
+    public function test_el_modulo_de_moderacion_tiene_tres_pestanas(): void
     {
-        $routes = collect(Route::getRoutes()->getRoutes())
-            ->filter(fn ($route) => str_starts_with($route->uri(), 'administracion/moderacion')
-                || str_starts_with($route->uri(), 'moderacion/'));
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
 
-        $this->assertNotEmpty($routes);
+        $this->actingAs($admin)
+            ->get('/administracion/moderacion')
+            ->assertOk()
+            ->assertSee('Reportes')
+            ->assertSee('Bloqueos entre usuarios')
+            ->assertSee('Vetados de grupo')
+            ->assertSee('moderacion-usuarios-table', false)
+            ->assertSee('moderacion-grupos-table', false)
+            ->assertSee('modal-moderacion-bloqueos', false)
+            ->assertSee('modal-moderacion-baneados', false);
+    }
 
-        foreach ($routes as $route) {
+    public function test_el_modal_de_bloqueos_selecciona_con_clic_y_guarda_con_confirmacion(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+
+        $this->actingAs($admin)
+            ->get('/administracion/moderacion')
+            ->assertOk()
+            // Sin casillas: la selección es por clic y las flechas mueven.
+            ->assertDontSee('data-transfer-check', false)
+            ->assertSee('data-transfer-save', false)
+            ->assertSee('data-transfer-confirm-yes', false)
+            ->assertSee('Sí, guardar')
+            ->assertSee('data-move="to-right-all"', false)
+            ->assertSee('data-move="to-right"', false)
+            ->assertSee('data-move="to-left"', false)
+            ->assertSee('data-move="to-left-all"', false)
+            // Cada flecha conserva su nombre accesible aunque no lleve texto.
+            ->assertSee('aria-label="Bloquear a todas las personas"', false)
+            ->assertSee('aria-label="Bloquear a la persona seleccionada"', false)
+            ->assertSee('aria-label="Desbloquear a la persona seleccionada"', false)
+            ->assertSee('aria-label="Desbloquear a todas las personas"', false);
+    }
+
+    public function test_el_listado_de_bloqueos_muestra_a_todos_los_usuarios_con_su_estado(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant);
+        $luis = $this->makeUser('Luis', UserRole::Participant);
+        $pedro = $this->makeUser('Pedro', UserRole::Participant);
+
+        ChatBlock::create(['blocker_id' => $ana->id, 'blocked_id' => $luis->id]);
+        ChatBlock::create(['blocker_id' => $ana->id, 'blocked_id' => $pedro->id]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/moderacion/bloqueos/usuarios?draw=3&start=0&length=10')
+            ->assertOk()
+            ->assertJsonPath('draw', 3)
+            ->assertJsonPath('recordsTotal', 4)
+            ->assertJsonPath('recordsFiltered', 4);
+
+        $rows = collect($response->json('data'))->keyBy('id');
+
+        $this->assertSame(2, $rows[$ana->id]['blocked_count']);
+        $this->assertSame(0, $rows[$luis->id]['blocked_count']);
+        $this->assertSame('Ana', $rows[$ana->id]['name_raw']);
+        $this->assertStringContainsString('Gestionar bloqueos', $rows[$ana->id]['actions']);
+    }
+
+    public function test_el_listado_de_bloqueos_se_puede_buscar(): void
+    {
+        // Correos y usuarios fijos: los aleatorios del factory pueden contener
+        // el texto buscado y volver la prueba inestable.
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat'], [
+            'email' => 'admin@example.com',
+            'username' => 'admin',
+        ]);
+
+        $this->makeUser('Ana', UserRole::Participant, [], [
+            'email' => 'ana@example.com',
+            'username' => 'ana',
+        ]);
+
+        $this->makeUser('Luis', UserRole::Participant, [], [
+            'email' => 'luis@example.com',
+            'username' => 'luis',
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/moderacion/bloqueos/usuarios?draw=1&start=0&length=10&search[value]=Luis')
+            ->assertOk();
+
+        $this->assertSame(1, $response->json('recordsFiltered'));
+        $this->assertSame('Luis', $response->json('data.0.name_raw'));
+    }
+
+    public function test_el_listado_de_bloqueos_ordena_por_cantidad_de_bloqueos(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant);
+        $luis = $this->makeUser('Luis', UserRole::Participant);
+
+        ChatBlock::create(['blocker_id' => $ana->id, 'blocked_id' => $luis->id]);
+        ChatBlock::create(['blocker_id' => $ana->id, 'blocked_id' => $admin->id]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/moderacion/bloqueos/usuarios?draw=1&start=0&length=10&order[0][column]=3&order[0][dir]=desc')
+            ->assertOk();
+
+        $this->assertSame($ana->id, $response->json('data.0.id'));
+        $this->assertSame(2, $response->json('data.0.blocked_count'));
+    }
+
+    public function test_el_detalle_de_bloqueos_separa_bloqueados_y_desbloqueados(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant);
+        $luis = $this->makeUser('Luis', UserRole::Participant);
+        $pedro = $this->makeUser('Pedro', UserRole::Participant);
+
+        ChatBlock::create(['blocker_id' => $ana->id, 'blocked_id' => $luis->id]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/moderacion/bloqueos/'.$ana->id)
+            ->assertOk()
+            ->assertJsonPath('subject.id', $ana->id)
+            ->assertJsonPath('blocked.0.id', $luis->id);
+
+        $availableIds = collect($response->json('available'))->pluck('id');
+
+        $this->assertTrue($availableIds->contains($admin->id));
+        $this->assertTrue($availableIds->contains($pedro->id));
+        $this->assertFalse($availableIds->contains($ana->id));
+        $this->assertFalse($availableIds->contains($luis->id));
+    }
+
+    public function test_la_sincronizacion_de_bloqueos_crea_y_elimina_segun_las_listas(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant);
+        $luis = $this->makeUser('Luis', UserRole::Participant);
+        $pedro = $this->makeUser('Pedro', UserRole::Participant);
+
+        ChatBlock::create(['blocker_id' => $ana->id, 'blocked_id' => $luis->id]);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/bloqueos/'.$ana->id, [
+                'available' => [$admin->id, $luis->id],
+                'blocked' => [$pedro->id],
+            ])
+            ->assertOk()
+            ->assertJsonPath('created', 1)
+            ->assertJsonPath('removed', 1)
+            ->assertJsonPath('message', 'Bloqueos actualizados.');
+
+        $this->assertDatabaseHas('chat_blocks', ['blocker_id' => $ana->id, 'blocked_id' => $pedro->id]);
+        $this->assertDatabaseMissing('chat_blocks', ['blocker_id' => $ana->id, 'blocked_id' => $luis->id]);
+        $this->assertSame(1, ChatBlock::query()->where('blocker_id', $ana->id)->count());
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/bloqueos/'.$ana->id, [
+                'available' => [$admin->id, $luis->id, $pedro->id],
+                'blocked' => [],
+            ])
+            ->assertOk()
+            ->assertJsonPath('created', 0)
+            ->assertJsonPath('removed', 1)
+            ->assertJsonPath('message', 'Bloqueo eliminado.');
+
+        $this->assertSame(0, ChatBlock::query()->count());
+    }
+
+    public function test_la_sincronizacion_de_bloqueos_no_duplica_bloqueos(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant);
+        $luis = $this->makeUser('Luis', UserRole::Participant);
+
+        ChatBlock::create(['blocker_id' => $ana->id, 'blocked_id' => $luis->id]);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/bloqueos/'.$ana->id, [
+                'available' => [],
+                'blocked' => [$luis->id],
+            ])
+            ->assertOk()
+            ->assertJsonPath('created', 0)
+            ->assertJsonPath('removed', 0)
+            ->assertJsonPath('message', 'Sin cambios en los bloqueos.');
+
+        $this->assertSame(1, ChatBlock::query()->count());
+    }
+
+    public function test_la_sincronizacion_de_bloqueos_valida_las_listas(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant);
+        $luis = $this->makeUser('Luis', UserRole::Participant);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/bloqueos/'.$ana->id, [
+                'available' => [$admin->id],
+                'blocked' => [$ana->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Un usuario no puede bloquearse a sí mismo.');
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/bloqueos/'.$ana->id, [
+                'available' => [$luis->id],
+                'blocked' => [$luis->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Un usuario no puede estar en las dos listas a la vez.');
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/bloqueos/'.$ana->id, ['blocked' => [$luis->id]])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Falta la lista de usuarios desbloqueados.');
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/bloqueos/'.$ana->id, [
+                'available' => [],
+                'blocked' => [999999],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Uno de los usuarios bloqueados ya no existe.');
+
+        $this->assertSame(0, ChatBlock::query()->count());
+    }
+
+    public function test_el_listado_de_grupos_muestra_miembros_y_vetados(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant, ['chat']);
+        $luis = $this->makeUser('Luis', UserRole::Participant, ['chat']);
+        $pedro = $this->makeUser('Pedro', UserRole::Participant, ['chat']);
+
+        $group = Conversation::create(['type' => 'group', 'name' => 'Cumpleaños', 'created_by' => $admin->id]);
+        $group->users()->attach([$ana->id, $luis->id, $pedro->id]);
+
+        GroupBan::create([
+            'conversation_id' => $group->id,
+            'user_id' => $pedro->id,
+            'banned_by' => $admin->id,
+        ]);
+
+        Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/moderacion/grupos?draw=1&start=0&length=10')
+            ->assertOk()
+            ->assertJsonPath('recordsTotal', 1)
+            ->assertJsonPath('data.0.name_raw', 'Cumpleaños')
+            ->assertJsonPath('data.0.members', 3)
+            ->assertJsonPath('data.0.banned', 1);
+
+        $this->assertStringContainsString('Ver baneados', $response->json('data.0.actions'));
+    }
+
+    public function test_el_detalle_de_vetados_separa_vetados_y_disponibles(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant, ['chat']);
+        $luis = $this->makeUser('Luis', UserRole::Participant, ['chat']);
+        $pedro = $this->makeUser('Pedro', UserRole::Participant, ['chat']);
+
+        $group = Conversation::create(['type' => 'group', 'name' => 'Cumpleaños', 'created_by' => $admin->id]);
+        $group->users()->attach([$ana->id, $pedro->id]);
+
+        GroupBan::create([
+            'conversation_id' => $group->id,
+            'user_id' => $pedro->id,
+            'banned_by' => $admin->id,
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/moderacion/grupos/'.$group->id.'/vetados')
+            ->assertOk()
+            ->assertJsonPath('subject.name', 'Cumpleaños')
+            ->assertJsonPath('banned.0.id', $pedro->id)
+            ->assertJsonPath('banned.0.member', true);
+
+        $availableIds = collect($response->json('available'))->pluck('id');
+
+        $this->assertTrue($availableIds->contains($ana->id));
+        $this->assertTrue($availableIds->contains($luis->id));
+        $this->assertFalse($availableIds->contains($pedro->id));
+        $this->assertFalse($availableIds->contains($admin->id), 'El administrador no aparece en las listas.');
+    }
+
+    public function test_el_detalle_de_vetados_solo_acepta_grupos(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $direct = Conversation::create(['type' => 'direct', 'created_by' => $admin->id]);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/grupos/'.$direct->id.'/vetados')
+            ->assertNotFound();
+    }
+
+    public function test_la_sincronizacion_de_vetados_aplica_el_veto_y_saca_al_usuario_del_grupo(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant, ['chat']);
+        $luis = $this->makeUser('Luis', UserRole::Participant, ['chat']);
+        $pedro = $this->makeUser('Pedro', UserRole::Participant, ['chat']);
+
+        $group = Conversation::create(['type' => 'group', 'name' => 'Cumpleaños', 'created_by' => $admin->id]);
+        $group->users()->attach([$ana->id, $luis->id, $pedro->id]);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/grupos/'.$group->id.'/vetados', [
+                'available' => [$luis->id],
+                'banned' => [$ana->id, $pedro->id],
+            ])
+            ->assertOk()
+            ->assertJsonPath('created', 2)
+            ->assertJsonPath('removed', 0)
+            ->assertJsonPath('kicked', 2)
+            ->assertJsonPath('message', 'Veto aplicado y usuario sacado del grupo.');
+
+        $this->assertSame(2, GroupBan::query()->where('conversation_id', $group->id)->whereNull('revoked_at')->count());
+        $this->assertFalse($group->users()->whereKey($ana->id)->exists());
+        $this->assertFalse($group->users()->whereKey($pedro->id)->exists());
+        $this->assertTrue($group->users()->whereKey($luis->id)->exists());
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/grupos/'.$group->id.'/vetados', [
+                'available' => [$ana->id, $luis->id],
+                'banned' => [$pedro->id],
+            ])
+            ->assertOk()
+            ->assertJsonPath('created', 0)
+            ->assertJsonPath('removed', 1)
+            ->assertJsonPath('message', 'Veto retirado.');
+
+        $this->assertNotNull(
+            GroupBan::query()->where('conversation_id', $group->id)->where('user_id', $ana->id)->firstOrFail()->revoked_at
+        );
+
+        $this->assertSame(1, GroupBan::query()->where('conversation_id', $group->id)->whereNull('revoked_at')->count());
+        $this->assertFalse($group->users()->whereKey($ana->id)->exists(), 'Retirar el veto no vuelve a meter al usuario.');
+    }
+
+    public function test_la_sincronizacion_de_vetados_valida_las_listas(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $ana = $this->makeUser('Ana', UserRole::Participant, ['chat']);
+
+        $group = Conversation::create(['type' => 'group', 'name' => 'Cumpleaños', 'created_by' => $admin->id]);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/grupos/'.$group->id.'/vetados', [
+                'available' => [$admin->id],
+                'banned' => [$admin->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Un usuario no puede estar en las dos listas a la vez.');
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/grupos/'.$group->id.'/vetados', [
+                'available' => [$ana->id],
+                'banned' => [$admin->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'No puedes vetarte a ti mismo.');
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/grupos/'.$group->id.'/vetados', ['available' => []])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Falta la lista de vetados.');
+
+        $this->assertSame(0, GroupBan::query()->count());
+    }
+
+    public function test_los_endpoints_de_bloqueos_y_vetados_exigen_el_modulo(): void
+    {
+        [$conversation] = $this->conversationWithReport();
+        $user = $this->makeUser('Curioso', UserRole::Participant, ['chat']);
+        $other = $this->makeUser('Otro', UserRole::Participant, ['chat']);
+
+        $group = Conversation::create(['type' => 'group', 'name' => 'Cumpleaños', 'created_by' => $user->id]);
+
+        $this->actingAs($user)->getJson('/moderacion/bloqueos/usuarios')->assertForbidden();
+
+        $this->actingAs($user)
+            ->getJson('/moderacion/bloqueos/'.$other->id)
+            ->assertForbidden();
+
+        $this->actingAs($user)
+            ->postJson('/moderacion/bloqueos/'.$other->id, ['available' => [], 'blocked' => [$user->id]])
+            ->assertForbidden();
+
+        $this->actingAs($user)->getJson('/moderacion/grupos')->assertForbidden();
+
+        $this->actingAs($user)
+            ->getJson('/moderacion/grupos/'.$group->id.'/vetados')
+            ->assertForbidden();
+
+        $this->actingAs($user)
+            ->postJson('/moderacion/grupos/'.$group->id.'/vetados', ['available' => [], 'banned' => []])
+            ->assertForbidden();
+
+        $this->assertSame(0, ChatBlock::query()->count());
+        $this->assertSame(0, GroupBan::query()->count());
+        $this->assertNotNull($conversation->fresh());
+    }
+
+    public function test_las_rutas_de_reporte_siguen_siendo_de_solo_lectura(): void
+    {
+        $reportRoutes = collect(Route::getRoutes()->getRoutes())
+            ->filter(fn ($route) => in_array($route->getName(), ['moderacion.index', 'moderacion.datos'], true));
+
+        $this->assertCount(2, $reportRoutes);
+
+        foreach ($reportRoutes as $route) {
             $this->assertSame(
                 [],
                 array_values(array_diff($route->methods(), ['GET', 'HEAD'])),

@@ -21,6 +21,7 @@
         }
 
         var resumenUrl = $widget.attr('data-url-resumen');
+        var contadorUrl = $widget.attr('data-url-contador');
         var abrirUrl = $widget.attr('data-url-abrir');
         var grupoUrl = $widget.attr('data-url-grupo');
         var secretUrl = $widget.attr('data-url-secret');
@@ -31,22 +32,36 @@
         var isAdmin = $widget.attr('data-is-admin') === '1';
         var token = $widget.attr('data-csrf');
         var pendingOpenId = null;
+        var pendingFromUrl = false;
 
         try {
             var requestedConversation = new window.URLSearchParams(window.location.search).get('conversacion');
             var requestedId = requestedConversation ? parseInt(requestedConversation, 10) : NaN;
 
             pendingOpenId = isNaN(requestedId) ? null : requestedId;
+            pendingFromUrl = pendingOpenId !== null;
         } catch (error) {
             pendingOpenId = null;
+            pendingFromUrl = false;
         }
 
         var currentId = null;
+        var currentModeration = false;
         var pollTimer = null;
         var messageTimer = null;
+        var counterTimer = null;
         var lastUnread = 0;
         var audioContext = null;
         var activeMessage = null;
+        var activeConversation = null;
+        var activeUser = null;
+        var lastUsers = [];
+
+        /** Etiquetas de la conversación abierta: token -> {name, label, kind}. */
+        var mentionIndex = {};
+        var mentionMatches = [];
+        var mentionActive = 0;
+        var mentionRange = null;
 
         function escape(value) {
             return $('<div>').text(value == null ? '' : value).html();
@@ -70,6 +85,7 @@
 
         function clearChat() {
             $('#chat-input').empty();
+            hideMentionSuggestions();
         }
 
         function insertEmoji(emoji) {
@@ -128,6 +144,7 @@
 
             var items = (response.conversations || []).concat(response.moderation || []);
             var found = null;
+            var fromUrl = pendingFromUrl;
 
             for (var index = 0; index < items.length; index += 1) {
                 if (items[index].id === pendingOpenId) {
@@ -137,12 +154,13 @@
             }
 
             pendingOpenId = null;
+            pendingFromUrl = false;
 
             if (!found) {
                 return;
             }
 
-            if (window.history && window.history.replaceState) {
+            if (fromUrl && window.history && window.history.replaceState) {
                 window.history.replaceState({}, '', window.location.pathname);
             }
 
@@ -155,7 +173,7 @@
             if (!inAppEnabled || count <= 0) {
                 $badge.prop('hidden', true).text('0');
             } else {
-                $badge.prop('hidden', false).text(count > 99 ? '99+' : count);
+                $badge.prop('hidden', false).text(count > 99 ? '+99' : count);
             }
         }
 
@@ -213,20 +231,113 @@
             onConfirm(window.prompt(message) || '');
         }
 
-        function post(url, data) {
+        function request(method, url, data) {
             return $.ajax({
                 url: url,
-                method: 'POST',
+                method: method,
                 dataType: 'json',
                 data: $.extend({ _token: token }, data || {})
             });
+        }
+
+        function post(url, data) {
+            return request('POST', url, data);
+        }
+
+        function remove(url, data) {
+            return request('DELETE', url, data);
+        }
+
+        /**
+         * Guarda el catálogo de etiquetas de la conversación abierta.
+         */
+        function setMentionCatalog(items) {
+            mentionIndex = {};
+
+            (items || []).forEach(function (item) {
+                if (!item || !item.token) {
+                    return;
+                }
+
+                mentionIndex[String(item.token).toLowerCase()] = item;
+            });
+        }
+
+        /**
+         * Resalta las @etiquetas con su color y su etiqueta visible.
+         *
+         * Azul para participantes, púrpura para el dueño del grupo y rojo para
+         * el rol de administrador; @everyone, @here y @AmigoSecreto llevan su
+         * propio color.
+         */
+        function highlightMentions(html) {
+            return String(html || '').replace(
+                /(^|[\s>])(@([\p{L}\p{N}_.-]+))/gu,
+                function (match, prefix, token, name) {
+                    var item = mentionIndex[name.toLowerCase()];
+                    var kind = item && item.kind ? item.kind : 'member';
+                    var label = item && item.label ? item.label : '';
+                    var chip = '<span class="chat-mention chat-mention--' + kind + '">' + token;
+
+                    if (label) {
+                        chip += '<span class="chat-mention__role">' + escape(label) + '</span>';
+                    }
+
+                    return prefix + chip + '</span>';
+                }
+            );
+        }
+
+        /**
+         * Convierte los enlaces del mensaje en hiperenlaces que abren en una
+         * pestaña nueva.
+         *
+         * Los enlaces internos (por ejemplo, la invitación a un grupo) también
+         * se abren así: la página de la invitación carga con la sesión del
+         * usuario y desde ahí se puede aceptar. Solo se marcan los enlaces que
+         * van sueltos en el texto, nunca los que ya están dentro de una
+         * etiqueta.
+         */
+        function linkify(html) {
+            return String(html || '').replace(
+                /(^|[\s>])((?:https?:\/\/|www\.)[^\s<>"']+)/gi,
+                function (match, prefix, url) {
+                    var trailing = '';
+                    var visible = url;
+
+                    // La puntuación del final no forma parte del enlace.
+                    while (/[.,;:!?]$/.test(visible)) {
+                        trailing = visible.slice(-1) + trailing;
+                        visible = visible.slice(0, -1);
+                    }
+
+                    // Un paréntesis de cierre sin abrir tampoco es del enlace.
+                    while (visible.slice(-1) === ')'
+                        && (visible.match(/\)/g) || []).length > (visible.match(/\(/g) || []).length) {
+                        trailing = ')' + trailing;
+                        visible = visible.slice(0, -1);
+                    }
+
+                    if (visible === '') {
+                        return match;
+                    }
+
+                    var safe = visible.replace(/&/g, '&amp;');
+                    var href = visible.indexOf('www.') === 0 ? 'http://' + visible : visible;
+
+                    href = href.replace(/&/g, '&amp;');
+
+                    return prefix + '<a class="chat-link" href="' + href + '"' +
+                        ' target="_blank" rel="noopener noreferrer">' + safe + '</a>' + trailing;
+                }
+            );
         }
 
         function messageHtml(message) {
             var attachment = '';
             var body = message.deleted
                 ? '<p class="chat-message__deleted">' + escape(message.deleted_label) + '</p>'
-                : '<p class="chat-message__body">' + (message.body || '') + '</p>';
+                : '<p class="chat-message__body">' + linkify(highlightMentions(message.body || '')) + '</p>';
             var fileName = message.attachment_name || 'Archivo';
             var mediaType = message.type;
 
@@ -358,6 +469,36 @@
         var pendingActive = null;
         var lastData = { messages: [], new_count: 0 };
 
+        // Índice de lo ya pintado: permite añadir o actualizar solo las burbujas
+        // que cambian, sin reconstruir la conversación (y sin cortar audios,
+        // videos ni el texto que el usuario tenga abierto).
+        var paintedMessages = {};
+        var paintedLastId = 0;
+        var paintedLastDate = null;
+        var recentHash = null;
+        var messageRequestPending = false;
+        var messageFailures = 0;
+        var summaryFailures = 0;
+
+        function isPanelOpen() {
+            return !$('#chat-panel').prop('hidden');
+        }
+
+        function canPoll() {
+            return !document.hidden && navigator.onLine !== false;
+        }
+
+        function isNearBottom($box) {
+            return ($box[0].scrollHeight - $box.scrollTop() - $box[0].clientHeight) < 80;
+        }
+
+        function forgetPaintedMessages() {
+            paintedMessages = {};
+            paintedLastId = 0;
+            paintedLastDate = null;
+            recentHash = null;
+        }
+
         function currentPending() {
             if (!pendingMessages[currentId]) {
                 pendingMessages[currentId] = [];
@@ -378,35 +519,53 @@
                 '<p class="chat-message__meta">Tú · ' + indicator + '</p></div>';
         }
 
-        function renderMessages() {
-            var html = '';
-            var lastDate = null;
-            var messages = lastData.messages || [];
+        function paintPending() {
+            var $box = $('#chat-messages');
 
-            messages.forEach(function (message, index) {
-                if (message.created_date !== lastDate) {
-                    lastDate = message.created_date;
-                    html += '<div class="chat-date">' + escape(dateLabel(message.created_date)) + '</div>';
-                }
+            if (!$box.length) {
+                return;
+            }
 
-                if (lastData.new_count > 0 && index === (messages.length - lastData.new_count)) {
-                    html += '<div class="chat-new-divider">' + lastData.new_count + ' mensajes nuevos</div>';
-                }
-
-                html += messageHtml(message);
-            });
+            $box.children('.chat-message--pending').remove();
 
             currentPending().forEach(function (pending) {
-                html += pendingHtml(pending);
+                $box.append(pendingHtml(pending));
+            });
+        }
+
+        // Deja las burbujas «enviando» en sintonía con la cola real: quita las
+        // que ya se confirmaron (o se descartaron) y mantiene el resto al final.
+        function syncPending() {
+            var $box = $('#chat-messages');
+            var pending = currentPending();
+            var missing = {};
+
+            pending.forEach(function (item) {
+                missing[item.id] = item;
             });
 
-            var $messages = $('#chat-messages');
-            var wasAtBottom = ($messages[0].scrollHeight - $messages.scrollTop() - $messages[0].clientHeight) < 80;
-            var previousScroll = $messages.scrollTop();
+            $box.children('.chat-message--pending').each(function () {
+                var id = this.getAttribute('data-pending-id');
 
-            $messages.html(html || '<p class="chat-hint">Aún no hay mensajes.</p>');
+                if (!missing[id]) {
+                    $(this).remove();
+                    return;
+                }
 
-            $('#chat-messages .chat-file__toggle').each(function () {
+                delete missing[id];
+            });
+
+            pending.forEach(function (item) {
+                if (missing[item.id]) {
+                    $box.append(pendingHtml(item));
+                }
+            });
+
+            $box.children('.chat-message--pending').appendTo($box);
+        }
+
+        function restoreOpenTexts($box) {
+            $box.find('.chat-file__toggle').each(function () {
                 var url = $(this).data('url');
 
                 if (openTexts[url] && textCache[url] !== undefined) {
@@ -417,6 +576,154 @@
                     $(this).text('Ocultar');
                 }
             });
+        }
+
+        function rememberMessage(message) {
+            paintedMessages[message.id] = JSON.stringify(message);
+            paintedLastDate = message.created_date;
+
+            if (message.id > paintedLastId) {
+                paintedLastId = message.id;
+            }
+        }
+
+        function appendMessage(message) {
+            var $existing = $('#chat-messages .chat-message[data-message-id="' + message.id + '"]');
+
+            // Nunca se duplica una burbuja que ya está en pantalla (por ejemplo
+            // si el sondeo llegó antes que la respuesta del envío).
+            if ($existing.length) {
+                updateMessageNode(message);
+                return;
+            }
+
+            if (paintedMessages[message.id]) {
+                updateMessageNode(message);
+                return;
+            }
+
+            var divider = '';
+
+            if (message.created_date !== paintedLastDate) {
+                divider = '<div class="chat-date">' + escape(dateLabel(message.created_date)) + '</div>';
+            }
+
+            $('#chat-messages').append(divider + messageHtml(message));
+            rememberMessage(message);
+        }
+
+        function updateMessageNode(message) {
+            var $node = $('#chat-messages .chat-message[data-message-id="' + message.id + '"]');
+            var stored = paintedMessages[message.id];
+            var current = JSON.stringify(message);
+
+            if (!$node.length) {
+                if (message.id > paintedLastId) {
+                    appendMessage(message);
+                } else {
+                    rememberMessage(message);
+                }
+
+                return;
+            }
+
+            if (stored === current) {
+                return;
+            }
+
+            var before = stored ? JSON.parse(stored) : null;
+
+            if (before === null) {
+                $node.replaceWith(messageHtml(message));
+                rememberMessage(message);
+                return;
+            }
+
+            // Lo que cambia el contenido repinta solo esa burbuja.
+            if (before.body !== message.body ||
+                before.deleted !== message.deleted ||
+                before.edited !== message.edited ||
+                before.deleted_label !== message.deleted_label ||
+                JSON.stringify(before.attachments) !== JSON.stringify(message.attachments) ||
+                before.link_url !== message.link_url) {
+                $node.replaceWith(messageHtml(message));
+                rememberMessage(message);
+                return;
+            }
+
+            // Confirmaciones de lectura: se toca solo el icono.
+            if (before.read !== message.read || before.delivered !== message.delivered) {
+                var $meta = $node.children('.chat-message__meta');
+                var check = '';
+
+                $meta.find('.chat-check').remove();
+
+                if (message.mine && !message.deleted) {
+                    check = '<i class="fa-solid fa-check chat-check' + (message.read ? ' chat-check--read' : '') +
+                        '" title="' + (message.read ? 'Leído' : (message.delivered ? 'Entregado' : 'Enviado')) +
+                        '" aria-hidden="true"></i>';
+                }
+
+                $meta.append(check);
+            }
+
+            // Reacciones: se toca solo su contenedor.
+            if (JSON.stringify(before.reactions) !== JSON.stringify(message.reactions)) {
+                var reactions = (message.reactions || []).map(function (reaction) {
+                    return '<button type="button" class="chat-reaction' + (reaction.mine ? ' is-mine' : '') +
+                        '" data-reaction="' + escape(reaction.emoji) + '">' +
+                        escape(reaction.emoji) + ' ' + reaction.count + '</button>';
+                }).join('');
+                var $reactions = $node.children('.chat-message__reactions');
+
+                if (reactions) {
+                    if ($reactions.length) {
+                        $reactions.html(reactions);
+                    } else {
+                        $node.append('<div class="chat-message__reactions">' + reactions + '</div>');
+                    }
+                } else {
+                    $reactions.remove();
+                }
+            }
+
+            $node.attr('data-body', message.body)
+                .attr('data-can-edit', message.can_edit ? '1' : '0')
+                .attr('data-can-delete', message.can_delete ? '1' : '0')
+                .attr('data-reported', message.reported ? '1' : '0')
+                .removeData('body can-edit can-delete reported');
+
+            rememberMessage(message);
+        }
+
+        function renderMessages() {
+            var html = '';
+            var messages = lastData.messages || [];
+
+            forgetPaintedMessages();
+
+            messages.forEach(function (message, index) {
+                if (message.created_date !== paintedLastDate) {
+                    paintedLastDate = message.created_date;
+                    html += '<div class="chat-date">' + escape(dateLabel(message.created_date)) + '</div>';
+                }
+
+                if (lastData.new_count > 0 && index === (messages.length - lastData.new_count)) {
+                    html += '<div class="chat-new-divider">' + lastData.new_count + ' mensajes nuevos</div>';
+                }
+
+                html += messageHtml(message);
+                rememberMessage(message);
+            });
+
+            var $messages = $('#chat-messages');
+            var wasAtBottom = isNearBottom($messages);
+            var previousScroll = $messages.scrollTop();
+
+            $messages.html(html || '<p class="chat-hint">Aún no hay mensajes.</p>');
+
+            paintPending();
+            restoreOpenTexts($messages);
 
             if (wasAtBottom) {
                 $messages.scrollTop($messages[0].scrollHeight);
@@ -424,22 +731,215 @@
                 $messages.scrollTop(previousScroll);
             }
 
+            renderPinned();
             drawWaveforms();
         }
 
-        function loadMessages() {
-            if (!currentId) {
+        /**
+         * Cintillo con el mensaje fijado. Se desfija con el clic derecho.
+         */
+        function renderPinned() {
+            var $pin = $('#chat-pin');
+
+            if (!$pin.length) {
                 return;
             }
 
-            $.getJSON(chatBase + '/' + currentId + '/mensajes')
+            var pinned = lastData && lastData.conversation ? lastData.conversation.pinned_message : null;
+
+            if (!pinned) {
+                $pin.prop('hidden', true);
+
+                return;
+            }
+
+            $('#chat-pin-body').text(
+                (pinned.sender ? pinned.sender + ': ' : '') + (pinned.body || '')
+            );
+
+            $pin.prop('hidden', false);
+        }
+
+        // Aplica una respuesta incremental: añade lo nuevo y actualiza en su
+        // sitio lo que cambió, sin tocar el resto de la conversación.
+        function patchMessages(response) {
+            var $box = $('#chat-messages');
+
+            if (!$box.children('.chat-message').length) {
+                lastData = response;
+                renderMessages();
+                return;
+            }
+
+            var newMessages = response.messages || [];
+            var recent = response.recent || [];
+            var atBottom = isNearBottom($box);
+            var previousHeight = $box[0].scrollHeight;
+            var previousTop = $box.scrollTop();
+
+            newMessages.forEach(appendMessage);
+            recent.forEach(updateMessageNode);
+
+            paintedLastId = Math.max(paintedLastId, parseInt(response.latest_id, 10) || 0);
+            recentHash = response.recent_hash || recentHash;
+
+            // Las burbujas en envío siempre quedan al final y las confirmadas se
+            // retiran en cuanto el servidor devuelve el mensaje real.
+            syncPending();
+
+            if (!newMessages.length && !recent.length) {
+                return;
+            }
+
+            if (atBottom) {
+                $box.scrollTop($box[0].scrollHeight);
+            } else if (newMessages.length) {
+                // Si el usuario está leyendo más arriba, no se le mueve el texto.
+                $box.scrollTop(previousTop + ($box[0].scrollHeight - previousHeight));
+            }
+
+            drawWaveforms();
+        }
+
+        // Refresca solo las burbujas indicadas (tras editar, borrar o reaccionar)
+        // sin pedir el historial ni repintar el resto de la conversación.
+        function refreshMessages(ids) {
+            var list = (ids || []).filter(function (id) {
+                return parseInt(id, 10) > 0;
+            });
+
+            if (!list.length || !currentId || !isPanelOpen()) {
+                return;
+            }
+
+            $.getJSON(chatBase + '/' + currentId + '/mensajes', { ids: list })
                 .done(function (response) {
-                    lastData = response;
-                    renderMessages();
+                    (response.recent || []).forEach(updateMessageNode);
+                });
+        }
+
+        function messageDelay() {
+            // Sondeo rápido en reposo y con espera creciente si el servidor falla.
+            return Math.min(15000, 1600 * Math.pow(2, messageFailures));
+        }
+
+        function summaryDelay() {
+            return Math.min(30000, 4500 * Math.pow(2, summaryFailures));
+        }
+
+        function loadMessages() {
+            if (!currentId || !isPanelOpen() || messageRequestPending) {
+                return;
+            }
+
+            var conversationId = currentId;
+            var painted = paintedLastId > 0 && $('#chat-messages .chat-message').length > 0;
+            var data = painted ? { after_id: paintedLastId } : {};
+
+            messageRequestPending = true;
+
+            $.getJSON(chatBase + '/' + conversationId + '/mensajes', data)
+                .done(function (response) {
+                    messageFailures = 0;
+
+                    if (conversationId !== currentId) {
+                        return;
+                    }
+
+                    if (!painted) {
+                        lastData = response;
+                        setMentionCatalog(response.mentionables || []);
+                        renderMessages();
+                        return;
+                    }
+
+                    // Sin novedad ni cambios en la ventana reciente: no se toca el DOM.
+                    if (!(response.messages || []).length &&
+                        response.recent_hash &&
+                        response.recent_hash === recentHash) {
+                        paintedLastId = Math.max(paintedLastId, parseInt(response.latest_id, 10) || 0);
+                        return;
+                    }
+
+                    patchMessages(response);
                 })
                 .fail(function () {
-                    $('#chat-messages').html('<p class="chat-hint">No se pudieron cargar los mensajes.</p>');
+                    messageFailures += 1;
+
+                    if (!painted) {
+                        $('#chat-messages').html('<p class="chat-hint">No se pudieron cargar los mensajes.</p>');
+                    }
+                })
+                .always(function () {
+                    messageRequestPending = false;
                 });
+        }
+
+        function startMessagePolling() {
+            window.clearTimeout(messageTimer);
+            messageTimer = null;
+
+            if (!currentId || !isPanelOpen()) {
+                return;
+            }
+
+            messageTimer = window.setTimeout(function poll() {
+                if (!currentId || !isPanelOpen() || !canPoll()) {
+                    return;
+                }
+
+                loadMessages();
+                messageTimer = window.setTimeout(poll, messageDelay());
+            }, messageDelay());
+        }
+
+        function startSummaryPolling() {
+            window.clearTimeout(pollTimer);
+            pollTimer = null;
+
+            if (!isPanelOpen()) {
+                return;
+            }
+
+            pollTimer = window.setTimeout(function poll() {
+                if (!isPanelOpen() || !canPoll()) {
+                    return;
+                }
+
+                refresh();
+                pollTimer = window.setTimeout(poll, summaryDelay());
+            }, summaryDelay());
+        }
+
+        function stopChatPolling() {
+            window.clearTimeout(messageTimer);
+            window.clearTimeout(pollTimer);
+            messageTimer = null;
+            pollTimer = null;
+        }
+
+        var lastSyncAt = 0;
+
+        // Sincronización inmediata al volver a la pestaña, al recuperar la red o
+        // al enfocar la ventana: el usuario no espera al siguiente sondeo.
+        function syncNow() {
+            if (!canPoll() || !isPanelOpen()) {
+                return;
+            }
+
+            if (Date.now() - lastSyncAt < 800) {
+                return;
+            }
+
+            lastSyncAt = Date.now();
+
+            refresh();
+            startSummaryPolling();
+
+            if (currentId) {
+                loadMessages();
+                startMessagePolling();
+            }
         }
 
         function statusKind(subtitle) {
@@ -454,8 +954,13 @@
             return 'offline';
         }
 
-        function openConversation(id, title, subtitle) {
+        function openConversation(id, title, subtitle, moderation) {
             currentId = id;
+            currentModeration = moderation === true;
+            closeChatProfile();
+            forgetPaintedMessages();
+            setMentionCatalog([]);
+            hideMentionSuggestions();
             $('#chat-title').text(title || '');
             $('#chat-subtitle').text(subtitle || '');
             $('#chat-status').attr('class', 'chat-status chat-status--' + statusKind(subtitle || ''));
@@ -467,42 +972,224 @@
 
             loadMessages();
 
-            window.clearInterval(messageTimer);
-            messageTimer = window.setInterval(loadMessages, 3000);
+            startMessagePolling();
         }
 
+        // Firmas de lo último pintado en cada lista: si el servidor devuelve lo
+        // mismo, no se vuelve a escribir nada en el DOM.
+        var conversationRows = {};
+        var usersSignature = null;
+        var moderationSignature = null;
+        var groupUsersSignature = null;
+
         function renderUsers(items) {
-            if (!items || !items.length) {
+            var list = items || [];
+            lastUsers = list;
+
+            var signature = JSON.stringify(list);
+
+            if (signature === usersSignature) {
+                return;
+            }
+
+            usersSignature = signature;
+
+            if (!list.length) {
                 $('#chat-users').html('<p class="chat-hint">No hay otros usuarios disponibles.</p>');
                 return;
             }
 
-            $('#chat-users').html(items.map(function (user) {
-                return '<button type="button" class="chat-item chat-user-open" data-id="' + user.id + '">' +
+            $('#chat-users').html(list.map(function (user) {
+                var states = [];
+
+                if (user.blocked) {
+                    states.push('Bloqueado');
+                }
+
+                if (user.blocked_by) {
+                    states.push('Te bloqueó');
+                }
+
+                if (user.muted) {
+                    states.push('Silenciado');
+                }
+
+                return '<button type="button" class="chat-item chat-user-open" data-id="' + user.id + '"' +
+                    ' data-name="' + escape(user.name) + '"' +
+                    ' data-muted="' + (user.muted ? '1' : '0') + '"' +
+                    ' data-blocked="' + (user.blocked ? '1' : '0') + '"' +
+                    ' data-blocked-by="' + (user.blocked_by ? '1' : '0') + '"' +
+                    ' data-is-admin="' + (user.is_admin ? '1' : '0') + '">' +
                     '<span class="chat-item__title">' + escape(user.name) +
                     ' <span class="' + (user.online ? 'chat-online' : 'chat-offline') + '"' +
                     ' title="' + (user.online ? 'En línea' : 'Desconectado') + '"></span></span>' +
                     '<span class="chat-item__meta">' + escape(user.role) +
-                    (user.online ? ' · En línea' : ' · Desconectado') + '</span>' +
+                    (user.online ? ' · En línea' : ' · Desconectado') +
+                    (states.length ? ' · ' + escape(states.join(' · ')) : '') +
+                    '</span>' +
                     '</button>';
             }).join(''));
         }
 
-        function renderConversations(items) {
-            if (!items || !items.length) {
-                $('#chat-conversations').html('<p class="chat-hint">Aún no tienes conversaciones.</p>');
+        function conversationItemHtml(item) {
+            var label = item.subtitle || (item.is_group ? 'Grupo' : 'Conversación directa');
+            var muted = item.muted ? '1' : '0';
+            var blocked = item.blocked ? '1' : '0';
+            var moderation = item.is_moderation ? '1' : '0';
+            var flags = '';
+
+            if (item.pinned) {
+                flags += ' <i class="fa-solid fa-thumbtack chat-item__flag chat-item__flag--pin"' +
+                    ' title="Conversación fijada" aria-label="Conversación fijada"></i>';
+            }
+
+            if (item.favorite) {
+                flags += ' <i class="fa-solid fa-star chat-item__flag chat-item__flag--favorite"' +
+                    ' title="Favorito" aria-label="Favorito"></i>';
+            }
+
+            var muteIcon = item.muted
+                ? ' <i class="fa-solid fa-bell-slash chat-item__mute"' +
+                    ' title="Conversación silenciada" aria-label="Conversación silenciada"></i>'
+                : '';
+
+            return '<button type="button" class="chat-item chat-conversation-open" data-id="' + item.id + '"' +
+                ' data-title="' + escape(item.title) + '"' +
+                ' data-subtitle="' + escape(label) + '"' +
+                ' data-muted="' + muted + '"' +
+                ' data-blocked="' + blocked + '"' +
+                ' data-owner="' + (item.is_owner ? '1' : '0') + '"' +
+                ' data-user-id="' + escape(item.other_user_id || '') + '"' +
+                ' data-is-group="' + (item.is_group ? '1' : '0') + '"' +
+                ' data-moderation="' + moderation + '"' +
+                ' data-favorite="' + (item.favorite ? '1' : '0') + '"' +
+                ' data-pinned="' + (item.pinned ? '1' : '0') + '"' +
+                ' data-archived="' + (item.archived ? '1' : '0') + '"' +
+                ' data-can-archive="' + (item.can_archive ? '1' : '0') + '"' +
+                ' data-can-unarchive="' + (item.can_unarchive ? '1' : '0') + '"' +
+                ' data-unread="' + (item.unread || 0) + '"' +
+                ' data-has-messages="' + (item.last_message ? '1' : '0') + '">' +
+                '<span class="chat-item__title">' + escape(item.title) + flags + muteIcon + '</span>' +
+                '<span class="chat-item__foot">' +
+                '<span class="chat-item__meta">' + escape(item.last_message || 'Sin mensajes') + '</span>' +
+                (item.unread > 0
+                    ? '<span class="chat-item__new">' +
+                        (item.unread === 1 ? '1 mensaje nuevo' : item.unread + ' mensajes nuevos') +
+                        '</span>'
+                    : '') +
+                '</span>' +
+                '</button>';
+        }
+
+        // Lista de archivadas: se repinta completa porque cambia poco.
+        function renderGroups(items) {
+            var $list = $('#chat-groups');
+
+            if (!$list.length) {
                 return;
             }
 
-            $('#chat-conversations').html(items.map(function (item) {
-                return '<button type="button" class="chat-item chat-conversation-open" data-id="' + item.id + '"' +
-                    ' data-title="' + escape(item.title) + '"' +
-                    ' data-subtitle="' + escape(item.subtitle || (item.is_group ? 'Grupo' : 'Conversación directa')) + '">' +
-                    '<span class="chat-item__title">' + escape(item.title) + '</span>' +
-                    (item.unread > 0 ? '<span class="chat-item__badge">' + item.unread + '</span>' : '') +
-                    '<span class="chat-item__meta">' + escape(item.last_message || 'Sin mensajes') + '</span>' +
-                    '</button>';
-            }).join(''));
+            var groups = (items || []).filter(function (item) {
+                return item.is_group;
+            });
+
+            if (!groups.length) {
+                $list.html('<p class="chat-hint">Aún no perteneces a ningún grupo.</p>');
+
+                return;
+            }
+
+            $list.html(groups.map(conversationItemHtml).join(''));
+        }
+
+        function renderArchived(items) {            var $list = $('#chat-archived');
+            var list = items || [];
+
+            if (!list.length) {
+                $list.html('<p class="chat-hint">No tienes conversaciones archivadas.</p>');
+
+                return;
+            }
+
+            $list.html(list.map(conversationItemHtml).join(''));
+        }
+
+        function renderArchivedCount(count) {
+            var $count = $('#chat-archived-count');
+
+            if (!$count.length) {
+                return;
+            }
+
+            if (count > 0) {
+                $count.prop('hidden', false).text(count > 99 ? '+99' : count);
+            } else {
+                $count.prop('hidden', true).text('0');
+            }
+        }
+
+        // Parchea la lista de conversaciones: reutiliza las filas que no
+        // cambiaron, reemplaza solo las que sí y las reordena sin recrearlas.
+        function renderConversations(items) {
+            var $list = $('#chat-conversations');
+            var list = items || [];
+
+            if (!list.length) {
+                if (Object.keys(conversationRows).length || !$list.children('.chat-hint').length) {
+                    conversationRows = {};
+                    $list.html('<p class="chat-hint">Aún no tienes conversaciones.</p>');
+                }
+
+                return;
+            }
+
+            var rows = {};
+            var wanted = [];
+
+            list.forEach(function (item) {
+                var key = String(item.id);
+                var signature = JSON.stringify(item);
+                var $node = $list.children('[data-id="' + key + '"]');
+
+                rows[key] = signature;
+
+                if ($node.length && conversationRows[key] === signature) {
+                    wanted.push($node[0]);
+                    return;
+                }
+
+                var $fresh = $(conversationItemHtml(item));
+
+                // Se reemplaza solo la fila afectada, conservando su posición.
+                if ($node.length) {
+                    $node.replaceWith($fresh);
+                }
+
+                wanted.push($fresh[0]);
+            });
+
+            $list.children('[data-id]').each(function () {
+                var key = String($(this).attr('data-id'));
+
+                if (!rows.hasOwnProperty(key)) {
+                    $(this).remove();
+                }
+            });
+
+            // Solo se toca el DOM cuando el resultado difiere de lo que ya hay
+            // (filas nuevas, cambiadas o en otro orden).
+            var current = $list.children('[data-id]').toArray();
+            var same = current.length === wanted.length && current.every(function (node, index) {
+                return node === wanted[index];
+            });
+
+            if (!same) {
+                wanted.forEach(function (node) {
+                    $list.append(node);
+                });
+            }
+
+            conversationRows = rows;
         }
 
         function renderModeration(items) {
@@ -510,23 +1197,45 @@
                 return;
             }
 
-            if (!items || !items.length) {
+            var list = items || [];
+            var signature = JSON.stringify(list);
+
+            if (signature === moderationSignature) {
+                return;
+            }
+
+            moderationSignature = signature;
+
+            if (!list.length) {
                 $('#chat-moderation').html('<p class="chat-hint">No hay conversaciones para moderar.</p>');
                 return;
             }
 
-            $('#chat-moderation').html(items.map(function (item) {
+            $('#chat-moderation').html(list.map(function (item) {
+                var nuevos = item.unread > 0
+                    ? ' · ' + (item.unread === 1 ? '1 nuevo' : item.unread + ' nuevos')
+                    : '';
+
                 return '<button type="button" class="chat-item chat-moderation-open" data-id="' + item.id + '"' +
                     ' data-title="' + escape(item.title) + '"' +
                     ' data-subtitle="' + escape(item.subtitle || 'Moderación') + '">' +
                     '<span class="chat-item__title">' + escape(item.title) + '</span>' +
-                    '<span class="chat-item__meta">' + escape(item.is_group ? 'Grupo' : 'Conversación directa') + '</span>' +
+                    '<span class="chat-item__meta">' + escape(item.is_group ? 'Grupo' : 'Conversación directa') + nuevos + '</span>' +
                     '</button>';
             }).join(''));
         }
 
         function renderGroupUsers(users) {
-            $('#chat-group-users').html(users.map(function (user) {
+            var list = users || [];
+            var signature = JSON.stringify(list.map(function (user) { return [user.id, user.name]; }));
+
+            if (signature === groupUsersSignature) {
+                return;
+            }
+
+            groupUsersSignature = signature;
+
+            $('#chat-group-users').html(list.map(function (user) {
                 return '<label class="chat-group__user">' +
                     '<input type="checkbox" class="form-check-input chat-group-user" value="' + user.id + '"> ' +
                     escape(user.name) + '</label>';
@@ -534,13 +1243,18 @@
         }
 
         function refresh() {
-            $.getJSON(resumenUrl)
+            return $.getJSON(resumenUrl)
                 .done(function (response) {
+                    summaryFailures = 0;
+
                     renderConversations(response.conversations);
+                    renderGroups(response.conversations);
+                    renderArchived(response.archived);
+                    renderArchivedCount((response.archived || []).length);
                     renderUsers(response.users);
                     renderModeration(response.moderation);
 
-                    if (isAdmin && response.users) {
+                    if (response.users) {
                         renderGroupUsers(response.users);
                     }
 
@@ -550,20 +1264,25 @@
 
                     lastUnread = response.unread || 0;
                     setBadge(lastUnread);
+                    renderModerationCount(response.moderation_unread || 0);
                     openPendingConversation(response);
                 })
                 .fail(function () {
+                    summaryFailures += 1;
                     $('#chat-users').html('<p class="chat-hint">No se pudieron cargar los usuarios. Intenta de nuevo.</p>');
                 });
         }
 
         function showList() {
             currentId = null;
+            currentModeration = false;
+            closeChatProfile();
             $('#chat-conversation').prop('hidden', true).removeClass('is-gallery');
             $('#chat-gallery-panel').prop('hidden', true);
             $('#chat-panel > .chat-tabs').show();
             $('#chat-body').show();
-            window.clearInterval(messageTimer);
+            stopChatPolling();
+            startSummaryPolling();
         }
 
         function hideContextMenu() {
@@ -572,9 +1291,129 @@
             pendingActive = null;
         }
 
+        function hideListMenu() {
+            $('#chat-list-menu').prop('hidden', true).css({ top: '', left: '' });
+            activeConversation = null;
+        }
+
+        function hideUserMenu() {
+            $('#chat-user-menu').prop('hidden', true).css({ top: '', left: '' });
+            activeUser = null;
+        }
+
+        /**
+         * Menú de una persona de la pestaña Usuarios:
+         * silenciar, bloquear/desbloquear y reportar.
+         */
+        function showUserMenu(event, $item) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            hideContextMenu();
+            hideListMenu();
+
+            activeUser = {
+                id: parseInt($item.data('id'), 10) || null,
+                name: $item.data('name') || '',
+                muted: $item.data('muted') === 1,
+                blocked: $item.data('blocked') === 1,
+                blockedBy: $item.data('blocked-by') === 1,
+                isAdmin: $item.data('is-admin') === 1
+            };
+
+            var $menu = $('#chat-user-menu');
+
+            $menu.find('[data-user-action="mute"]').prop('hidden', activeUser.muted);
+            $menu.find('[data-user-action="unmute"]').prop('hidden', !activeUser.muted);
+            $menu.find('[data-user-action="block"]')
+                .prop('hidden', activeUser.blocked || activeUser.isAdmin);
+            $menu.find('[data-user-action="unblock"]').prop('hidden', !activeUser.blocked);
+
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+
+            $menu.css({
+                top: Math.max(8, Math.min(event.clientY, window.innerHeight - $menu.outerHeight() - 8)) + 'px',
+                left: Math.max(8, Math.min(event.clientX, window.innerWidth - $menu.outerWidth() - 8)) + 'px'
+            });
+        }
+
+        function showListMenu(event, $item) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            hideContextMenu();
+
+            activeConversation = {
+                id: parseInt($item.data('id'), 10) || null,
+                title: $item.data('title') || '',
+                muted: $item.data('muted') === 1,
+                blocked: $item.data('blocked') === 1,
+                userId: parseInt($item.data('user-id'), 10) || null,
+                isGroup: $item.data('is-group') === 1,
+                isOwner: $item.data('owner') === 1,
+                favorite: $item.data('favorite') === 1,
+                pinned: $item.data('pinned') === 1,
+                archived: $item.data('archived') === 1,
+                canArchive: $item.data('can-archive') === 1,
+                canUnarchive: $item.data('can-unarchive') === 1,
+                unread: parseInt($item.data('unread'), 10) || 0,
+                hasMessages: $item.data('has-messages') === 1
+            };
+
+            var $menu = $('#chat-list-menu');
+
+            var isModeration = $item.hasClass('chat-moderation-open');
+            var isAdmin = $widget.attr('data-is-admin') === '1';
+            var canManage = activeConversation.isGroup && (activeConversation.isOwner || isAdmin);
+            var mine = !isModeration;
+
+            $menu.find('[data-list-action="mute"]').prop('hidden', !mine || activeConversation.muted);
+            $menu.find('[data-list-action="unmute"]').prop('hidden', !mine || !activeConversation.muted);
+
+            var canBlock = !activeConversation.isGroup && activeConversation.userId !== null;
+
+            $menu.find('[data-list-action="block"]').prop('hidden', !mine || !canBlock || activeConversation.blocked);
+            $menu.find('[data-list-action="unblock"]').prop('hidden', !mine || !canBlock || !activeConversation.blocked);
+
+            $menu.find('[data-list-action="favorite"]').prop('hidden', !mine || activeConversation.favorite);
+            $menu.find('[data-list-action="unfavorite"]').prop('hidden', !mine || !activeConversation.favorite);
+            $menu.find('[data-list-action="pin"]').prop('hidden', !mine || activeConversation.pinned);
+            $menu.find('[data-list-action="unpin"]').prop('hidden', !mine || !activeConversation.pinned);
+            $menu.find('[data-list-action="read"]').prop('hidden', !mine || activeConversation.unread === 0);
+            $menu.find('[data-list-action="unread"]')
+                .prop('hidden', !mine || !activeConversation.hasMessages);
+            $menu.find('[data-list-action="archive"]')
+                .prop('hidden', !mine || activeConversation.archived || !activeConversation.canArchive);
+            $menu.find('[data-list-action="unarchive"]')
+                .prop('hidden', !mine || !activeConversation.archived || !activeConversation.canUnarchive);
+            $menu.find('[data-list-action="vaciar"]').prop('hidden', !mine);
+            $menu.find('[data-list-action="clear"]').prop('hidden', !mine);
+
+            $menu.find('[data-list-action="leave"]').prop('hidden', !activeConversation.isGroup);
+            $menu.find('[data-list-action="report"]').prop('hidden', isModeration);
+            $menu.find('[data-list-action="delete"]').prop('hidden', !isModeration);
+            $menu.find('[data-list-action="invite"]').prop('hidden', !canManage);
+            $menu.find('[data-list-action="members"]').prop('hidden', !canManage);
+            $menu.find('[data-list-action="banned"]').prop('hidden', !canManage);
+
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+
+            // Mantener el menú dentro de la ventana, aunque el clic sea al borde.
+            var width = $menu.outerWidth();
+            var height = $menu.outerHeight();
+
+            $menu.css({
+                top: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8)) + 'px',
+                left: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)) + 'px'
+            });
+        }
+
         function showContextMenu(event, $message) {
             event.preventDefault();
             event.stopPropagation();
+
+            hideListMenu();
+
             activeMessage = $message;
 
             var $menu = $('#chat-context-menu');
@@ -596,6 +1435,18 @@
                 $menu.find('[data-action="reaction"], [data-action="edit"], [data-action="delete"], [data-action="report"]')
                     .prop('hidden', true);
             }
+
+            // Fijar/desfijar el mensaje: solo para participantes, nunca moderando.
+            var pinned = lastData && lastData.conversation ? lastData.conversation.pinned_message : null;
+            var pinnedId = pinned ? parseInt(pinned.id, 10) : null;
+            var messageId = parseInt($message.data('message-id'), 10) || null;
+            var canPin = !currentModeration
+                && !pendingId
+                && messageId !== null
+                && $message.data('deleted') !== 1;
+
+            $menu.find('[data-action="pin"]').prop('hidden', !canPin || messageId === pinnedId);
+            $menu.find('[data-action="unpin"]').prop('hidden', !canPin || messageId !== pinnedId);
 
             $menu.prop('hidden', false).css({
                 top: event.clientY + 'px',
@@ -623,17 +1474,22 @@
 
             if (expanded) {
                 refresh();
-                window.clearInterval(pollTimer);
-                pollTimer = window.setInterval(refresh, 6000);
+                startSummaryPolling();
+
+                if (currentId) {
+                    startMessagePolling();
+                }
             } else {
-                window.clearInterval(pollTimer);
+                stopChatPolling();
+                closeChatProfile();
             }
         });
 
         $('#chat-close').on('click', function () {
             $('#chat-panel').prop('hidden', true);
             $('#chat-toggle').attr('aria-expanded', 'false');
-            window.clearInterval(pollTimer);
+            stopChatPolling();
+            closeChatProfile();
         });
 
         $('#chat-sound-toggle').on('click', function () {
@@ -656,18 +1512,25 @@
 
         $(document).on('click', function (event) {
             var $panel = $('#chat-panel');
+            var target = event.target;
 
             if ($panel.prop('hidden')) {
                 return;
             }
 
-            if ($(event.target).closest('#chat-widget').length) {
+            // Un clic que repinta el interior del chat (carrusel, miniaturas, mensajes)
+            // deja el nodo pulsado fuera del DOM. Ese clic no es «fuera del widget».
+            if (!target || (target.nodeType === 1 && !document.documentElement.contains(target))) {
+                return;
+            }
+
+            if ($(target).closest('#chat-widget').length) {
                 return;
             }
 
             $panel.prop('hidden', true);
             $('#chat-toggle').attr('aria-expanded', 'false');
-            window.clearInterval(pollTimer);
+            stopChatPolling();
         });
 
         $('.chat-tab').on('click', function () {
@@ -678,7 +1541,7 @@
             $('.chat-tab-panel').prop('hidden', true);
             $('.chat-tab-panel[data-panel="' + tab + '"]').prop('hidden', false);
 
-            if (tab === 'users') {
+            if (tab === 'users' || tab === 'groups') {
                 refresh();
             }
 
@@ -692,11 +1555,16 @@
                 var items = response.items || [];
 
                 $('#chat-secret').html(items.length ? items.map(function (item) {
+                    var label = item.label || (item.role === 'giver' ? 'Tu asignado' : 'Incógnito');
+
                     return '<button type="button" class="chat-item chat-secret-open" data-id="' + item.conversation_id + '"' +
+                        ' data-title="' + escape(item.title) + '"' +
+                        ' data-label="' + escape(label) + '"' +
                         ' data-online="' + (item.online ? '1' : '0') + '">' +
                         '<span class="chat-item__title">' + escape(item.title) +
                         ' <span class="' + (item.online ? 'chat-online' : 'chat-offline') + '"></span></span>' +
-                        '<span class="chat-item__meta">' + (item.online ? 'En línea' : 'Desconectado') + '</span></button>';
+                        '<span class="chat-item__meta">' + escape(label) + ' · ' +
+                        (item.online ? 'En línea' : 'Desconectado') + '</span></button>';
                 }).join('') : '<p class="chat-hint">Aún no tienes amigo secreto asignado.</p>');
             }).fail(function () {
                 $('#chat-secret').html('<p class="chat-hint">No se pudo cargar el amigo secreto.</p>');
@@ -705,18 +1573,35 @@
 
         $widget.on('click', '.chat-secret-open', function () {
             var online = $(this).data('online') === 1;
-            openConversation($(this).data('id'), 'Amigo secreto', online ? 'En línea' : 'Desconectado');
+
+            openConversation(
+                $(this).data('id'),
+                $(this).data('title') || 'Amigo secreto',
+                ($(this).data('label') || 'Amigo secreto') + ' · ' + (online ? 'En línea' : 'Desconectado')
+            );
         });
 
         $widget.on('click', '.chat-conversation-open, .chat-moderation-open', function () {
-            openConversation($(this).data('id'), $(this).data('title'), $(this).data('subtitle'));
+            openConversation(
+                $(this).data('id'),
+                $(this).data('title'),
+                $(this).data('subtitle'),
+                $(this).hasClass('chat-moderation-open')
+            );
         });
 
         $widget.on('click', '.chat-user-open', function () {
             post(abrirUrl, { user_id: $(this).data('id') })
                 .done(function (response) {
                     openConversation(response.conversation.id, response.conversation.title, 'Conversación directa');
+                })
+                .fail(function (xhr) {
+                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo abrir el chat.');
                 });
+        });
+
+        $widget.on('contextmenu', '.chat-user-open', function (event) {
+            showUserMenu(event, $(this));
         });
 
         $('#chat-back').on('click', function () {
@@ -727,9 +1612,388 @@
             showContextMenu(event, $(this));
         });
 
+        $widget.on('contextmenu', '.chat-conversation-open', function (event) {
+            showListMenu(event, $(this));
+        });
+
+        // El cintillo del mensaje fijado se desfija con el clic derecho.
+        $('#chat-pin').on('contextmenu', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (currentModeration) {
+                return;
+            }
+
+            hideContextMenu();
+            hideListMenu();
+
+            var $menu = $('#chat-pin-menu');
+
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+
+            $menu.css({
+                top: Math.max(8, Math.min(event.clientY, window.innerHeight - $menu.outerHeight() - 8)) + 'px',
+                left: Math.max(8, Math.min(event.clientX, window.innerWidth - $menu.outerWidth() - 8)) + 'px'
+            });
+        });
+
+        $('#chat-pin-menu').on('click', '[data-pin-action="unpin"]', function () {
+            $('#chat-pin-menu').prop('hidden', true);
+
+            if (!currentId || currentModeration) {
+                return;
+            }
+
+            remove(chatBase + '/' + currentId + '/mensaje-fijado', {})
+                .done(function () {
+                    if (lastData && lastData.conversation) {
+                        lastData.conversation.pinned_message = null;
+                    }
+
+                    renderPinned();
+                })
+                .fail(function (xhr) {
+                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo desfijar el mensaje.');
+                });
+        });
+
         $(document).on('click', function (event) {
             if (!$(event.target).closest('#chat-context-menu').length) {
                 hideContextMenu();
+            }
+
+            if (!$(event.target).closest('#chat-list-menu').length) {
+                hideListMenu();
+            }
+
+            if (!$(event.target).closest('#chat-pin-menu').length) {
+                $('#chat-pin-menu').prop('hidden', true);
+            }
+
+            if (!$(event.target).closest('#chat-user-menu').length) {
+                hideUserMenu();
+            }
+        });
+
+        $('#chat-list-menu').on('click', '.chat-context-item', function () {
+            var action = $(this).data('list-action');
+            var target = activeConversation;
+
+            hideListMenu();
+
+            if (!target || !target.id) {
+                return;
+            }
+
+            if (action === 'mute' || action === 'unmute') {
+                post(chatBase + '/' + target.id + '/silenciar', {})
+                    .done(refresh)
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cambiar el silencio.');
+                    });
+
+                return;
+            }
+
+            if (action === 'favorite' || action === 'unfavorite') {
+                post(chatBase + '/' + target.id + '/favorito', {})
+                    .done(refresh)
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cambiar el favorito.');
+                    });
+
+                return;
+            }
+
+            if (action === 'pin' || action === 'unpin') {
+                post(chatBase + '/' + target.id + '/fijar', {})
+                    .done(refresh)
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo fijar la conversación.');
+                    });
+
+                return;
+            }
+
+            if (action === 'read') {
+                post(chatBase + '/' + target.id + '/leer', {})
+                    .done(refresh)
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo marcar como leída.');
+                    });
+
+                return;
+            }
+
+            if (action === 'unread') {
+                post(chatBase + '/' + target.id + '/no-leido', {})
+                    .done(refresh)
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo marcar como no leída.');
+                    });
+
+                return;
+            }
+
+            if (action === 'archive') {
+                confirmDialog(
+                    '¿Archivar esta conversación? Mientras esté archivada no aparece en la moderación.',
+                    function () {
+                        post(chatBase + '/' + target.id + '/archivar', {})
+                            .done(function () {
+                                if (currentId === target.id) {
+                                    showList();
+                                }
+
+                                refresh();
+                            })
+                            .fail(function (xhr) {
+                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo archivar.');
+                            });
+                    }
+                );
+
+                return;
+            }
+
+            if (action === 'unarchive') {
+                remove(chatBase + '/' + target.id + '/archivar', {})
+                    .done(refresh)
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo deshacer el archivo.');
+                    });
+
+                return;
+            }
+
+            if (action === 'vaciar') {
+                confirmDialog(
+                    '¿Vaciar este chat? Se borran los mensajes, enlaces y adjuntos de tu lado.',
+                    function () {
+                        post(chatBase + '/' + target.id + '/vaciar', {})
+                            .done(function () {
+                                if (currentId === target.id) {
+                                    loadMessages();
+                                }
+
+                                refresh();
+                            })
+                            .fail(function (xhr) {
+                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo vaciar el chat.');
+                            });
+                    }
+                );
+
+                return;
+            }
+
+            if (action === 'clear') {
+                confirmDialog(
+                    '¿Eliminar esta conversación de tu lista? Si vuelves a abrirla, empieza vacía.',
+                    function () {
+                        post(chatBase + '/' + target.id + '/eliminar', {})
+                            .done(function () {
+                                if (currentId === target.id) {
+                                    showList();
+                                }
+
+                                refresh();
+                            })
+                            .fail(function (xhr) {
+                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo eliminar la conversación.');
+                            });
+                    }
+                );
+
+                return;
+            }
+
+            if (action === 'leave') {
+                confirmDialog('¿Salir de «' + escape(target.title) + '»?', function () {
+                    post(chatBase + '/' + target.id + '/salir', {})
+                        .done(function () {
+                            if (currentId === target.id) {
+                                showList();
+                            }
+
+                            refresh();
+                        })
+                        .fail(function (xhr) {
+                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo salir del grupo.');
+                        });
+                });
+
+                return;
+            }
+
+            if (action === 'report') {
+                confirmDialog('¿Reportar esta conversación a la administración?', function () {
+                    post(chatBase + '/' + target.id + '/reportar-conversacion', {})
+                        .done(function () {
+                            alertDialog('Reporte enviado a la administración.');
+                        })
+                        .fail(function (xhr) {
+                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo reportar.');
+                        });
+                });
+
+                return;
+            }
+
+            if (action === 'delete') {
+                confirmDialog('¿Eliminar esta conversación para todos? No se puede deshacer.', function () {
+                    remove(chatBase + '/' + target.id, {})
+                        .done(function () {
+                            if (currentId === target.id) {
+                                showList();
+                            }
+
+                            refresh();
+                        })
+                        .fail(function (xhr) {
+                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo eliminar.');
+                        });
+                });
+
+                return;
+            }
+
+            if (action === 'invite') {
+                post(chatBase + '/grupo/' + target.id + '/invitar', {})
+                    .done(function (response) {
+                        var url = response && response.url ? response.url : '';
+
+                        if (navigator.clipboard && url) {
+                            navigator.clipboard.writeText(url);
+                        }
+
+                        alertDialog('Enlace de invitación copiado:\n' + url);
+                    })
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo crear la invitación.');
+                    });
+
+                return;
+            }
+
+            if (action === 'members') {
+                manageMembers(target.id);
+                return;
+            }
+
+            if (action === 'banned') {
+                $.getJSON(chatBase + '/grupo/' + target.id + '/baneados')
+                    .done(function (response) {
+                        var items = (response && response.items) || [];
+
+                        alertDialog(items.length
+                            ? items.map(function (item) {
+                                return '• ' + item.name + (item.reason ? ' — ' + item.reason : '');
+                            }).join('\n')
+                            : 'No hay usuarios vetados en este grupo.');
+                    })
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cargar la lista de vetados.');
+                    });
+
+                return;
+            }
+
+            if (target.userId === null) {
+                return;
+            }
+
+            if (action === 'block') {
+                confirmDialog(
+                    '¿Bloquear a «' + escape(target.title) + '»? No podrán enviarse mensajes entre ustedes.',
+                    function () {
+                        post(chatBase + '/usuarios/' + target.userId + '/bloquear', {})
+                            .done(refresh)
+                            .fail(function (xhr) {
+                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo bloquear al usuario.');
+                            });
+                    }
+                );
+
+                return;
+            }
+
+            if (action === 'unblock') {
+                remove(chatBase + '/usuarios/' + target.userId + '/bloquear', {})
+                    .done(refresh)
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo desbloquear al usuario.');
+                    });
+            }
+        });
+
+        // Acciones sobre una persona de la pestaña Usuarios.
+        $('#chat-user-menu').on('click', '.chat-context-item', function () {
+            var action = $(this).data('user-action');
+            var target = activeUser;
+
+            hideUserMenu();
+
+            if (!target || !target.id) {
+                return;
+            }
+
+            if (action === 'mute' || action === 'unmute') {
+                post(chatBase + '/usuarios/' + target.id + '/silenciar', {})
+                    .done(function () {
+                        refresh();
+                    })
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cambiar el silencio.');
+                    });
+
+                return;
+            }
+
+            if (action === 'block') {
+                confirmDialog(
+                    '¿Bloquear a «' + escape(target.name) + '»? Mientras esté bloqueado no podrás abrir el chat.',
+                    function () {
+                        post(chatBase + '/usuarios/' + target.id + '/bloquear', {})
+                            .done(function () {
+                                if (currentId) {
+                                    loadMessages();
+                                }
+
+                                refresh();
+                            })
+                            .fail(function (xhr) {
+                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo bloquear.');
+                            });
+                    }
+                );
+
+                return;
+            }
+
+            if (action === 'unblock') {
+                remove(chatBase + '/usuarios/' + target.id + '/bloquear', {})
+                    .done(function () {
+                        refresh();
+                    })
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo desbloquear.');
+                    });
+
+                return;
+            }
+
+            if (action === 'report') {
+                promptDialog('Reportar usuario', 'Escribe el motivo del reporte:', function (value) {
+                    post(chatBase + '/usuarios/' + target.id + '/reportar', { reason: value })
+                        .done(function () {
+                            alertDialog('Reporte enviado a la administración.');
+                        })
+                        .fail(function (xhr) {
+                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo enviar el reporte.');
+                        });
+                });
             }
         });
 
@@ -759,6 +2023,30 @@
                 return;
             }
 
+            if (action === 'pin' || action === 'unpin') {
+                if (!currentId || id === null || id === undefined) {
+                    return;
+                }
+
+                var pinRequest = action === 'pin'
+                    ? post(chatBase + '/' + currentId + '/fijar-mensaje/' + id, {})
+                    : remove(chatBase + '/' + currentId + '/mensaje-fijado', {});
+
+                pinRequest
+                    .done(function (response) {
+                        if (lastData && lastData.conversation) {
+                            lastData.conversation.pinned_message = response.pinned_message || null;
+                        }
+
+                        renderPinned();
+                    })
+                    .fail(function (xhr) {
+                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cambiar el mensaje fijado.');
+                    });
+
+                return;
+            }
+
             if (action === 'edit') {
                 promptDialog('Editar mensaje', 'Escribe el nuevo texto:', function (value) {
                     if (!value) {
@@ -766,7 +2054,10 @@
                     }
 
                     post(chatBase + '/mensajes/' + id + '/editar', { body: value })
-                        .done(loadMessages)
+                        .done(function () {
+                            refreshMessages([id]);
+                            refresh();
+                        })
                         .fail(function (xhr) {
                             alertDialog((xhr.responseJSON || {}).message || 'No se pudo editar.');
                         });
@@ -777,7 +2068,10 @@
             if (action === 'delete') {
                 confirmDialog('¿Desea eliminar el mensaje?', function () {
                     post(chatBase + '/mensajes/' + id + '/eliminar', {})
-                        .done(loadMessages)
+                        .done(function () {
+                            refreshMessages([id]);
+                            refresh();
+                        })
                         .fail(function (xhr) {
                             alertDialog((xhr.responseJSON || {}).message || 'No se pudo eliminar.');
                         });
@@ -810,7 +2104,9 @@
 
             post(chatBase + '/mensajes/' + $message.data('message-id') + '/reaccionar', {
                 emoji: $button.data('reaction')
-            }).done(loadMessages).fail(function (xhr) {
+            }).done(function () {
+                refreshMessages([$message.data('message-id')]);
+            }).fail(function (xhr) {
                 alertDialog((xhr.responseJSON || {}).message || 'No se pudo reaccionar.');
             });
         });
@@ -825,7 +2121,7 @@
                 post(chatBase + '/mensajes/' + mode.messageId + '/reaccionar', { emoji: emoji })
                     .done(function () {
                         $('#chat-emoji-palette').prop('hidden', true);
-                        loadMessages();
+                        refreshMessages([mode.messageId]);
                     })
                     .fail(function (xhr) {
                         alertDialog((xhr.responseJSON || {}).message || 'No se pudo reaccionar.');
@@ -881,38 +2177,195 @@
             currentLink = null;
         });
 
+        /* ------------------------------------------------------------------
+           Crear grupo en un modal (integrantes y enlace de invitación)
+           ------------------------------------------------------------------ */
+
+        var groupModalElement = document.getElementById('modal-chat-group');
+        var groupModal = groupModalElement && window.bootstrap && window.bootstrap.Modal
+            ? window.bootstrap.Modal.getOrCreateInstance(groupModalElement)
+            : null;
+        var groupInviteUrl = null;
+
+        function resetGroupModal() {
+            groupInviteUrl = null;
+            $('#chat-group-name').val('').prop('hidden', false);
+            $('#chat-group-users').prop('hidden', false);
+            $('#chat-group-error').text('');
+            $('#chat-group-invite').prop('hidden', true);
+            $('#chat-group-invite-url').val('');
+            $('#chat-group-create').prop('hidden', false).prop('disabled', false);
+
+            renderGroupUsers(lastUsers);
+        }
+
+        $('#chat-group-open').on('click', function () {
+            resetGroupModal();
+
+            // Se refresca la lista de personas para el modal; si ya estaba
+            // cargada se usa la copia en memoria.
+            refresh().done(function (response) {
+                if (response && response.users) {
+                    renderGroupUsers(response.users);
+                }
+            });
+
+            if (groupModal) {
+                groupModal.show();
+            }
+        });
+
         $('#chat-group-create').on('click', function () {
             var name = $.trim($('#chat-group-name').val());
             var ids = $('.chat-group-user:checked').map(function () {
                 return parseInt(this.value, 10);
             }).get();
 
-            if (!name || !ids.length) {
-                $('#chat-group-error').text('Escribe el nombre y selecciona al menos un usuario.');
+            if (!name) {
+                $('#chat-group-error').text('Escribe el nombre del grupo.');
                 return;
             }
 
+            var $button = $(this).prop('disabled', true);
+            $('#chat-group-error').text('');
+
             post(grupoUrl, { name: name, user_ids: ids })
                 .done(function (response) {
-                    $('#chat-group-name').val('');
-                    $('.chat-group-user').prop('checked', false);
-                    $('#chat-group-error').text('');
+                    var conversation = response.conversation || {};
 
                     refresh();
-                    openConversation(response.conversation.id, response.conversation.title, 'Grupo');
+
+                    // El enlace se crea al vuelo y se muestra para copiarlo.
+                    post(chatBase + '/grupo/' + conversation.id + '/invitar', {})
+                        .done(function (invite) {
+                            groupInviteUrl = (invite && invite.url) ? invite.url : '';
+
+                            $('#chat-group-invite-url').val(groupInviteUrl);
+                            $('#chat-group-invite').prop('hidden', groupInviteUrl === '');
+                            $('#chat-group-create').prop('hidden', true);
+
+                            if (groupInviteUrl === '') {
+                                $('#chat-group-error').text('El grupo se creó, pero no se pudo obtener el enlace.');
+                            }
+                        })
+                        .fail(function (xhr) {
+                            $('#chat-group-error').text(
+                                (xhr.responseJSON || {}).message
+                                || 'El grupo se creó, pero no se pudo obtener el enlace de invitación.'
+                            );
+                            $('#chat-group-create').prop('hidden', true);
+                        });
                 })
                 .fail(function (xhr) {
                     $('#chat-group-error').text((xhr.responseJSON || {}).message || 'No se pudo crear el grupo.');
+                })
+                .always(function () {
+                    $button.prop('disabled', false);
                 });
         });
+
+        $('#chat-group-invite-copy').on('click', function () {
+            if (!groupInviteUrl) {
+                return;
+            }
+
+            copyLightboxText(groupInviteUrl, 'Enlace de invitación copiado.');
+        });
+
+        /* ------------------------------------------------------------------
+           Invitación a un grupo: modal al entrar al sistema
+           ------------------------------------------------------------------ */
+
+        var invitationToken = $widget.attr('data-invitation') || '';
+        var inviteModalElement = document.getElementById('modal-chat-invite');
+        var inviteModal = inviteModalElement && window.bootstrap && window.bootstrap.Modal
+            ? window.bootstrap.Modal.getOrCreateInstance(inviteModalElement)
+            : null;
+        var invitationGroup = 'Grupo';
+
+        function openInvitation() {
+            if (!invitationToken || !inviteModal) {
+                return;
+            }
+
+            $.getJSON(chatBase + '/grupo/invitacion/' + encodeURIComponent(invitationToken) + '/datos')
+                .done(function (response) {
+                    invitationGroup = response.group || 'Grupo';
+
+                    $('#chat-invite-group').text(invitationGroup);
+                    $('#chat-invite-text').text(
+                        (response.inviter ? response.inviter + ' te invitó' : 'Te invitaron') + ' al grupo:'
+                    );
+                    $('#chat-invite-error').text('');
+
+                    inviteModal.show();
+                })
+                .fail(function () {
+                    // Invitación vencida o ya usada: no se vuelve a ofrecer.
+                    invitationToken = '';
+                });
+        }
+
+        $('#chat-invite-accept').on('click', function () {
+            if (!invitationToken) {
+                return;
+            }
+
+            var $button = $(this).prop('disabled', true);
+
+            post(chatBase + '/grupo/invitacion/' + encodeURIComponent(invitationToken) + '/aceptar', {})
+                .done(function (response) {
+                    invitationToken = '';
+                    inviteModal.hide();
+
+                    // Se abre el chat y, dentro, la sala del grupo.
+                    if ($('#chat-panel').prop('hidden')) {
+                        $('#chat-toggle').trigger('click');
+                    }
+
+                    refresh();
+
+                    if (response && response.conversation_id) {
+                        openConversation(response.conversation_id, invitationGroup, 'Grupo');
+                    }
+                })
+                .fail(function (xhr) {
+                    $('#chat-invite-error').text(
+                        (xhr.responseJSON || {}).message || 'No se pudo aceptar la invitación.'
+                    );
+                })
+                .always(function () {
+                    $button.prop('disabled', false);
+                });
+        });
+
+        $('#chat-invite-reject').on('click', function () {
+            if (!invitationToken) {
+                if (inviteModal) {
+                    inviteModal.hide();
+                }
+
+                return;
+            }
+
+            post(chatBase + '/grupo/invitacion/' + encodeURIComponent(invitationToken) + '/rechazar', {})
+                .always(function () {
+                    invitationToken = '';
+                    inviteModal.hide();
+                });
+        });
+
+        openInvitation();
 
         function sendPending(pending) {
             if (!currentId) {
                 return;
             }
 
+            var conversationId = currentId;
+
             pending.status = 'sending';
-            renderMessages();
+            paintPending();
 
             var data = new FormData();
             data.append('_token', token);
@@ -947,25 +2400,35 @@
             }
 
             $.ajax({
-                url: chatBase + '/' + currentId + '/mensajes',
+                url: chatBase + '/' + conversationId + '/mensajes',
                 method: 'POST',
                 dataType: 'json',
                 data: data,
                 processData: false,
                 contentType: false
             }).done(function () {
-                var list = currentPending();
+                // Se usa la conversación en la que se envió: el usuario pudo
+                // haber vuelto a la lista mientras el servidor respondía.
+                var list = pendingMessages[conversationId] || [];
                 var index = list.indexOf(pending);
 
                 if (index > -1) {
                     list.splice(index, 1);
                 }
 
-                loadMessages();
+                // El sondeo pudo haber pintado ya el mensaje del servidor y
+                // dejar esta burbuja marcada como «enviando»: se retira en el
+                // acto y se pide la novedad para que no se vea duplicado.
+                if (conversationId === currentId) {
+                    syncPending();
+                    recentHash = null;
+                    loadMessages();
+                }
+
                 refresh();
             }).fail(function () {
                 pending.status = 'failed';
-                renderMessages();
+                paintPending();
             });
         }
 
@@ -984,7 +2447,7 @@
             };
 
             currentPending().push(pending);
-            renderMessages();
+            paintPending();
             sendPending(pending);
         }
 
@@ -1181,88 +2644,79 @@
 
         var lightboxScale = 1;
         var lightboxDrag = null;
-
-        function openLightbox(type, src, name) {
-            var $stage = $('#chat-lightbox-stage').empty();
-
-            $('#chat-lightbox-name').text(name || '');
-            $('#chat-lightbox-download').attr('href', src || '#');
-            lightboxScale = 1;
-
-            if (type === 'image') {
-                $stage.html('<img id="chat-lightbox-image" src="' + src + '" alt="' + escape(name) + '">');
-            } else if (type === 'video') {
-                $stage.html('<video controls src="' + src + '"></video>');
-            } else if (type === 'pdf') {
-                $stage.html('<iframe src="' + src + '" title="PDF"></iframe>');
-            } else {
-                $stage.html('<audio controls src="' + src + '"></audio>');
-            }
-
-            $('#chat-lightbox').prop('hidden', false);
-        }
-
-        function closeLightbox() {
-            $('#chat-lightbox').prop('hidden', true);
-            $('#chat-lightbox-stage').empty();
-            lightboxScale = 1;
-        }
-
-        $('#chat-lightbox-close').on('click', closeLightbox);
-        $('#chat-lightbox').on('click', function (event) {
-            if (event.target === this) {
-                closeLightbox();
-            }
-        });
-
-        $('#chat-lightbox-stage').on('click', function (event) {
-            if ($(event.target).is('img, video, audio, iframe, button, a, input')) {
-                return;
-            }
-
-            closeLightbox();
-        });
-
         var carousel = { items: [], index: 0 };
+        var singleLightbox = null;
 
-        function renderCarousel() {
-            var item = carousel.items[carousel.index];
+        function currentLightboxItem() {
+            return singleLightbox || carousel.items[carousel.index] || null;
+        }
+
+        function hideLightboxMenu() {
+            $('#chat-lightbox-menu').prop('hidden', true).css({ top: '', left: '' });
+        }
+
+        function absoluteUrl(url) {
+            try {
+                return new URL(url, window.location.href).href;
+            } catch (error) {
+                return url;
+            }
+        }
+
+        function paintLightboxItem() {
+            var item = currentLightboxItem();
 
             if (!item) {
                 return;
             }
 
-            $('#chat-lightbox-name').text(item.name || '');
-            $('#chat-lightbox-download').attr('href', item.url);
-
+            var url = item.url || '';
+            var name = item.name || '';
             var $stage = $('#chat-lightbox-stage').empty();
 
             if (item.type === 'image') {
-                $stage.html('<img id="chat-lightbox-image" src="' + item.url + '" alt="' + escape(item.name) + '">');
+                $stage.append($('<img id="chat-lightbox-image" alt="">').attr({ src: url, alt: name }));
             } else if (item.type === 'video') {
-                $stage.html('<video controls src="' + item.url + '"></video>');
+                $stage.append($('<video controls></video>').attr('src', url));
             } else if (item.type === 'pdf') {
-                $stage.html('<iframe src="' + item.url + '" title="PDF"></iframe>');
+                $stage.append($('<iframe title="PDF"></iframe>').attr('src', url));
             } else {
-                $stage.html('<div class="chat-audio chat-audio--carousel">' +
-                    '<canvas class="chat-wave" width="320" height="60" data-url="' + item.url + '"></canvas>' +
-                    '<audio class="chat-attachment__audio" controls src="' + item.url + '"></audio></div>');
-            }
-
-            $('.chat-lightbox__footer .chat-carousel__thumbs').remove();
-
-            if (carousel.items.length > 1) {
                 $stage.append(
-                    '<button type="button" class="chat-carousel__arrow chat-carousel__arrow--prev" aria-label="Anterior">&#8249;</button>' +
-                    '<button type="button" class="chat-carousel__arrow chat-carousel__arrow--next" aria-label="Siguiente">&#8250;</button>'
+                    '<div class="chat-audio chat-audio--carousel">' +
+                    '<canvas class="chat-wave" width="320" height="60" data-url="' + escape(url) + '"></canvas>' +
+                    '<audio class="chat-attachment__audio" controls src="' + escape(url) + '"></audio></div>'
                 );
             }
+
+            $('#chat-lightbox-name').text(name);
+            $('#chat-lightbox-download').attr('href', url).attr('download', name || 'archivo');
+
+            lightboxScale = 1;
+            lightboxDrag = null;
+            $('#chat-lightbox-image').css({ transform: '', marginLeft: '', marginTop: '' });
+
+            paintLightboxControls();
+            drawWaveforms();
+        }
+
+        function paintLightboxControls() {
+            $('#chat-lightbox-stage .chat-carousel__arrow').remove();
+            $('.chat-lightbox__footer .chat-carousel__thumbs').remove();
+
+            if (carousel.items.length < 2) {
+                return;
+            }
+
+            $('#chat-lightbox-stage').append(
+                '<button type="button" class="chat-carousel__arrow chat-carousel__arrow--prev" aria-label="Anterior">&#8249;</button>' +
+                '<button type="button" class="chat-carousel__arrow chat-carousel__arrow--next" aria-label="Siguiente">&#8250;</button>'
+            );
 
             $('.chat-lightbox__footer').append(
                 '<div class="chat-carousel__thumbs">' + carousel.items.map(function (entry, index) {
                     var thumb = entry.type === 'video'
-                        ? '<video src="' + entry.url + '"></video>'
-                        : (entry.type === 'image' ? '<img src="' + entry.url + '" alt="">' : '<i class="fa-regular fa-file"></i>');
+                        ? '<video src="' + escape(entry.url) + '"></video>'
+                        : (entry.type === 'image' ? '<img src="' + escape(entry.url) + '" alt="">' : '<i class="fa-regular fa-file"></i>');
 
                     return '<button type="button" class="chat-carousel__thumb' + (index === carousel.index ? ' is-active' : '') +
                         '" data-index="' + index + '" aria-label="Ver elemento ' + (index + 1) + '">' + thumb + '</button>';
@@ -1270,13 +2724,94 @@
             );
         }
 
+        function showCarouselItem(index) {
+            if (!carousel.items.length) {
+                return;
+            }
+
+            carousel.index = (index + carousel.items.length) % carousel.items.length;
+            singleLightbox = null;
+            hideLightboxMenu();
+            paintLightboxItem();
+        }
+
         function openCarousel(items, index) {
-            carousel.items = items;
-            carousel.index = Math.max(0, Math.min(index || 0, items.length - 1));
-            renderCarousel();
-            drawWaveforms();
+            var list = items || [];
+
+            carousel.items = list;
+            carousel.index = Math.max(0, Math.min(parseInt(index, 10) || 0, list.length - 1));
+            singleLightbox = null;
+            hideLightboxMenu();
+            paintLightboxItem();
             $('#chat-lightbox').prop('hidden', false);
         }
+
+        function openLightbox(type, src, name) {
+            carousel.items = [];
+            carousel.index = 0;
+            singleLightbox = { url: src, type: type || 'audio', name: name };
+            hideLightboxMenu();
+            paintLightboxItem();
+            $('#chat-lightbox').prop('hidden', false);
+        }
+
+        function closeLightbox() {
+            $('#chat-lightbox').prop('hidden', true);
+            $('#chat-lightbox-stage').empty();
+            $('.chat-lightbox__footer .chat-carousel__thumbs').remove();
+            hideLightboxMenu();
+            carousel.items = [];
+            carousel.index = 0;
+            singleLightbox = null;
+            lightboxScale = 1;
+            lightboxDrag = null;
+        }
+
+        $('#chat-lightbox-close').on('click', closeLightbox);
+
+        // Un único manejador para todo el carrusel: se detiene la propagación para que
+        // el clic no llegue al manejador global que cierra el panel del chat (sus nodos
+        // ya fueron repintados y parecían estar «fuera» del widget).
+        $('#chat-lightbox').on('click', function (event) {
+            var $target = $(event.target);
+
+            event.stopPropagation();
+
+            if ($target.closest('#chat-lightbox-menu').length) {
+                return;
+            }
+
+            hideLightboxMenu();
+
+            var $thumb = $target.closest('.chat-carousel__thumb');
+
+            if ($thumb.length) {
+                showCarouselItem(parseInt($thumb.attr('data-index'), 10) || 0);
+                return;
+            }
+
+            var $arrow = $target.closest('.chat-carousel__arrow');
+
+            if ($arrow.length) {
+                showCarouselItem(carousel.index + ($arrow.hasClass('chat-carousel__arrow--next') ? 1 : -1));
+                return;
+            }
+
+            if ($target.closest('.chat-lightbox__actions, .chat-lightbox__footer').length) {
+                return;
+            }
+
+            if (event.target === this) {
+                closeLightbox();
+                return;
+            }
+
+            // Clic fuera de la imagen (fondo del escenario): sí cierra.
+            if ($target.closest('#chat-lightbox-stage').length &&
+                !$target.is('img, video, audio, iframe, canvas, button, a, input, .chat-audio')) {
+                closeLightbox();
+            }
+        });
 
         $(document).on('click', '.chat-media-open', function (event) {
             event.preventDefault();
@@ -1300,36 +2835,22 @@
             openLightbox($(this).data('lightbox') || $(this).data('type'), $(this).data('src'), $(this).data('name'));
         });
 
-        $('#chat-lightbox-stage').on('click', '.chat-carousel__arrow', function () {
-            if (!carousel.items.length) {
-                return;
-            }
-
-            var step = $(this).hasClass('chat-carousel__arrow--next') ? 1 : -1;
-            carousel.index = (carousel.index + step + carousel.items.length) % carousel.items.length;
-            renderCarousel();
-            drawWaveforms();
-        });
-
-        $(document).on('click', '.chat-carousel__thumb', function () {
-            carousel.index = parseInt($(this).data('index'), 10) || 0;
-            renderCarousel();
-            drawWaveforms();
-        });
-
         $(document).on('keydown', function (event) {
-            if ($('#chat-lightbox').prop('hidden') || !carousel.items.length) {
+            if ($('#chat-lightbox').prop('hidden')) {
                 return;
-            }
-
-            if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
-                var step = event.key === 'ArrowRight' ? 1 : -1;
-                carousel.index = (carousel.index + step + carousel.items.length) % carousel.items.length;
-                renderCarousel();
             }
 
             if (event.key === 'Escape') {
                 closeLightbox();
+                return;
+            }
+
+            if (!carousel.items.length) {
+                return;
+            }
+
+            if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                showCarouselItem(carousel.index + (event.key === 'ArrowRight' ? 1 : -1));
             }
         });
 
@@ -1364,21 +2885,123 @@
             $('#chat-lightbox-image').css('cursor', 'grab');
         });
 
-        $('#chat-lightbox-copy').on('click', function () {
-            var src = $('#chat-lightbox-download').attr('href');
+        function copyLightboxText(text, okMessage) {
+            if (!navigator.clipboard || !navigator.clipboard.writeText) {
+                alertDialog('Tu navegador no permite copiar al portapapeles.');
+                return;
+            }
 
-            fetch(src).then(function (response) { return response.blob(); }).then(function (blob) {
-                if (navigator.clipboard && window.ClipboardItem) {
-                    navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-                    alertDialog('Imagen copiada.');
-                } else {
-                    navigator.clipboard.writeText(src);
-                    alertDialog('Enlace de la imagen copiado.');
-                }
+            navigator.clipboard.writeText(text).then(function () {
+                alertDialog(okMessage || 'Enlace copiado.');
             }).catch(function () {
-                alertDialog('No se pudo copiar.');
+                alertDialog('No se pudo copiar. Revisa el permiso del portapapeles.');
             });
+        }
+
+        function copyLightboxItem() {
+            var item = currentLightboxItem();
+
+            if (!item) {
+                return;
+            }
+
+            if (item.type !== 'image') {
+                copyLightboxText(absoluteUrl(item.url));
+                return;
+            }
+
+            fetch(item.url)
+                .then(function (response) { return response.blob(); })
+                .then(function (blob) {
+                    if (!navigator.clipboard || !window.ClipboardItem) {
+                        throw new Error('sin portapapeles de imágenes');
+                    }
+
+                    return navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+                })
+                .then(function () {
+                    alertDialog('Imagen copiada.');
+                })
+                .catch(function () {
+                    copyLightboxText(absoluteUrl(item.url));
+                });
+        }
+
+        function copyLightboxLink() {
+            var item = currentLightboxItem();
+
+            if (item) {
+                copyLightboxText(absoluteUrl(item.url));
+            }
+        }
+
+        function downloadLightboxItem() {
+            var item = currentLightboxItem();
+
+            if (!item) {
+                return;
+            }
+
+            var link = document.createElement('a');
+
+            link.href = item.url;
+            link.download = item.name || 'archivo';
+            link.rel = 'noopener';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function showLightboxMenu(event) {
+            var item = currentLightboxItem();
+            var $menu = $('#chat-lightbox-menu');
+
+            if (!item || !$menu.length) {
+                return;
+            }
+
+            $menu.find('[data-lightbox-action="copy"]').text(item.type === 'image' ? 'Copiar imagen' : 'Copiar');
+            $menu.prop('hidden', false);
+
+            var margin = 8;
+            var width = $menu.outerWidth() || 176;
+            var height = $menu.outerHeight() || 132;
+            var left = Math.min(event.clientX, window.innerWidth - width - margin);
+            var top = Math.min(event.clientY, window.innerHeight - height - margin);
+
+            $menu.css({
+                left: Math.max(margin, left) + 'px',
+                top: Math.max(margin, top) + 'px'
+            });
+        }
+
+        $('#chat-lightbox').on('contextmenu', function (event) {
+            if (!currentLightboxItem() || $(event.target).closest('#chat-lightbox-menu').length) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            showLightboxMenu(event);
         });
+
+        $('#chat-lightbox-menu').on('click', '.chat-context-item', function (event) {
+            var action = $(this).attr('data-lightbox-action');
+
+            event.preventDefault();
+            event.stopPropagation();
+            hideLightboxMenu();
+
+            if (action === 'copy') {
+                copyLightboxItem();
+            } else if (action === 'download') {
+                downloadLightboxItem();
+            } else if (action === 'link') {
+                copyLightboxLink();
+            }
+        });
+
+        $('#chat-lightbox-copy').on('click', copyLightboxItem);
 
         $('#chat-attach').on('click', function (event) {
             event.stopPropagation();
@@ -1590,6 +3213,9 @@
         var currentLink = null;
         var linkTimer = null;
         var galleryItems = [];
+        var profileData = null;
+        var profileMedia = [];
+        var profileView = 'main';
 
         $('#chat-input').on('input', function () {
             var value = $(this).text();
@@ -1838,24 +3464,511 @@
             }).join(''));
         }
 
-        $('#chat-gallery').on('click', function () {
+        function profileInitials(name) {
+            var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+            var first = parts.length ? parts[0].charAt(0) : '?';
+            var second = parts.length > 1 ? parts[1].charAt(0) : '';
+
+            return (first + second).toUpperCase();
+        }
+
+        function profileMemberRow(member) {
+            var name = escape(member.name || '');
+            var meta = member.username ? '@' + escape(member.username) : '';
+
+            if (member.online) {
+                meta += (meta ? ' · ' : '') + 'En línea';
+            }
+
+            var badge = '';
+
+            if (member.is_owner) {
+                badge = '<span class="chat-profile__member-badge chat-profile__member-badge--owner">Dueño</span>';
+            } else if (member.status && member.status !== 'Activo') {
+                badge = '<span class="chat-profile__member-badge chat-profile__member-badge--danger">' + escape(member.status) + '</span>';
+            }
+
+            return '<div class="chat-profile__member" data-search="'
+                + escape((String(member.name || '') + ' ' + String(member.username || '')).toLowerCase()) + '">'
+                + '<span class="chat-profile__member-avatar">' + escape(profileInitials(member.name)) + '</span>'
+                + '<div class="chat-profile__member-main">'
+                + '<span class="chat-profile__member-name">' + name + '</span>'
+                + '<span class="chat-profile__member-meta">' + meta + '</span>'
+                + '</div>'
+                + badge
+                + '</div>';
+        }
+
+        function renderProfileMembers(members) {
+            var list = members || [];
+
+            $('#chat-profile-member-list').html(
+                list.length
+                    ? list.map(profileMemberRow).join('')
+                    : '<p class="chat-profile__empty">El grupo no tiene miembros.</p>'
+            );
+        }
+
+        function renderProfileAudit(entries) {
+            var list = entries || [];
+
+            if (!list.length) {
+                $('#chat-profile-audit-list').html('<p class="chat-profile__empty">Todavía no hay cambios registrados.</p>');
+                return;
+            }
+
+            $('#chat-profile-audit-list').html(list.map(function (entry) {
+                var meta = [];
+
+                if (entry.actor) {
+                    meta.push('Por ' + entry.actor);
+                }
+
+                if (entry.target) {
+                    meta.push('Sobre ' + entry.target);
+                }
+
+                if (entry.status) {
+                    meta.push('Estado: ' + entry.status);
+                }
+
+                return '<article class="chat-profile__audit-entry">'
+                    + '<div class="chat-profile__audit-head">'
+                    + '<p class="chat-profile__audit-action">' + escape(entry.label || entry.action || '') + '</p>'
+                    + '<span class="chat-profile__audit-date">' + escape(entry.created_at || '') + '</span>'
+                    + '</div>'
+                    + (meta.length ? '<p class="chat-profile__audit-meta">' + escape(meta.join(' · ')) + '</p>' : '')
+                    + (entry.details ? '<p class="chat-profile__audit-meta">' + escape(entry.details) + '</p>' : '')
+                    + '</article>';
+            }).join(''));
+        }
+
+        function renderProfileMedia() {
+            var media = (profileMedia || []).filter(function (item) {
+                return item && (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio');
+            }).slice(0, 5);
+
+            var html = media.map(function (item) {
+                var tab = item.kind === 'audio' ? 'audios' : 'multimedia';
+                var inner = '';
+
+                if (item.kind === 'image') {
+                    inner = '<img src="' + escape(item.url) + '" alt="' + escape(item.name || '') + '" loading="lazy">';
+                } else if (item.kind === 'video') {
+                    inner = '<video src="' + escape(item.url) + '" muted preload="metadata" playsinline></video>';
+                } else {
+                    inner = '<i class="fa-solid fa-music" aria-hidden="true"></i>';
+                }
+
+                return '<button type="button" class="chat-profile__tile'
+                    + (item.kind === 'audio' ? ' chat-profile__tile--audio' : '')
+                    + '" data-profile-action="gallery" data-gallery-tab="' + tab + '"'
+                    + ' title="' + escape(item.name || 'Contenido') + '">' + inner + '</button>';
+            }).join('');
+
+            for (var index = media.length; index < 5; index += 1) {
+                html += '<span class="chat-profile__tile chat-profile__tile--empty"><i class="fa-regular fa-image" aria-hidden="true"></i></span>';
+            }
+
+            $('#chat-profile-media-grid').html(html);
+        }
+
+        function profileOption(action, icon, label, variant) {
+            return '<button type="button" class="chat-profile__option'
+                + (variant === 'danger' ? ' chat-profile__option--danger' : '')
+                + '" data-profile-action="' + action + '">'
+                + '<i class="fa-solid ' + icon + '" aria-hidden="true"></i>'
+                + '<span>' + escape(label) + '</span>'
+                + '</button>';
+        }
+
+        function renderChatProfile(data) {
+            var name = data.other && data.other.name ? data.other.name : (data.name || data.title || 'Conversación');
+            var html = '';
+
+            if (data.is_secret && data.secret_role === 'receiver') {
+                name = 'Amigo secreto';
+            }
+
+            $('#chat-profile-title').text(data.is_group ? (data.name || 'Grupo') : name);
+            $('#chat-profile-eyebrow').text(data.is_group ? 'Grupo' : (data.is_moderating ? 'Moderación' : 'Perfil'));
+
+            html += '<div class="chat-profile__identity">'
+                + '<span class="chat-profile__avatar">' + escape(profileInitials(name)) + '</span>'
+                + '<p class="chat-profile__name">' + escape(name) + '</p>';
+
+            if (data.is_group) {
+                html += '<p class="chat-profile__username">' + Number(data.members_count || 0) + ' miembros</p>';
+            } else if (data.is_secret && data.secret_role === 'receiver') {
+                html += '<p class="chat-profile__username">Identidad protegida hasta el final del evento</p>';
+            } else if (data.other) {
+                html += '<p class="chat-profile__username">@' + escape(data.other.username || '') + '</p>'
+                    + '<p class="chat-profile__email">' + escape(data.other.email || '') + '</p>';
+            }
+
+            if (data.is_moderating) {
+                html += '<p class="chat-profile__moderating">Estás moderando esta conversación</p>';
+            }
+
+            html += '</div>';
+
+            if (data.is_group) {
+                var members = data.members || [];
+                var visible = members.slice(0, 5);
+
+                html += '<div class="chat-profile__card">'
+                    + '<div class="chat-profile__section-head">'
+                    + '<span class="chat-profile__section-title">Miembros (' + Number(data.members_count || 0) + ')</span>'
+                    + '<button type="button" class="chat-profile__link" data-profile-action="members">'
+                    + 'Ver todos <i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>'
+                    + '</div>'
+                    + '<div class="chat-profile__member-summary">'
+                    + (visible.length ? visible.map(profileMemberRow).join('') : '<p class="chat-profile__empty">Sin miembros.</p>')
+                    + '</div></div>';
+
+                if (data.can_manage) {
+                    html += '<div class="chat-profile__card">'
+                        + '<div class="chat-profile__section-head">'
+                        + '<span class="chat-profile__section-title">Auditoría del grupo</span>'
+                        + '<button type="button" class="chat-profile__link" data-profile-action="audit">'
+                        + 'Ver auditoría <i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>'
+                        + '</div></div>';
+                }
+            }
+
+            html += '<div class="chat-profile__card">'
+                + '<div class="chat-profile__section-head">'
+                + '<span class="chat-profile__section-title">Contenido multimedia, documentos y enlaces</span>'
+                + '<button type="button" class="chat-profile__link" data-profile-action="gallery" data-gallery-tab="multimedia"'
+                + ' aria-label="Ver todo el contenido">'
+                + '<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>'
+                + '</div>'
+                + '<div class="chat-profile__media-grid" id="chat-profile-media-grid">'
+                + '<p class="chat-profile__media-empty">Cargando contenido...</p>'
+                + '</div></div>';
+
+            var options = [];
+
+            if (data.is_participant) {
+                options.push(profileOption('favorite', 'fa-star', data.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'));
+                options.push(profileOption('vaciar', 'fa-broom', data.is_group ? 'Vaciar sala' : 'Vaciar chat'));
+            }
+
+            if (data.can_block && data.other) {
+                options.push(profileOption(
+                    data.blocked ? 'unblock' : 'block',
+                    data.blocked ? 'fa-unlock' : 'fa-ban',
+                    (data.blocked ? 'Desbloquear ' : 'Bloquear ') + data.other.name
+                ));
+            }
+
+            if (data.can_leave) {
+                options.push(profileOption('leave', 'fa-right-from-bracket', 'Salir del grupo'));
+            }
+
+            if (data.can_delete) {
+                options.push(profileOption('delete', 'fa-trash', 'Eliminar grupo', 'danger'));
+            }
+
+            if (data.can_report && (!data.is_secret || data.secret_role === 'giver' || data.is_group)) {
+                options.push(profileOption(
+                    data.is_group ? 'report-group' : 'report-user',
+                    'fa-flag',
+                    data.is_group ? 'Reportar grupo' : 'Reportar ' + (data.other ? data.other.name : 'usuario')
+                ));
+            }
+
+            if (options.length) {
+                html += '<div class="chat-profile__options">' + options.join('') + '</div>';
+            }
+
+            $('#chat-profile-main').html(html).prop('hidden', false);
+            $('#chat-profile-loading').prop('hidden', true);
+            showProfileSection('main');
+            renderProfileMedia();
+        }
+
+        function showProfileSection(name) {
+            profileView = name;
+            $('#chat-profile [data-profile-section]').prop('hidden', true);
+            $('#chat-profile [data-profile-section="' + name + '"]').prop('hidden', false);
+            $('#chat-gallery-panel').prop('hidden', name !== 'gallery');
+            $('#chat-profile-back').attr('aria-label', name === 'main' ? 'Volver a la conversación' : 'Volver al perfil');
+            $('#chat-profile-body').scrollTop(0);
+        }
+
+        function openChatProfile() {
             if (!currentId) {
                 return;
             }
 
-            var $panel = $('#chat-gallery-panel');
+            var conversationId = currentId;
 
-            if (!$panel.prop('hidden')) {
-                $panel.prop('hidden', true);
-                $('#chat-conversation').removeClass('is-gallery');
+            profileData = null;
+            profileMedia = [];
+            profileView = 'main';
+
+            $('#chat-profile').prop('hidden', false);
+            $('#chat-profile-loading').prop('hidden', false).text('Cargando perfil...');
+            $('#chat-profile-main').empty().prop('hidden', true);
+            $('#chat-profile [data-profile-section]').prop('hidden', true);
+            $('#chat-profile [data-profile-section="main"]').prop('hidden', false);
+            $('#chat-profile-title').text('Perfil');
+            $('#chat-profile-eyebrow').text(currentModeration ? 'Moderación' : 'Perfil');
+
+            $.getJSON(chatBase + '/' + conversationId + '/perfil')
+                .done(function (response) {
+                    if (currentId !== conversationId) {
+                        return;
+                    }
+
+                    profileData = response;
+                    renderChatProfile(response);
+
+                    $.getJSON(chatBase + '/' + conversationId + '/media')
+                        .done(function (mediaResponse) {
+                            if (currentId !== conversationId || !profileData) {
+                                return;
+                            }
+
+                            profileMedia = mediaResponse.items || [];
+                            renderProfileMedia();
+                        })
+                        .fail(function () {
+                            if (currentId === conversationId && profileData) {
+                                profileMedia = [];
+                                renderProfileMedia();
+                            }
+                        });
+                })
+                .fail(function (xhr) {
+                    if (currentId !== conversationId) {
+                        return;
+                    }
+
+                    $('#chat-profile-loading')
+                        .prop('hidden', false)
+                        .text((xhr.responseJSON || {}).message || 'No se pudo cargar el perfil.');
+                });
+        }
+
+        function closeChatProfile() {
+            $('#chat-profile').prop('hidden', true);
+            $('#chat-gallery-panel').prop('hidden', true);
+            profileData = null;
+            profileMedia = [];
+            profileView = 'main';
+            $('#chat-profile-member-search').val('');
+        }
+
+        function openProfileGallery(tab) {
+            if (!profileData) {
                 return;
             }
 
-            $.getJSON(chatBase + '/' + currentId + '/media').done(function (response) {
-                galleryItems = response.items || [];
-                renderGallery('multimedia');
-                $panel.prop('hidden', false);
-                $('#chat-conversation').addClass('is-gallery');
+            var selected = tab === 'documents' || tab === 'audios' || tab === 'links' ? tab : 'multimedia';
+
+            showProfileSection('gallery');
+            $('#chat-gallery-panel [data-gallery]').removeClass('is-active');
+            $('#chat-gallery-panel [data-gallery="' + selected + '"]').addClass('is-active');
+
+            if (profileMedia.length) {
+                galleryItems = profileMedia;
+                renderGallery(selected);
+                return;
+            }
+
+            $.getJSON(chatBase + '/' + currentId + '/media')
+                .done(function (response) {
+                    profileMedia = response.items || [];
+                    galleryItems = profileMedia;
+                    renderGallery(selected);
+                })
+                .fail(function (xhr) {
+                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo cargar el contenido.');
+                });
+        }
+
+        function openProfileMembers() {
+            if (!profileData) {
+                return;
+            }
+
+            $('#chat-profile-members-title').text('Miembros (' + Number(profileData.members_count || 0) + ')');
+            renderProfileMembers(profileData.members || []);
+            $('#chat-profile-member-search').val('');
+            showProfileSection('members');
+        }
+
+        function openProfileAudit() {
+            if (!profileData) {
+                return;
+            }
+
+            renderProfileAudit(profileData.audit || []);
+            showProfileSection('audit');
+        }
+
+        function profileError(xhr) {
+            alertDialog((xhr.responseJSON || {}).message || 'No se pudo completar la operación.');
+        }
+
+        function handleProfileAction(action, $trigger) {
+            if (!profileData) {
+                return;
+            }
+
+            var other = profileData.other;
+
+            if (action === 'gallery') {
+                openProfileGallery($trigger.data('gallery-tab'));
+                return;
+            }
+
+            if (action === 'members') {
+                openProfileMembers();
+                return;
+            }
+
+            if (action === 'audit') {
+                openProfileAudit();
+                return;
+            }
+
+            if (action === 'favorite') {
+                post(chatBase + '/' + currentId + '/favorito', {})
+                    .done(function (response) {
+                        if (profileData) {
+                            profileData.favorite = !!response.favorite;
+                        }
+
+                        var $button = $('#chat-profile [data-profile-action="favorite"]');
+
+                        $button.find('span').text(response.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos');
+                        refresh();
+                    })
+                    .fail(profileError);
+                return;
+            }
+
+            if (action === 'vaciar') {
+                confirmDialog(
+                    profileData.is_group ? '¿Vaciar esta sala de tu lado?' : '¿Vaciar este chat de tu lado?',
+                    function () {
+                        post(chatBase + '/' + currentId + '/vaciar', {})
+                            .done(function () {
+                                closeChatProfile();
+                                loadMessages();
+                                refresh();
+                            })
+                            .fail(profileError);
+                    }
+                );
+                return;
+            }
+
+            if (action === 'block' || action === 'unblock') {
+                if (!other) {
+                    return;
+                }
+
+                var blocking = action === 'block';
+
+                confirmDialog(
+                    blocking ? '¿Bloquear a ' + other.name + '?' : '¿Desbloquear a ' + other.name + '?',
+                    function () {
+                        var blockCall = blocking
+                            ? post(chatBase + '/usuarios/' + other.id + '/bloquear', {})
+                            : remove(chatBase + '/usuarios/' + other.id + '/bloquear', {});
+
+                        blockCall
+                            .done(function () {
+                                if (profileData) {
+                                    profileData.blocked = blocking;
+                                    renderChatProfile(profileData);
+                                }
+
+                                refresh();
+                            })
+                            .fail(profileError);
+                    }
+                );
+                return;
+            }
+
+            if (action === 'report-user') {
+                if (!other) {
+                    return;
+                }
+
+                promptDialog('Reportar usuario', 'Escribe el motivo del reporte:', function (value) {
+                    post(chatBase + '/usuarios/' + other.id + '/reportar', { reason: value })
+                        .done(function () {
+                            alertDialog('Reporte enviado a la administración.');
+                        })
+                        .fail(profileError);
+                });
+                return;
+            }
+
+            if (action === 'report-group') {
+                confirmDialog('¿Reportar este grupo a la administración?', function () {
+                    post(chatBase + '/' + currentId + '/reportar-conversacion', {})
+                        .done(function () {
+                            alertDialog('Reporte enviado a la administración.');
+                        })
+                        .fail(profileError);
+                });
+                return;
+            }
+
+            if (action === 'leave') {
+                confirmDialog('¿Salir de «' + (profileData.name || 'este grupo') + '»?', function () {
+                    post(chatBase + '/' + currentId + '/salir', {})
+                        .done(function () {
+                            closeChatProfile();
+                            showList();
+                            refresh();
+                        })
+                        .fail(profileError);
+                });
+                return;
+            }
+
+            if (action === 'delete') {
+                confirmDialog('¿Eliminar este grupo para todos? No se puede deshacer.', function () {
+                    remove(chatBase + '/' + currentId, {})
+                        .done(function () {
+                            closeChatProfile();
+                            showList();
+                            refresh();
+                        })
+                        .fail(profileError);
+                });
+            }
+        }
+
+        $('#chat-profile-open').on('click', openChatProfile);
+
+        $('#chat-profile-back').on('click', function () {
+            if (profileView !== 'main') {
+                showProfileSection('main');
+                return;
+            }
+
+            closeChatProfile();
+        });
+
+        $('#chat-profile').on('click', '[data-profile-action]', function () {
+            handleProfileAction($(this).data('profile-action'), $(this));
+        });
+
+        $('#chat-profile-member-search').on('input', function () {
+            var term = String($(this).val() || '').toLowerCase().trim();
+
+            $('#chat-profile-member-list .chat-profile__member').each(function () {
+                var haystack = String($(this).data('search') || '');
+                $(this).toggle(term === '' || haystack.indexOf(term) !== -1);
             });
         });
 
@@ -1936,10 +4049,251 @@
             }
         });
 
+        /* ------------------------------------------------------------------
+           Etiquetas @: sugerencias mientras se escribe
+           ------------------------------------------------------------------ */
+
+        var $mentionList = $('#chat-mentions');
+
+        function hideMentionSuggestions() {
+            mentionMatches = [];
+            mentionActive = 0;
+            mentionRange = null;
+
+            if ($mentionList.length) {
+                $mentionList.prop('hidden', true).empty();
+            }
+        }
+
+        /**
+         * Rango del texto «@algo» que se está escribiendo antes del cursor.
+         * Devuelve null si el cursor no está dentro de una etiqueta.
+         */
+        function mentionContext() {
+            var selection = window.getSelection();
+
+            if (!selection || !selection.rangeCount) {
+                return null;
+            }
+
+            var range = selection.getRangeAt(0);
+
+            if (!range.collapsed) {
+                return null;
+            }
+
+            var node = range.startContainer;
+
+            if (node.nodeType !== 3) {
+                return null;
+            }
+
+            var before = node.nodeValue.slice(0, range.startOffset);
+            var match = before.match(/(^|[\s\u00A0])@([\p{L}\p{N}_.-]*)$/u);
+
+            if (!match) {
+                return null;
+            }
+
+            var start = range.startOffset - match[2].length - 1;
+            var tokenRange = document.createRange();
+
+            tokenRange.setStart(node, start);
+            tokenRange.setEnd(node, range.startOffset);
+
+            return { range: tokenRange, query: match[2].toLowerCase() };
+        }
+
+        function renderMentionSuggestions() {
+            $mentionList.empty();
+
+            mentionMatches.forEach(function (item, index) {
+                var $option = $('<button type="button" class="chat-mention-option">')
+                    .attr('role', 'option')
+                    .attr('data-index', index)
+                    .attr('aria-selected', index === mentionActive ? 'true' : 'false')
+                    .addClass(index === mentionActive ? 'is-active' : '')
+                    .addClass('is-' + (item.kind || 'member'));
+
+                $('<span class="chat-mention-option__token">').text('@' + (item.text || item.token)).appendTo($option);
+                $('<span class="chat-mention-option__name">').text(item.name || '').appendTo($option);
+                $('<span class="chat-mention-option__label">')
+                    .addClass('is-' + (item.kind || 'member'))
+                    .text(item.label || '')
+                    .appendTo($option);
+
+                $option.appendTo($mentionList);
+            });
+        }
+
+        function updateMentionSuggestions() {
+            if (!currentId || !$mentionList.length) {
+                return;
+            }
+
+            var context = mentionContext();
+
+            if (!context) {
+                hideMentionSuggestions();
+                return;
+            }
+
+            var query = context.query;
+            var matches = [];
+
+            Object.keys(mentionIndex).forEach(function (token) {
+                var item = mentionIndex[token];
+                var name = String(item.name || '').toLowerCase();
+
+                if (query === '' || token.indexOf(query) !== -1 || name.indexOf(query) !== -1) {
+                    matches.push(item);
+                }
+            });
+
+            matches.sort(function (first, second) {
+                var firstStarts = String(first.token).indexOf(query) === 0 ? 0 : 1;
+                var secondStarts = String(second.token).indexOf(query) === 0 ? 0 : 1;
+
+                if (firstStarts !== secondStarts) {
+                    return firstStarts - secondStarts;
+                }
+
+                return String(first.name || '').localeCompare(String(second.name || ''), 'es');
+            });
+
+            matches = matches.slice(0, 8);
+
+            if (!matches.length) {
+                hideMentionSuggestions();
+                return;
+            }
+
+            mentionMatches = matches;
+            mentionActive = 0;
+            mentionRange = context.range;
+
+            renderMentionSuggestions();
+            $mentionList.prop('hidden', false);
+        }
+
+        function chooseMention(index) {
+            var item = mentionMatches[index];
+            var range = mentionRange;
+
+            if (!item || !range) {
+                hideMentionSuggestions();
+                return;
+            }
+
+            range.deleteContents();
+
+            var node = document.createTextNode('@' + (item.text || item.token) + ' ');
+            range.insertNode(node);
+
+            var after = document.createRange();
+            after.setStart(node, node.nodeValue.length);
+            after.collapse(true);
+
+            var selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(after);
+
+            hideMentionSuggestions();
+            $('#chat-input').trigger('focus');
+        }
+
+        /**
+         * Atiende las teclas de la lista de etiquetas. Devuelve true si la
+         * consumió, para que no se envíe el mensaje con Enter.
+         */
+        function mentionKeydown(event) {
+            if ($mentionList.prop('hidden') || !mentionMatches.length) {
+                return false;
+            }
+
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+
+                var step = event.key === 'ArrowDown' ? 1 : mentionMatches.length - 1;
+                mentionActive = (mentionActive + step) % mentionMatches.length;
+                renderMentionSuggestions();
+
+                return true;
+            }
+
+            if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault();
+                chooseMention(mentionActive);
+
+                return true;
+            }
+
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                hideMentionSuggestions();
+
+                return true;
+            }
+
+            return false;
+        }
+
+        $mentionList.on('mousedown', '.chat-mention-option', function (event) {
+            event.preventDefault();
+            chooseMention(parseInt($(this).attr('data-index'), 10));
+        });
+
+        $('#chat-input').on('input', function () {
+            updateMentionSuggestions();
+        });
+
+        $('#chat-input').on('blur', function () {
+            window.setTimeout(hideMentionSuggestions, 150);
+        });
+
+        /* ------------------------------------------------------------------
+           Contador del botón flotante
+           ------------------------------------------------------------------ */
+
+        function renderModerationCount(count) {
+            var $count = $('#chat-moderation-count');
+
+            if (!$count.length) {
+                return;
+            }
+
+            if (count > 0) {
+                $count.prop('hidden', false).text(count > 99 ? '+99' : count);
+            } else {
+                $count.prop('hidden', true).text('0');
+            }
+        }
+
+        function pollCounter() {
+            if (!contadorUrl || !canPoll() || isPanelOpen()) {
+                return;
+            }
+
+            $.getJSON(contadorUrl).done(function (response) {
+                lastUnread = response.unread || 0;
+                setBadge(lastUnread);
+                renderModerationCount(response.moderation || 0);
+            });
+        }
+
+        function startCounterPolling() {
+            window.clearInterval(counterTimer);
+            counterTimer = window.setInterval(pollCounter, 10000);
+        }
+
         var isTouchDevice = ('ontouchstart' in window || navigator.maxTouchPoints > 0) &&
             window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
         $('#chat-input').on('keydown', function (event) {
+            if (mentionKeydown(event)) {
+                return;
+            }
+
             if (event.key !== 'Enter') {
                 return;
             }
@@ -2035,14 +4389,144 @@
                 });
         });
 
+        document.addEventListener('chat:open', function (event) {
+            var id = parseInt(event.detail && event.detail.id, 10);
+
+            if (!id) {
+                return;
+            }
+
+            pendingOpenId = id;
+            pendingFromUrl = false;
+            $('#chat-panel').prop('hidden', false);
+            $('#chat-toggle').attr('aria-expanded', 'true');
+            startSummaryPolling();
+            refresh();
+        });
+
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) {
+                stopChatPolling();
+
+                return;
+            }
+
+            // Al volver a la pestaña se sincroniza al instante y luego se
+            // retoma el ciclo normal.
+            syncNow();
+        });
+
+        window.addEventListener('focus', syncNow);
+
+        window.addEventListener('online', function () {
+            syncNow();
+        });
+
+        window.addEventListener('offline', function () {
+            stopChatPolling();
+        });
+
         if (pendingOpenId) {
             $('#chat-panel').prop('hidden', false);
             $('#chat-toggle').attr('aria-expanded', 'true');
-            window.clearInterval(pollTimer);
-            pollTimer = window.setInterval(refresh, 6000);
+            startSummaryPolling();
+        }
+
+        function manageMembers(conversationId) {
+            $.getJSON(chatBase + '/grupo/' + conversationId + '/miembros').done(function (response) {
+                var items = (response && response.items) || [];
+                var options = items
+                    .filter(function (item) { return !item.is_owner; })
+                    .map(function (item) {
+                        var notes = [];
+
+                        if (item.suspended_until) {
+                            notes.push('suspendido hasta ' + item.suspended_until);
+                        }
+
+                        if (item.banned) {
+                            notes.push('vetado');
+                        }
+
+                        return '<option value="' + item.id + '">' + escape(item.name) +
+                            (notes.length ? ' (' + escape(notes.join(', ')) + ')' : '') + '</option>';
+                    })
+                    .join('');
+
+                if (!options) {
+                    alertDialog('No hay otros miembros para gestionar.');
+                    return;
+                }
+
+                if (!window.bootbox) {
+                    return;
+                }
+
+                window.bootbox.dialog({
+                    title: 'Gestionar miembros',
+                    centerVertical: true,
+                    message:
+                        '<div class="mb-2"><label class="form-label" for="chat-member-select">Miembro</label>' +
+                        '<select class="form-select" id="chat-member-select">' + options + '</select></div>' +
+                        '<div class="mb-2"><label class="form-label" for="chat-member-days">Días de suspensión</label>' +
+                        '<input type="number" class="form-control" id="chat-member-days" value="1" min="1" max="365"></div>',
+                    buttons: {
+                        cancel: { label: 'Cerrar', className: 'btn-outline-secondary' },
+                        suspend: {
+                            label: 'Suspender',
+                            className: 'btn-warning',
+                            callback: function () {
+                                post(chatBase + '/grupo/' + conversationId + '/suspender/' + $('#chat-member-select').val(), {
+                                    days: $('#chat-member-days').val()
+                                }).done(function (dialogResponse) {
+                                    alertDialog(dialogResponse.message || 'Usuario suspendido.');
+                                    refresh();
+                                }).fail(function (xhr) {
+                                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo suspender.');
+                                });
+                            }
+                        },
+                        ban: {
+                            label: 'Banear',
+                            className: 'btn-danger',
+                            callback: function () {
+                                post(chatBase + '/grupo/' + conversationId + '/banear/' + $('#chat-member-select').val(), {})
+                                    .done(function (dialogResponse) {
+                                        alertDialog(dialogResponse.message || 'Usuario vetado.');
+                                        refresh();
+                                    })
+                                    .fail(function (xhr) {
+                                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo banear.');
+                                    });
+                            }
+                        },
+                        unban: {
+                            label: 'Desbanear',
+                            className: 'btn-outline-secondary',
+                            callback: function () {
+                                remove(chatBase + '/grupo/' + conversationId + '/banear/' + $('#chat-member-select').val(), {})
+                                    .done(function (dialogResponse) {
+                                        alertDialog(dialogResponse.message || 'Veto retirado.');
+                                        refresh();
+                                    })
+                                    .fail(function (xhr) {
+                                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo desbanear.');
+                                    });
+                            }
+                        }
+                    }
+                });
+            }).fail(function (xhr) {
+                alertDialog((xhr.responseJSON || {}).message || 'No se pudieron cargar los miembros.');
+            });
         }
 
         refresh();
         setBadge(0);
+
+        // El contador se consulta aunque el panel esté cerrado: así el botón
+        // flotante muestra los mensajes nuevos apenas llegan.
+        pollCounter();
+        startCounterPolling();
     });
 })(window.jQuery);

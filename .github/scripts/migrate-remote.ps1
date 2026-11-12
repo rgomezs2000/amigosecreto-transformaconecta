@@ -10,6 +10,7 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
 function Step([string]$mensaje) {
   Write-Host ''

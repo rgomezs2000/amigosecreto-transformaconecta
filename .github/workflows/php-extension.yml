@@ -1,0 +1,60 @@
+name: Extensiones PHP
+
+# Se ejecuta SOLO a mano: Actions → Extensiones PHP → Run workflow.
+#
+# Activa una extensión de PHP en el php.ini del servidor (por omisión sodium).
+# Hace falta cuando composer.lock exige una extensión que el servidor no tiene
+# cargada, por ejemplo:
+#
+#   lcobucci/jwt requires ext-sodium * -> it is missing from your system
+#
+# Es idempotente y reversible: si la extensión ya está activa no toca nada, y si
+# no, guarda una copia del php.ini antes de editarlo y la restaura si la
+# comprobación posterior falla. No despliega código.
+
+on:
+  workflow_dispatch:
+    inputs:
+      extension:
+        description: 'Extensión de PHP a activar (sin prefijo php_ ni .dll)'
+        required: true
+        default: 'sodium'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extensiones-php
+  cancel-in-progress: false
+
+jobs:
+  activar:
+    name: Activar extensión PHP en producción
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Instalar Posh-SSH
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          if (-not (Get-Module -ListAvailable -Name Posh-SSH)) {
+            Install-Module Posh-SSH -Scope CurrentUser -Force
+          }
+
+      - name: Activar extensión
+        shell: pwsh
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          PHP_BIN: ${{ vars.PHP_BIN }}
+          PHP_EXTENSION: ${{ inputs.extension }}
+        run: ./.github/scripts/Invoke-RemoteDeploy.ps1 -RemoteScriptPath '.github/scripts/enable-php-extension.ps1' -TimeoutSeconds 600

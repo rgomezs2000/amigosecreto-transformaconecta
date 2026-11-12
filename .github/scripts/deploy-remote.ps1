@@ -12,6 +12,8 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# Sin esto, al escribir en la tubería de SSH los acentos salen como "fall?".
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
 function Step([string]$mensaje) {
   Write-Host ''
@@ -30,6 +32,36 @@ function Find-Tool([string]$nombre) {
   $cmd = Get-Command -Name $nombre -CommandType Application -ErrorAction SilentlyContinue
   if (-not $cmd) { return $null }
   return @($cmd)[0].Source
+}
+
+# Compara las extensiones que exige composer.lock con las que PHP tiene
+# cargadas. Así el fallo se explica solo, en vez de dejar que Composer reviente
+# con "requires ext-sodium * -> it is missing from your system".
+function Assert-PhpExtensions([string]$php, [string]$deployPath) {
+  $lockFile = Join-Path $deployPath 'composer.lock'
+  if (-not (Test-Path -LiteralPath $lockFile)) { return }
+
+  $cargadas = @((& $php -m) | Where-Object { $_ -and $_ -notmatch '^\[' } | ForEach-Object { $_.Trim().ToLowerInvariant() })
+
+  $requeridas = @()
+  foreach ($paquete in (Get-Content -LiteralPath $lockFile -Raw | ConvertFrom-Json).packages) {
+    if (-not $paquete.require) { continue }
+    foreach ($propiedad in $paquete.require.PSObject.Properties) {
+      if ($propiedad.Name -like 'ext-*') { $requeridas += $propiedad.Name.Substring(4).ToLowerInvariant() }
+    }
+  }
+  $requeridas = @($requeridas | Sort-Object -Unique)
+
+  $faltan = @($requeridas | Where-Object { $cargadas -notcontains $_ })
+  if ($faltan.Count -eq 0) {
+    Write-Host "composer.lock exige $($requeridas.Count) extensiones de PHP: todas están cargadas."
+    return
+  }
+
+  throw ("Faltan extensiones de PHP que composer.lock exige: " + ($faltan -join ', ') + ". " +
+    "Actívalas en el php.ini del servidor (línea 'extension=<nombre>' sin ';' al inicio), " +
+    "comprueba que exista php_<nombre>.dll en la carpeta ext y reinicia Apache. " +
+    "Atajo: Actions → Extensiones PHP → Run workflow indicando la extensión.")
 }
 
 try {
@@ -121,6 +153,8 @@ try {
   Write-Host "Commit desplegado: $((& $git rev-parse --short HEAD) -join '')"
 
   Step '[2/6] Composer'
+  Assert-PhpExtensions $php $deployPath
+
   # Revalidar: 'git clean' u otro paso pudo haber borrado composer.phar.
   if ($composerArgs.Count -gt 0) {
     if (-not (Test-Path -LiteralPath $composerArgs[0])) {

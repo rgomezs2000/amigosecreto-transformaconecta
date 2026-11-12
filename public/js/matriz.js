@@ -35,6 +35,8 @@
         var canEdit = false;
         var filterType = 'all';
         var filterPermission = null;
+        var lastSignature = null;
+        var refreshing = false;
 
         function escapeHtml(value) {
             return String(value == null ? '' : value)
@@ -275,34 +277,115 @@
             return true;
         });
 
-        function loadMatrix(profileId) {
+        function hasPendingChanges() {
+            return modules.some(function (module) {
+                var base = new Set((module.permissions || []).filter(function (permission) {
+                    return permission.granted;
+                }).map(function (permission) {
+                    return permission.id;
+                }));
+                var current = staging[module.id] || new Set();
+
+                if (base.size !== current.size) {
+                    return true;
+                }
+
+                var changed = false;
+
+                current.forEach(function (permissionId) {
+                    if (!base.has(permissionId)) {
+                        changed = true;
+                    }
+                });
+
+                return changed;
+            });
+        }
+
+        function loadMatrix(profileId, preserveState) {
             if (!profileId) {
                 return;
             }
+
+            var previousSearch = $search.val();
+            var previousType = filterType;
+            var previousPermission = filterPermission;
 
             setStatus('Cargando matriz...', 'info');
 
             $.getJSON(datosUrl, { profile_id: profileId })
                 .done(function (response) {
+                    currentProfile = profileId;
+                    lastSignature = JSON.stringify(response);
                     canEdit = !!(response.can_grant && response.can_revoke);
 
                     initStaging(response);
                     buildPermissionFilter();
 
-                    filterType = 'all';
-                    filterPermission = null;
-                    $filterType.val('all');
-                    $filterPermission.val('');
-                    $filterPermissionWrap.addClass('d-none');
-                    $search.val('');
+                    if (!preserveState) {
+                        filterType = 'all';
+                        filterPermission = null;
+                        $filterType.val('all');
+                        $filterPermission.val('');
+                        $filterPermissionWrap.addClass('d-none');
+                        $search.val('');
+                    }
 
                     initTable();
+
+                    if (preserveState) {
+                        filterType = previousType;
+                        filterPermission = previousPermission;
+                        $filterType.val(previousType);
+                        $filterPermission.val(previousPermission || '');
+                        $filterPermissionWrap.toggleClass('d-none', previousType !== 'permission');
+                        $search.val(previousSearch);
+                        table.search(previousSearch);
+                        table.draw(false);
+                    }
+
                     $apply.prop('disabled', !canEdit);
                     setStatus('Matriz cargada.', 'info');
                 })
                 .fail(function (xhr) {
                     setStatus('', '');
                     showError(xhr);
+                });
+        }
+
+        function refreshMatrixIfChanged() {            if (refreshing || !currentProfile || document.hidden) {
+                return;
+            }
+
+            if ($.active > 0) {
+                return;
+            }
+
+            if (document.querySelector('.modal.show, .bootbox')) {
+                return;
+            }
+
+            var active = document.activeElement;
+
+            if (active && (active.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName))) {
+                return;
+            }
+
+            // No se toca la matriz mientras haya cambios sin aplicar.
+            if (hasPendingChanges()) {
+                return;
+            }
+
+            refreshing = true;
+
+            $.getJSON(datosUrl, { profile_id: currentProfile })
+                .done(function (response) {
+                    if (JSON.stringify(response) !== lastSignature) {
+                        loadMatrix(currentProfile, true);
+                    }
+                })
+                .always(function () {
+                    refreshing = false;
                 });
         }
 
@@ -443,5 +526,13 @@
         if (currentProfile) {
             loadMatrix(currentProfile);
         }
+
+        window.setInterval(refreshMatrixIfChanged, 30000);
+
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) {
+                refreshMatrixIfChanged();
+            }
+        });
     });
 })(window.jQuery);

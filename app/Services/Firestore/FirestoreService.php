@@ -264,7 +264,7 @@ class FirestoreService
             'type' => (string) $notification->type,
             'title' => (string) ($data['title'] ?? ''),
             'body' => (string) ($data['body'] ?? ''),
-            'url' => $notification->url,
+            'url' => $notification->link(),
             'source' => $notification->source,
             'sound' => (bool) $notification->sound,
             'visual' => (bool) $notification->visual,
@@ -289,6 +289,7 @@ class FirestoreService
                 'name' => $user->name,
                 'role' => (string) ($user->pivot->role ?? 'member'),
                 'last_read_at' => $this->toIsoDate($user->pivot->last_read_at),
+                'muted_at' => $this->toIsoDate($user->pivot->muted_at),
             ])
             ->values()
             ->all();

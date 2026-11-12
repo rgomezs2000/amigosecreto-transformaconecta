@@ -169,6 +169,8 @@ class DashboardTest extends TestCase
             ->assertSee('Amigo Secreto 2026')
             ->assertSee('Lista de deseos')
             ->assertSee('event-countdown', false)
+            ->assertSee('data-exchange-at', false)
+            ->assertSee('data-server-now', false)
             ->assertSee('aria-current="step"', false);
     }
 

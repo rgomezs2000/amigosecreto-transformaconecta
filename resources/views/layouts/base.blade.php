@@ -32,5 +32,9 @@
          las usan, con @push('vendor') desde esa vista. --}}
     @stack('vendor')
     @stack('scripts')
+
+    {{-- Refresco en reposo de las tablas: nunca interrumpe formularios,
+         modales ni la interacción del usuario. --}}
+    <script src="{{ asset('js/live-tables.js') }}?v={{ filemtime(public_path('js/live-tables.js')) }}"></script>
 </body>
 </html>

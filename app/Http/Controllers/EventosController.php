@@ -54,6 +54,37 @@ class EventosController extends Controller
         ]);
     }
 
+    /**
+     * Estado de los eventos para refrescar las tarjetas sin recargar.
+     */
+    public function estado(): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $events = Event::query()
+            ->withCount('participants')
+            ->orderByDesc('year')
+            ->get();
+
+        $data = $events->map(fn (Event $event) => [
+            'id' => $event->id,
+            'year' => $event->year,
+            'name' => $event->name,
+            'status' => $event->statusLabel(),
+            'badge' => $event->isSuspended() ? 'blocked' : ($event->status->isFinished() ? 'inactive' : 'active'),
+            'exchange' => $event->exchange_at?->format('d/m/Y') ?? 'Sin fecha',
+            'participants' => $event->participants_count,
+            'created' => $event->created_at?->format('d/m/Y') ?? '—',
+        ])->values();
+
+        return api_success('Estado de eventos.', [
+            'version' => md5($data->toJson()),
+            'events' => $data,
+            'html' => view('eventos.partials.lista', ['events' => $events])->render(),
+            'can_create' => ! $events->contains(fn (Event $event) => (int) $event->year === (int) now()->year),
+        ]);
+    }
+
     public function crear(Request $request): JsonResponse
     {
         $this->ensureAccess();
@@ -138,7 +169,7 @@ class EventosController extends Controller
         }
 
         if (Event::query()->where('year', $event->year)->whereKeyNot($event->id)->exists()) {
-            return api_error('Ya existe un evento en curso para el año ' . $event->year . '.', 409);
+            return api_error('Ya existe un evento en curso para el año '.$event->year.'.', 409);
         }
 
         $participants = $this->activeParticipants($event);
@@ -161,9 +192,9 @@ class EventosController extends Controller
                 'Tu Amigo Secreto ha comenzado',
                 [
                     'Hola, {name}.',
-                    'El evento «' . $event->name . '» ha comenzado.',
+                    'El evento «'.$event->name.'» ha comenzado.',
                     'Se da paso al sorteo: ya puedes descubrir a tu amigo secreto.',
-                    'Fecha del intercambio: ' . $event->exchange_at?->format('d/m/Y') . '.',
+                    'Fecha del intercambio: '.$event->exchange_at?->format('d/m/Y').'.',
                 ],
                 ['label' => 'Entrar al sistema', 'url' => route('login')]
             );
@@ -220,8 +251,8 @@ class EventosController extends Controller
                 'El evento fue suspendido',
                 [
                     'Hola, {name}.',
-                    'El evento «' . $event->name . '» fue suspendido.',
-                    'Motivo: ' . $reason,
+                    'El evento «'.$event->name.'» fue suspendido.',
+                    'Motivo: '.$reason,
                     'El plazo de la suspensión es indefinido. Te avisaremos cuando se reactive.',
                 ],
                 null
@@ -288,9 +319,9 @@ class EventosController extends Controller
                 'El evento fue pospuesto',
                 [
                     'Hola, {name}.',
-                    'El evento «' . $event->name . '» fue pospuesto.',
-                    'Motivo: ' . $data['reason'],
-                    'Nueva fecha del intercambio: ' . $date->format('d/m/Y') . '.',
+                    'El evento «'.$event->name.'» fue pospuesto.',
+                    'Motivo: '.$data['reason'],
+                    'Nueva fecha del intercambio: '.$date->format('d/m/Y').'.',
                     $suspend
                         ? 'El evento queda suspendido hasta nuevo aviso.'
                         : 'El evento sigue activo con la nueva fecha.',
@@ -335,8 +366,8 @@ class EventosController extends Controller
                 'El evento fue cancelado',
                 [
                     'Hola, {name}.',
-                    'El evento «' . $event->name . '» fue cancelado.',
-                    'Motivo: ' . $reason,
+                    'El evento «'.$event->name.'» fue cancelado.',
+                    'Motivo: '.$reason,
                 ],
                 null
             );

@@ -1,8 +1,12 @@
 /**
- * Moderación: listado de reportes del chat en modo solo lectura.
+ * Moderación: reportes del chat, bloqueos entre usuarios y vetados de grupo.
  *
- * No crea, edita ni elimina nada: únicamente muestra el detalle y enlaza al
- * chat para que el administrador revise la conversación.
+ * La pantalla tiene tres pestañas y dos modales de dos listas. Cada modal
+ * muestra, a la izquierda, a las personas sin la sanción y, a la derecha, a
+ * las que la tienen. Cada movimiento (botón o arrastre) guarda la lista
+ * completa de los dos lados en el endpoint de sincronización.
+ *
+ * Español literal, controles grandes y sin animaciones.
  */
 (function ($) {
     'use strict';
@@ -18,16 +22,70 @@
             return;
         }
 
-        var datosUrl = $config.attr('data-url-datos');
+        var csrf = $config.attr('data-csrf');
+
+        /* ------------------------------------------------------------------
+           Pestañas
+           ------------------------------------------------------------------ */
+
+        var $tabs = $('.moderacion-tab');
+        var $panels = $('.moderacion-panel');
+        var openTab = $.noop;
+
+        function activateTab(name) {
+            $tabs.each(function () {
+                var active = $(this).attr('data-tab') === name;
+
+                $(this).toggleClass('is-active', active)
+                    .attr('aria-selected', active ? 'true' : 'false');
+            });
+
+            $panels.each(function () {
+                $(this).prop('hidden', $(this).attr('data-panel') !== name);
+            });
+
+            openTab(name);
+        }
+
+        $tabs.on('click', function () {
+            activateTab($(this).attr('data-tab'));
+        });
+
+        $('.moderacion-tabs').on('keydown', '.moderacion-tab', function (event) {
+            if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') {
+                return;
+            }
+
+            event.preventDefault();
+
+            var $items = $tabs.filter(':visible');
+            var index = $items.index(this);
+            var next = event.key === 'ArrowRight' ? index + 1 : index - 1;
+
+            if (next < 0) {
+                next = $items.length - 1;
+            }
+
+            if (next >= $items.length) {
+                next = 0;
+            }
+
+            $items.eq(next).trigger('focus').trigger('click');
+        });
+
+        /* ------------------------------------------------------------------
+           Reportes (solo lectura)
+           ------------------------------------------------------------------ */
+
         var modalElement = document.getElementById('modal-moderacion-detail');
         var modal = modalElement ? window.bootstrap.Modal.getOrCreateInstance(modalElement) : null;
 
-        var table = $('#moderacion-table').DataTable({
+        var reportesTable = $('#moderacion-table').DataTable({
             serverSide: true,
             processing: true,
             autoWidth: true,
             ajax: {
-                url: datosUrl,
+                url: $config.attr('data-url-datos'),
                 type: 'GET'
             },
             columns: [
@@ -66,16 +124,16 @@
         });
 
         $('#moderacion-search').on('input', function () {
-            table.search(this.value).draw();
+            reportesTable.search(this.value).draw();
         });
 
         $('#moderacion-clear').on('click', function () {
             $('#moderacion-search').val('');
-            table.search('').draw();
+            reportesTable.search('').draw();
         });
 
         $('#moderacion-table').on('click', '.moderacion-detail', function () {
-            var row = table.row($(this).closest('tr')).data();
+            var row = reportesTable.row($(this).closest('tr')).data();
 
             if (!row) {
                 return;
@@ -100,5 +158,826 @@
                 modal.show();
             }
         });
+
+        /* ------------------------------------------------------------------
+           Modal de dos listas (bloqueos y vetados)
+           ------------------------------------------------------------------ */
+
+        function Transfer(element) {
+            var $modal = $(element);
+            var $root = $modal.find('[data-transfer]');
+
+            if (!$root.length) {
+                return null;
+            }
+
+            var kind = $root.attr('data-kind');
+            var rightKey = $root.attr('data-right-key');
+            var subjectPrefix = $root.attr('data-subject-prefix') || '';
+            var showMember = $root.attr('data-show-member') === '1';
+            var detailUrl = $root.attr('data-url-detalle') || '';
+            var syncUrl = $root.attr('data-url-sincronizar') || '';
+
+            var $leftList = $root.find('[data-side="available"] [data-list]');
+            var $rightList = $root.find('[data-side="right"] [data-list]');
+            var $status = $root.find('[data-transfer-status]');
+            var $subject = $modal.find('[data-transfer-subject]');
+            var $save = $modal.find('[data-transfer-save]');
+            var $confirm = $root.find('[data-transfer-confirm]');
+            var $confirmText = $root.find('[data-transfer-confirm-text]');
+            var $confirmYes = $root.find('[data-transfer-confirm-yes]');
+            var $confirmNo = $root.find('[data-transfer-confirm-no]');
+
+            var state = { available: [], right: [] };
+            var baseline = null;
+            var currentId = null;
+            var currentLabel = '';
+            var selected = null;
+            var anchor = null;
+            var dragging = null;
+            var saving = false;
+            var confirming = false;
+
+            function idsOf(items) {
+                return items.map(function (item) {
+                    return item.id;
+                });
+            }
+
+            function sortedIds(items) {
+                return idsOf(items).sort(function (first, second) {
+                    return first - second;
+                });
+            }
+
+            function snapshot() {
+                return {
+                    available: sortedIds(state.available),
+                    right: sortedIds(state.right)
+                };
+            }
+
+            function sameIds(first, second) {
+                if (!first || !second || first.length !== second.length) {
+                    return false;
+                }
+
+                for (var index = 0; index < first.length; index++) {
+                    if (first[index] !== second[index]) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            function hasChanges() {
+                if (!baseline) {
+                    return false;
+                }
+
+                var current = snapshot();
+
+                return !sameIds(baseline.available, current.available) ||
+                    !sameIds(baseline.right, current.right);
+            }
+
+            function updateSave() {
+                $save.prop('disabled', saving || confirming || !hasChanges());
+            }
+
+            function sortState() {
+                function byName(first, second) {
+                    return String(first.name || '').localeCompare(String(second.name || ''), 'es');
+                }
+
+                state.available.sort(byName);
+                state.right.sort(byName);
+            }
+
+            function setStatus(message, kindOf) {
+                $status.text(message || '').attr('data-kind', kindOf || 'info');
+            }
+
+            function renderList($list, items, emptyText) {
+                $list.empty();
+
+                if (!items.length) {
+                    $list.append(
+                        $('<li class="moderacion-transfer__empty">').text(emptyText)
+                    );
+
+                    return;
+                }
+
+                items.forEach(function (item) {
+                    var $label = $('<span class="moderacion-transfer__label">');
+
+                    $('<span class="moderacion-transfer__name">')
+                        .text(item.name || 'Sin nombre')
+                        .appendTo($label);
+
+                    if (item.username) {
+                        $('<span class="moderacion-transfer__meta">').text('@' + item.username).appendTo($label);
+                    }
+
+                    if (showMember && item.member) {
+                        $('<span class="moderacion-transfer__tag">').text('En el grupo').appendTo($label);
+                    }
+
+                    $('<li class="moderacion-transfer__item">')
+                        .attr('data-id', item.id)
+                        .attr('role', 'option')
+                        .attr('tabindex', '0')
+                        .attr('aria-selected', 'false')
+                        .attr('draggable', 'true')
+                        .append($label)
+                        .appendTo($list);
+                });
+            }
+
+            function listOfSide(side) {
+                return side === 'available' ? $leftList : $rightList;
+            }
+
+            function itemsOfSide(side) {
+                return listOfSide(side).find('li[data-id]');
+            }
+
+            function isChosen(side, id) {
+                return !!selected && selected.side === side && selected.ids.indexOf(id) !== -1;
+            }
+
+            function applySelection() {
+                $root.find('.moderacion-transfer__item').each(function () {
+                    var $item = $(this);
+                    var side = stateKeyOf($item.closest('[data-list]'));
+                    var chosen = isChosen(side, Number($item.attr('data-id')));
+
+                    $item.toggleClass('is-selected', chosen)
+                        .attr('aria-selected', chosen ? 'true' : 'false');
+                });
+            }
+
+            /* La lista derecha usa la clave del servidor (blocked/banned),
+               pero el estado interno siempre se llama «right». */
+            function stateKeyOf($list) {
+                return $list.attr('data-list') === 'available' ? 'available' : 'right';
+            }
+
+            /* Ids del tramo entre dos personas, en el orden en que se ven. */
+            function idsBetween(side, fromId, toId) {
+                var ids = itemsOfSide(side).map(function () {
+                    return Number($(this).attr('data-id'));
+                }).get();
+
+                var from = ids.indexOf(fromId);
+                var to = ids.indexOf(toId);
+
+                if (from === -1 || to === -1) {
+                    return [toId];
+                }
+
+                return ids.slice(Math.min(from, to), Math.max(from, to) + 1);
+            }
+
+            /**
+             * Selección de personas: un clic elige una; con Shift se toma el
+             * tramo desde la última elegida y con Ctrl (o Cmd) se suman o
+             * quitan personas sueltas.
+             */
+            function selectItem($item, event) {
+                var side = stateKeyOf($item.closest('[data-list]'));
+                var id = Number($item.attr('data-id'));
+                var shift = !!(event && event.shiftKey);
+                var multiple = !!(event && (event.ctrlKey || event.metaKey));
+
+                if (shift && anchor && anchor.side === side) {
+                    selected = { side: side, ids: idsBetween(side, anchor.id, id) };
+                    applySelection();
+
+                    return;
+                }
+
+                if (multiple) {
+                    var ids = selected && selected.side === side ? selected.ids.slice() : [];
+                    var index = ids.indexOf(id);
+
+                    if (index === -1) {
+                        ids.push(id);
+                    } else {
+                        ids.splice(index, 1);
+                    }
+
+                    selected = ids.length ? { side: side, ids: ids } : null;
+                    anchor = { side: side, id: id };
+                    applySelection();
+
+                    return;
+                }
+
+                if (isChosen(side, id) && selected.ids.length === 1) {
+                    selected = null;
+                } else {
+                    selected = { side: side, ids: [id] };
+                }
+
+                anchor = { side: side, id: id };
+                applySelection();
+            }
+
+            function render() {
+                renderList(
+                    $leftList,
+                    state.available,
+                    kind === 'vetados' ? 'No hay personas disponibles.' : 'Todas las personas están bloqueadas.'
+                );
+                renderList(
+                    $rightList,
+                    state.right,
+                    kind === 'vetados' ? 'No hay personas vetadas.' : 'No hay personas bloqueadas.'
+                );
+
+                $root.find('[data-side="available"] [data-count]').text(state.available.length);
+                $root.find('[data-side="right"] [data-count]').text(state.right.length);
+
+                applySelection();
+            }
+
+            function payload() {
+                var data = { available: idsOf(state.available) };
+
+                data[rightKey] = idsOf(state.right);
+
+                return data;
+            }
+
+            function save() {
+                if (saving || !hasChanges()) {
+                    return;
+                }
+
+                confirming = false;
+                $confirm.prop('hidden', true);
+                $confirmText.text('');
+                saving = true;
+                updateSave();
+                setStatus('Guardando cambios...', 'info');
+
+                $.ajax({
+                    url: syncUrl.replace('__ID__', currentId),
+                    method: 'POST',
+                    dataType: 'json',
+                    contentType: 'application/json; charset=utf-8',
+                    headers: {
+                        'X-CSRF-TOKEN': csrf,
+                        'Accept': 'application/json'
+                    },
+                    data: JSON.stringify(payload())
+                }).done(function (response) {
+                    baseline = snapshot();
+                    setStatus(response.message || 'Cambios guardados.', 'ok');
+
+                    if (typeof $modal.data('on-saved') === 'function') {
+                        $modal.data('on-saved')();
+                    }
+                }).fail(function (xhr) {
+                    var response = xhr && xhr.responseJSON ? xhr.responseJSON : {};
+
+                    // La lista local se conserva: el administrador corrige lo que
+                    // haga falta y reintenta sin recargar ni perder lo movido.
+                    setStatus(response.message || 'No se pudieron guardar los cambios.', 'error');
+                }).always(function () {
+                    saving = false;
+                    updateSave();
+                });
+            }
+
+            function confirmSave() {
+                if (saving || !hasChanges()) {
+                    return;
+                }
+
+                var name = currentLabel || 'este usuario';
+
+                $confirmText.text(
+                    kind === 'vetados'
+                        ? '¿Seguro que quieres guardar los cambios de veto del grupo ' + name + '?'
+                        : '¿Seguro que quieres guardar los cambios de bloqueo de ' + name + '?'
+                );
+
+                confirming = true;
+                $confirm.prop('hidden', false);
+
+                if ($confirm.length && typeof $confirm.get(0).scrollIntoView === 'function') {
+                    $confirm.get(0).scrollIntoView({ block: 'nearest' });
+                }
+
+                updateSave();
+                $confirmYes.trigger('focus');
+            }
+
+            function cancelConfirm() {
+                confirming = false;
+                $confirm.prop('hidden', true);
+                $confirmText.text('');
+                updateSave();
+            }
+
+            function moveIds(ids, direction) {
+                if (!ids.length) {
+                    return;
+                }
+
+                var from = direction === 'right' ? 'available' : 'right';
+                var to = direction === 'right' ? 'right' : 'available';
+                var moving = [];
+
+                ids.forEach(function (id) {
+                    state[from] = state[from].filter(function (item) {
+                        if (item.id !== id) {
+                            return true;
+                        }
+
+                        moving.push(item);
+
+                        return false;
+                    });
+                });
+
+                state[to] = state[to].concat(moving);
+                sortState();
+                selected = null;
+                anchor = null;
+                confirming = false;
+                $confirm.prop('hidden', true);
+                $confirmText.text('');
+                render();
+                updateSave();
+                setStatus('Cambios sin guardar. Pulsa Guardar para aplicarlos.', 'info');
+            }
+
+            function move(direction, all) {
+                if (saving) {
+                    return;
+                }
+
+                var from = direction === 'right' ? 'available' : 'right';
+                var ids = all
+                    ? idsOf(state[from])
+                    : (selected && selected.side === from ? selected.ids.slice() : []);
+
+                if (!ids.length) {
+                    setStatus(
+                        all ? 'No hay personas para mover.' : 'Selecciona al menos una persona.',
+                        'error'
+                    );
+
+                    return;
+                }
+
+                moveIds(ids, direction);
+            }
+
+            function load(id, label) {
+                currentId = Number(id);
+                currentLabel = label || '';
+                selected = null;
+                anchor = null;
+                baseline = null;
+                saving = false;
+                confirming = false;
+
+                $save.prop('disabled', true);
+                $confirm.prop('hidden', true);
+                $confirmText.text('');
+                setStatus('');
+                state = { available: [], right: [] };
+                render();
+
+                $subject.attr('data-label', currentLabel).text(
+                    currentLabel ? subjectPrefix + ' ' + currentLabel : 'Cargando...'
+                );
+
+                $.getJSON(detailUrl.replace('__ID__', currentId)).done(function (response) {
+                    var subject = response.subject || {};
+
+                    state.available = response.available || [];
+                    state.right = response[rightKey] || [];
+                    currentLabel = subject.name || currentLabel;
+
+                    sortState();
+                    baseline = snapshot();
+                    render();
+                    updateSave();
+
+                    $subject.text(subjectPrefix + ' ' + (currentLabel || 'sin nombre'));
+                }).fail(function (xhr) {
+                    var response = xhr && xhr.responseJSON ? xhr.responseJSON : {};
+
+                    setStatus(response.message || 'No se pudo cargar la información.', 'error');
+                });
+            }
+
+            function transferData(event) {
+                var original = event.originalEvent || event;
+
+                return original.dataTransfer || null;
+            }
+
+            $root.on('click', '[data-list] [data-id]', function (event) {
+                if (saving) {
+                    return;
+                }
+
+                selectItem($(this), event);
+            });
+
+            $root.on('keydown', '[data-list] [data-id]', function (event) {
+                if (event.key !== 'Enter' && event.key !== ' ') {
+                    return;
+                }
+
+                event.preventDefault();
+                selectItem($(this), event);
+            });
+
+            $root.on('click', '[data-move]', function () {
+                switch ($(this).attr('data-move')) {
+                    case 'to-right-all':
+                        move('right', true);
+                        break;
+                    case 'to-right':
+                        move('right', false);
+                        break;
+                    case 'to-left':
+                        move('left', false);
+                        break;
+                    default:
+                        move('left', true);
+                }
+            });
+
+            $save.on('click', confirmSave);
+
+            $confirmYes.on('click', function () {
+                if (saving) {
+                    return;
+                }
+
+                confirming = false;
+                $confirm.prop('hidden', true);
+                $confirmText.text('');
+                save();
+            });
+
+            $confirmNo.on('click', cancelConfirm);
+
+            $root.on('dragstart', 'li[data-id]', function (event) {
+                var $row = $(this);
+                var side = stateKeyOf($row.closest('[data-list]'));
+                var id = Number($row.attr('data-id'));
+
+                // Si la fila ya forma parte de la selección, se arrastra toda
+                // la selección; si no, se arrastra solo esa persona.
+                if (!isChosen(side, id)) {
+                    selected = { side: side, ids: [id] };
+                    anchor = { side: side, id: id };
+                    applySelection();
+                }
+
+                var ids = selected.ids.slice();
+
+                dragging = {
+                    ids: ids,
+                    list: $row.closest('[data-list]').attr('data-list')
+                };
+
+                itemsOfSide(side).each(function () {
+                    if (ids.indexOf(Number($(this).attr('data-id'))) !== -1) {
+                        $(this).addClass('is-dragging');
+                    }
+                });
+
+                var data = transferData(event);
+
+                if (data) {
+                    try {
+                        data.effectAllowed = 'move';
+                        data.setData('text/plain', ids.join(','));
+                    } catch (error) {
+                        // Sin dataTransfer no se puede arrastrar; los botones siguen funcionando.
+                    }
+                }
+            });
+
+            $root.on('dragend', 'li[data-id]', function () {
+                dragging = null;
+                $root.find('.is-dragging, .is-drop-target').removeClass('is-dragging is-drop-target');
+            });
+
+            $root.on('dragover', '[data-list]', function (event) {
+                var $list = $(this);
+
+                if (!dragging || $list.attr('data-list') === dragging.list) {
+                    return;
+                }
+
+                event.preventDefault();
+
+                var data = transferData(event);
+
+                if (data) {
+                    try {
+                        data.dropEffect = 'move';
+                    } catch (error) {
+                        // Irrelevante: el arrastre ya está permitido.
+                    }
+                }
+
+                $list.addClass('is-drop-target');
+            });
+
+            $root.on('dragleave', '[data-list]', function () {
+                $(this).removeClass('is-drop-target');
+            });
+
+            $root.on('drop', '[data-list]', function (event) {
+                var $list = $(this);
+
+                event.preventDefault();
+                $list.removeClass('is-drop-target');
+
+                if (!dragging) {
+                    return;
+                }
+
+                var target = $list.attr('data-list');
+                var source = dragging.list;
+                var ids = dragging.ids.slice();
+
+                dragging = null;
+
+                if (target === source) {
+                    return;
+                }
+
+                moveIds(ids, target === 'available' ? 'left' : 'right');
+            });
+
+            $modal.on('hidden.bs.modal', function () {
+                // «Cerrar» descarta lo pendiente: al abrir de nuevo, load()
+                // vuelve a traer el estado real del servidor.
+                selected = null;
+                dragging = null;
+                confirming = false;
+                $confirm.prop('hidden', true);
+            });
+
+            return {
+                open: function (id, label) {
+                    load(id, label);
+
+                    if (window.bootstrap && window.bootstrap.Modal) {
+                        window.bootstrap.Modal.getOrCreateInstance($modal.get(0)).show();
+                    }
+                }
+            };
+        }
+
+        var bloquesModal = Transfer(document.getElementById('modal-moderacion-bloqueos'));
+        var baneadosModal = Transfer(document.getElementById('modal-moderacion-baneados'));
+
+        /* ------------------------------------------------------------------
+           Bloqueos entre usuarios
+           ------------------------------------------------------------------ */
+
+        var usuariosTable = null;
+
+        function initUsuariosTable() {
+            var table = $('#moderacion-usuarios-table').DataTable({
+                serverSide: true,
+                processing: true,
+                autoWidth: true,
+                ajax: {
+                    url: $config.attr('data-url-usuarios'),
+                    type: 'GET'
+                },
+                columns: [
+                    { data: 'name' },
+                    { data: 'username' },
+                    { data: 'role', orderable: false, searchable: false },
+                    { data: 'blocked_count', className: 'roles-id' },
+                    { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
+                ],
+                columnDefs: [
+                    { orderable: false, targets: [2, 4] }
+                ],
+                order: [[0, 'asc']],
+                pageLength: 10,
+                lengthMenu: [[10, 25, 50], [10, 25, 50]],
+                searching: true,
+                dom: 'lrtip',
+                language: {
+                    emptyTable: 'No hay usuarios registrados.',
+                    info: 'Mostrando _START_ a _END_ de _TOTAL_ usuarios',
+                    infoEmpty: 'Sin usuarios',
+                    infoFiltered: '(filtrado de _MAX_)',
+                    lengthMenu: 'Mostrar _MENU_',
+                    loadingRecords: 'Cargando usuarios...',
+                    processing: 'Procesando...',
+                    zeroRecords: 'No se encontraron usuarios',
+                    paginate: {
+                        first: 'Primera',
+                        last: 'Última',
+                        next: 'Siguiente',
+                        previous: 'Anterior'
+                    }
+                }
+            });
+
+            $('#moderacion-usuarios-search').on('input', function () {
+                table.search(this.value).draw();
+            });
+
+            $('#moderacion-usuarios-clear').on('click', function () {
+                $('#moderacion-usuarios-search').val('');
+                table.search('').draw();
+            });
+
+            return table;
+        }
+
+        $('#moderacion-usuarios-table').on('click', '.moderacion-bloqueos', function () {
+            if (!bloquesModal) {
+                return;
+            }
+
+            bloquesModal.open($(this).attr('data-id'), $(this).attr('data-name'));
+        });
+
+        /* ------------------------------------------------------------------
+           Vetados de grupo
+           ------------------------------------------------------------------ */
+
+        var gruposTable = null;
+
+        function initGruposTable() {
+            var table = $('#moderacion-grupos-table').DataTable({
+                serverSide: true,
+                processing: true,
+                autoWidth: true,
+                ajax: {
+                    url: $config.attr('data-url-grupos'),
+                    type: 'GET'
+                },
+                columns: [
+                    { data: 'name' },
+                    { data: 'members', orderable: false, searchable: false, className: 'roles-id' },
+                    { data: 'banned', orderable: false, searchable: false, className: 'roles-id' },
+                    { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
+                ],
+                columnDefs: [
+                    { orderable: false, targets: [1, 2, 3] }
+                ],
+                order: [[0, 'asc']],
+                pageLength: 10,
+                lengthMenu: [[10, 25, 50], [10, 25, 50]],
+                searching: true,
+                dom: 'lrtip',
+                language: {
+                    emptyTable: 'No hay grupos registrados.',
+                    info: 'Mostrando _START_ a _END_ de _TOTAL_ grupos',
+                    infoEmpty: 'Sin grupos',
+                    infoFiltered: '(filtrado de _MAX_)',
+                    lengthMenu: 'Mostrar _MENU_',
+                    loadingRecords: 'Cargando grupos...',
+                    processing: 'Procesando...',
+                    zeroRecords: 'No se encontraron grupos',
+                    paginate: {
+                        first: 'Primera',
+                        last: 'Última',
+                        next: 'Siguiente',
+                        previous: 'Anterior'
+                    }
+                }
+            });
+
+            $('#moderacion-grupos-search').on('input', function () {
+                table.search(this.value).draw();
+            });
+
+            $('#moderacion-grupos-clear').on('click', function () {
+                $('#moderacion-grupos-search').val('');
+                table.search('').draw();
+            });
+
+            return table;
+        }
+
+        $('#moderacion-grupos-table').on('click', '.moderacion-baneados', function () {
+            if (!baneadosModal) {
+                return;
+            }
+
+            baneadosModal.open($(this).attr('data-id'), $(this).attr('data-name'));
+        });
+
+        /* ------------------------------------------------------------------
+           Apertura de cada pestaña
+           ------------------------------------------------------------------ */
+
+        if (bloquesModal) {
+            $('#modal-moderacion-bloqueos').data('on-saved', function () {
+                if (usuariosTable) {
+                    usuariosTable.ajax.reload(null, false);
+                }
+            });
+        }
+
+        if (baneadosModal) {
+            $('#modal-moderacion-baneados').data('on-saved', function () {
+                if (gruposTable) {
+                    gruposTable.ajax.reload(null, false);
+                }
+            });
+        }
+
+        openTab = function (name) {
+            if (name === 'reportes') {
+                reportesTable.columns.adjust();
+            }
+
+            if (name === 'bloqueos') {
+                if (usuariosTable) {
+                    usuariosTable.columns.adjust();
+                } else {
+                    usuariosTable = initUsuariosTable();
+                }
+            }
+
+            if (name === 'vetados') {
+                if (gruposTable) {
+                    gruposTable.columns.adjust();
+                } else {
+                    gruposTable = initGruposTable();
+                }
+            }
+        };
+
+        /* ------------------------------------------------------------------
+           Contadores de las pestañas: solo texto, sin recargar la página.
+           ------------------------------------------------------------------ */
+
+        var contadoresUrl = $config.attr('data-url-contadores');
+        var numberFormat = window.Intl ? new window.Intl.NumberFormat('es-VE') : null;
+
+        function formatCount(value) {
+            var number = parseInt(value, 10) || 0;
+
+            return numberFormat ? numberFormat.format(number) : String(number);
+        }
+
+        function canRefreshCounts() {
+            if (!contadoresUrl || document.hidden) {
+                return false;
+            }
+
+            if (document.querySelector('.modal.show, .bootbox')) {
+                return false;
+            }
+
+            var active = document.activeElement;
+
+            return !(active && (active.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName)));
+        }
+
+        function refreshModerationCounts() {
+            if (!canRefreshCounts()) {
+                return;
+            }
+
+            $.getJSON(contadoresUrl).done(function (response) {
+                $('[data-moderation-count="reports"]').text(formatCount(response.reports));
+                $('[data-moderation-count="blocks"]').text(formatCount(response.blocks));
+                $('[data-moderation-count="bans"]').text(formatCount(response.bans));
+            });
+        }
+
+        if (contadoresUrl) {
+            window.setInterval(function () {
+                if (!document.hidden) {
+                    refreshModerationCounts();
+                }
+            }, 20000);
+
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) {
+                    refreshModerationCounts();
+                }
+            });
+        }
+
+        activateTab('reportes');
     });
 })(window.jQuery);

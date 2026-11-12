@@ -5,52 +5,169 @@
 @section('shell-eyebrow', 'Administración')
 
 @section('page')
-    <div class="roles-page">
-        <section class="matriz-card moderacion-summary" aria-label="Resumen de reportes">
-            <div>
-                <p class="dashboard-eyebrow">Reportes del chat</p>
-                <p class="moderacion-summary__total">{{ format_count($total) }}</p>
-                <p class="notification-row__hint">
-                    Este módulo es de solo lectura: recopila los reportes hechos en el chat.
-                    Desde cada fila puedes abrir la conversación para revisarla.
-                </p>
-            </div>
+    <div class="roles-page moderacion-page">
+        <div class="moderacion-tabs" role="tablist" aria-label="Secciones de Moderación">
+            <button type="button" class="moderacion-tab is-active" id="moderacion-tab-reportes"
+                    role="tab" aria-selected="true" aria-controls="moderacion-panel-reportes"
+                    data-tab="reportes">
+                <i class="fa-solid fa-flag" aria-hidden="true"></i>
+                <span>Reportes</span>
+            </button>
+            <button type="button" class="moderacion-tab" id="moderacion-tab-bloqueos"
+                    role="tab" aria-selected="false" aria-controls="moderacion-panel-bloqueos"
+                    data-tab="bloqueos">
+                <i class="fa-solid fa-user-lock" aria-hidden="true"></i>
+                <span>Bloqueos entre usuarios</span>
+            </button>
+            <button type="button" class="moderacion-tab" id="moderacion-tab-vetados"
+                    role="tab" aria-selected="false" aria-controls="moderacion-panel-vetados"
+                    data-tab="vetados">
+                <i class="fa-solid fa-user-slash" aria-hidden="true"></i>
+                <span>Vetados de grupo</span>
+            </button>
+        </div>
+
+        <section id="moderacion-panel-reportes" role="tabpanel" aria-labelledby="moderacion-tab-reportes"
+                 data-panel="reportes" class="moderacion-panel">
+            <section class="matriz-card moderacion-summary" aria-label="Resumen de reportes">
+                <div>
+                    <p class="dashboard-eyebrow">Reportes del chat</p>
+                    <p class="moderacion-summary__total" data-moderation-count="reports">{{ format_count($total) }}</p>
+                    <p class="notification-row__hint">
+                        Este apartado es de solo lectura: recopila los reportes hechos en el chat.
+                        Desde cada fila puedes abrir la conversación para revisarla.
+                    </p>
+                </div>
+            </section>
+
+            <section class="matriz-card roles-search-card" aria-label="Búsqueda de reportes">
+                <div class="roles-search">
+                    <label for="moderacion-search" class="form-label">Buscar reporte</label>
+                    <input type="search" class="form-control" id="moderacion-search"
+                           placeholder="Motivo, persona o mensaje..." autocomplete="off">
+                </div>
+
+                <div class="roles-actions">
+                    <button type="button" class="btn btn-outline-secondary" id="moderacion-clear">
+                        <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                        <span>Limpiar</span>
+                    </button>
+                </div>
+            </section>
+
+            <section class="roles-table-card" aria-label="Listado de reportes">
+                <table id="moderacion-table" class="table table-striped align-middle w-100 roles-table">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="roles-id">Fecha</th>
+                            <th scope="col" class="roles-name">Reportado por</th>
+                            <th scope="col" class="roles-name">Autor del mensaje</th>
+                            <th scope="col" class="roles-name">Motivo</th>
+                            <th scope="col" class="roles-name">Conversación</th>
+                            <th scope="col" class="roles-actions">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </section>
         </section>
 
-        <section class="matriz-card roles-search-card" aria-label="Búsqueda de reportes">
-            <div class="roles-search">
-                <label for="moderacion-search" class="form-label">Buscar reporte</label>
-                <input type="search" class="form-control" id="moderacion-search"
-                       placeholder="Motivo, persona o mensaje..." autocomplete="off">
-            </div>
+        <section id="moderacion-panel-bloqueos" role="tabpanel" aria-labelledby="moderacion-tab-bloqueos"
+                 data-panel="bloqueos" class="moderacion-panel" hidden>
+            <section class="matriz-card moderacion-summary" aria-label="Resumen de bloqueos">
+                <div>
+                    <p class="dashboard-eyebrow">Bloqueos entre usuarios</p>
+                    <p class="moderacion-summary__total" data-moderation-count="blocks">{{ format_count($usuarios) }}</p>
+                    <p class="notification-row__hint">
+                        Total de bloqueos activos entre usuarios. Con «Gestionar bloqueos» eliges a quién
+                        tiene bloqueado cada uno: al pasar a «Bloqueados» se crea el bloqueo y al volver a
+                        «Desbloqueados» se elimina.
+                    </p>
+                </div>
+            </section>
 
-            <div class="roles-actions">
-                <button type="button" class="btn btn-outline-secondary" id="moderacion-clear">
-                    <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                    <span>Limpiar</span>
-                </button>
-            </div>
+            <section class="matriz-card roles-search-card" aria-label="Búsqueda de usuarios">
+                <div class="roles-search">
+                    <label for="moderacion-usuarios-search" class="form-label">Buscar usuario</label>
+                    <input type="search" class="form-control" id="moderacion-usuarios-search"
+                           placeholder="Nombre, usuario o correo..." autocomplete="off">
+                </div>
+
+                <div class="roles-actions">
+                    <button type="button" class="btn btn-outline-secondary" id="moderacion-usuarios-clear">
+                        <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                        <span>Limpiar</span>
+                    </button>
+                </div>
+            </section>
+
+            <section class="roles-table-card" aria-label="Listado de usuarios con sus bloqueos">
+                <table id="moderacion-usuarios-table" class="table table-striped align-middle w-100 roles-table">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="roles-name">Usuario</th>
+                            <th scope="col" class="roles-name">Inicio de sesión</th>
+                            <th scope="col" class="roles-name">Rol</th>
+                            <th scope="col" class="roles-id">Bloqueados</th>
+                            <th scope="col" class="roles-actions">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </section>
         </section>
 
-        <section class="roles-table-card" aria-label="Listado de reportes">
-            <table id="moderacion-table" class="table table-striped align-middle w-100 roles-table">
-                <thead>
-                    <tr>
-                        <th scope="col" class="roles-id">Fecha</th>
-                        <th scope="col" class="roles-name">Reportado por</th>
-                        <th scope="col" class="roles-name">Autor del mensaje</th>
-                        <th scope="col" class="roles-name">Motivo</th>
-                        <th scope="col" class="roles-name">Conversación</th>
-                        <th scope="col" class="roles-actions">Acciones</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+        <section id="moderacion-panel-vetados" role="tabpanel" aria-labelledby="moderacion-tab-vetados"
+                 data-panel="vetados" class="moderacion-panel" hidden>
+            <section class="matriz-card moderacion-summary" aria-label="Resumen de grupos">
+                <div>
+                    <p class="dashboard-eyebrow">Vetados de grupo</p>
+                    <p class="moderacion-summary__total" data-moderation-count="bans">{{ format_count($grupos) }}</p>
+                    <p class="notification-row__hint">
+                        Total de vetos activos en grupos. Con «Ver baneados» eliges quién está vetado en cada
+                        grupo: al pasar a «Vetados» se aplica el veto y, si la persona está dentro del
+                        grupo, se le saca. Al volver a «Disponibles» se retira el veto.
+                    </p>
+                </div>
+            </section>
+
+            <section class="matriz-card roles-search-card" aria-label="Búsqueda de grupos">
+                <div class="roles-search">
+                    <label for="moderacion-grupos-search" class="form-label">Buscar grupo</label>
+                    <input type="search" class="form-control" id="moderacion-grupos-search"
+                           placeholder="Nombre del grupo..." autocomplete="off">
+                </div>
+
+                <div class="roles-actions">
+                    <button type="button" class="btn btn-outline-secondary" id="moderacion-grupos-clear">
+                        <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                        <span>Limpiar</span>
+                    </button>
+                </div>
+            </section>
+
+            <section class="roles-table-card" aria-label="Listado de grupos con sus vetados">
+                <table id="moderacion-grupos-table" class="table table-striped align-middle w-100 roles-table">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="roles-name">Grupo</th>
+                            <th scope="col" class="roles-id">Miembros</th>
+                            <th scope="col" class="roles-id">Vetados</th>
+                            <th scope="col" class="roles-actions">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </section>
         </section>
     </div>
 
     <div id="moderacion-config"
          data-url-datos="{{ route('moderacion.datos') }}"
+         data-url-usuarios="{{ route('moderacion.bloqueos.usuarios') }}"
+         data-url-grupos="{{ route('moderacion.grupos') }}"
+         data-url-contadores="{{ route('moderacion.contadores') }}"
+         data-csrf="{{ csrf_token() }}"
          hidden></div>
 
     <x-app-modal id="modal-moderacion-detail" title="Detalle del reporte">
@@ -91,6 +208,48 @@
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
         </x-slot:footer>
     </x-app-modal>
+
+    @include('moderacion.partials.transfer-modal', [
+        'modalId' => 'modal-moderacion-bloqueos',
+        'modalTitle' => 'Gestionar bloqueos',
+        'kind' => 'bloqueos',
+        'subjectPrefix' => 'Bloqueos de',
+        'sideLabels' => ['Desbloqueados', 'Bloqueados'],
+        'sideHelp' => [
+            'Personas que este usuario no tiene bloqueadas.',
+            'Personas bloqueadas: no pueden escribirle.',
+        ],
+        'moveLabels' => [
+            'Bloquear a todas las personas',
+            'Bloquear a la persona seleccionada',
+            'Desbloquear a la persona seleccionada',
+            'Desbloquear a todas las personas',
+        ],
+        'urlDetalle' => route('moderacion.bloqueos.detalle', ['user' => '__ID__']),
+        'urlSincronizar' => route('moderacion.bloqueos.sincronizar', ['user' => '__ID__']),
+        'showMemberHint' => false,
+    ])
+
+    @include('moderacion.partials.transfer-modal', [
+        'modalId' => 'modal-moderacion-baneados',
+        'modalTitle' => 'Ver baneados',
+        'kind' => 'vetados',
+        'subjectPrefix' => 'Vetados de',
+        'sideLabels' => ['Disponibles', 'Vetados'],
+        'sideHelp' => [
+            'Personas que pueden entrar al grupo.',
+            'Personas vetadas: no pueden entrar y salen si estaban dentro.',
+        ],
+        'moveLabels' => [
+            'Vetar a todas las personas',
+            'Vetar a la persona seleccionada',
+            'Quitar el veto a la persona seleccionada',
+            'Quitar el veto a todas las personas',
+        ],
+        'urlDetalle' => route('moderacion.grupos.vetados', ['conversation' => '__ID__']),
+        'urlSincronizar' => route('moderacion.grupos.vetados.sincronizar', ['conversation' => '__ID__']),
+        'showMemberHint' => true,
+    ])
 @endsection
 
 @push('head')

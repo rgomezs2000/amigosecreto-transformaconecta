@@ -5,12 +5,15 @@ use App\Http\Controllers\AmigoSecretoController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\EventoReinicioController;
 use App\Http\Controllers\EventosController;
+use App\Http\Controllers\GroupModerationController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\LogoutController;
 use App\Http\Controllers\MatrizPerfilesController;
+use App\Http\Controllers\ModeracionBloqueosController;
 use App\Http\Controllers\ModeracionController;
+use App\Http\Controllers\ModeracionGruposController;
 use App\Http\Controllers\ModuleController;
 use App\Http\Controllers\ModulosController;
 use App\Http\Controllers\NotificacionesController;
@@ -70,6 +73,10 @@ Route::post('/administracion/notificaciones', [NotificacionesController::class, 
     ->middleware('auth')
     ->name('notificaciones.guardar');
 
+Route::get('/administracion/notificaciones/contadores', [NotificacionesController::class, 'contadores'])
+    ->middleware('auth')
+    ->name('notificaciones.contadores');
+
 Route::post('/administracion/notificaciones/usuarios/{user}', [NotificacionesController::class, 'preferenciasUsuario'])
     ->middleware('auth')
     ->name('notificaciones.usuarios.preferences');
@@ -78,6 +85,10 @@ Route::post('/administracion/notificaciones/usuarios/{user}', [NotificacionesCon
 Route::get('/notificaciones/contador', [NotificacionesController::class, 'contador'])
     ->middleware('auth')
     ->name('notificaciones.contador');
+
+Route::get('/notificaciones/lista', [NotificacionesController::class, 'lista'])
+    ->middleware('auth')
+    ->name('notificaciones.lista');
 
 Route::post('/notificaciones/leer-todas', [NotificacionesController::class, 'leerTodas'])
     ->middleware('auth')
@@ -91,7 +102,8 @@ Route::post('/notificaciones/{notification}/leer', [NotificacionesController::cl
     ->middleware('auth')
     ->name('notificaciones.leer');
 
-// Moderación: reportes del chat, solo lectura, con acceso directo al chat.
+// Moderación: pestaña de reportes (solo lectura, con acceso directo al chat),
+// pestaña de bloqueos entre usuarios y pestaña de vetados de grupo.
 Route::get('/administracion/moderacion', [ModeracionController::class, 'index'])
     ->middleware('auth')
     ->name('moderacion.index');
@@ -99,6 +111,36 @@ Route::get('/administracion/moderacion', [ModeracionController::class, 'index'])
 Route::get('/moderacion/datos', [ModeracionController::class, 'datos'])
     ->middleware('auth')
     ->name('moderacion.datos');
+
+Route::get('/moderacion/contadores', [ModeracionController::class, 'contadores'])
+    ->middleware('auth')
+    ->name('moderacion.contadores');
+
+// Bloqueos entre usuarios: listado con estado, detalle y sincronización.
+Route::get('/moderacion/bloqueos/usuarios', [ModeracionBloqueosController::class, 'usuarios'])
+    ->middleware('auth')
+    ->name('moderacion.bloqueos.usuarios');
+
+Route::get('/moderacion/bloqueos/{user}', [ModeracionBloqueosController::class, 'detalle'])
+    ->middleware('auth')
+    ->name('moderacion.bloqueos.detalle');
+
+Route::post('/moderacion/bloqueos/{user}', [ModeracionBloqueosController::class, 'sincronizar'])
+    ->middleware('auth')
+    ->name('moderacion.bloqueos.sincronizar');
+
+// Vetados de grupo: listado de grupos, detalle y sincronización por grupo.
+Route::get('/moderacion/grupos', [ModeracionGruposController::class, 'grupos'])
+    ->middleware('auth')
+    ->name('moderacion.grupos');
+
+Route::get('/moderacion/grupos/{conversation}/vetados', [ModeracionGruposController::class, 'detalle'])
+    ->middleware('auth')
+    ->name('moderacion.grupos.vetados');
+
+Route::post('/moderacion/grupos/{conversation}/vetados', [ModeracionGruposController::class, 'sincronizar'])
+    ->middleware('auth')
+    ->name('moderacion.grupos.vetados.sincronizar');
 
 // Chat (buzón universal, flotante).
 Route::get('/mensajes/chat', [ChatController::class, 'index'])
@@ -108,6 +150,11 @@ Route::get('/mensajes/chat', [ChatController::class, 'index'])
 Route::get('/chat/resumen', [ChatController::class, 'resumen'])
     ->middleware('auth')
     ->name('chat.resumen');
+
+// Contador liviano del botón flotante: nuevo propio y nuevo de moderación.
+Route::get('/chat/contador', [ChatController::class, 'contador'])
+    ->middleware('auth')
+    ->name('chat.contador');
 
 Route::post('/chat/abrir', [ChatController::class, 'abrir'])
     ->middleware('auth')
@@ -137,6 +184,53 @@ Route::post('/chat/{conversation}/limpiar', [ChatController::class, 'limpiar'])
     ->middleware('auth')
     ->name('chat.limpiar');
 
+// Menú de la conversación: vaciar, eliminar, archivar, favorito, fijar y lectura.
+Route::post('/chat/{conversation}/vaciar', [ChatController::class, 'vaciar'])
+    ->middleware('auth')
+    ->name('chat.vaciar');
+
+Route::post('/chat/{conversation}/eliminar', [ChatController::class, 'eliminarPropia'])
+    ->middleware('auth')
+    ->name('chat.eliminar-propia');
+
+Route::post('/chat/{conversation}/archivar', [ChatController::class, 'archivar'])
+    ->middleware('auth')
+    ->name('chat.archivar');
+
+Route::delete('/chat/{conversation}/archivar', [ChatController::class, 'desarchivar'])
+    ->middleware('auth')
+    ->name('chat.desarchivar');
+
+Route::post('/chat/{conversation}/favorito', [ChatController::class, 'favorito'])
+    ->middleware('auth')
+    ->name('chat.favorito');
+
+Route::post('/chat/{conversation}/fijar', [ChatController::class, 'fijar'])
+    ->middleware('auth')
+    ->name('chat.fijar');
+
+Route::post('/chat/{conversation}/no-leido', [ChatController::class, 'noLeido'])
+    ->middleware('auth')
+    ->name('chat.no-leido');
+
+// Mensaje fijado que se muestra en el cintillo del chat.
+Route::post('/chat/{conversation}/fijar-mensaje/{message}', [ChatController::class, 'fijarMensaje'])
+    ->middleware('auth')
+    ->name('chat.mensaje.fijar');
+
+Route::delete('/chat/{conversation}/mensaje-fijado', [ChatController::class, 'desfijarMensaje'])
+    ->middleware('auth')
+    ->name('chat.mensaje.desfijar');
+
+// Acciones por persona desde la pestaña Usuarios.
+Route::post('/chat/usuarios/{user}/silenciar', [ChatController::class, 'silenciarUsuario'])
+    ->middleware('auth')
+    ->name('chat.usuarios.silenciar');
+
+Route::post('/chat/usuarios/{user}/reportar', [ChatController::class, 'reportarUsuario'])
+    ->middleware('auth')
+    ->name('chat.usuarios.reportar');
+
 Route::post('/chat/usuarios/{user}/bloquear', [ChatController::class, 'bloquear'])
     ->middleware('auth')
     ->name('chat.bloquear');
@@ -144,6 +238,63 @@ Route::post('/chat/usuarios/{user}/bloquear', [ChatController::class, 'bloquear'
 Route::delete('/chat/usuarios/{user}/bloquear', [ChatController::class, 'desbloquear'])
     ->middleware('auth')
     ->name('chat.desbloquear');
+
+Route::post('/chat/{conversation}/salir', [ChatController::class, 'salir'])
+    ->middleware('auth')
+    ->name('chat.salir');
+
+Route::post('/chat/{conversation}/reportar-conversacion', [ChatController::class, 'reportarConversacion'])
+    ->middleware('auth')
+    ->name('chat.reportar-conversacion');
+
+Route::post('/chat/{conversation}/expulsar/{user}', [ChatController::class, 'expulsar'])
+    ->middleware('auth')
+    ->name('chat.expulsar');
+
+Route::delete('/chat/{conversation}', [ChatController::class, 'eliminarConversacion'])
+    ->middleware('auth')
+    ->name('chat.eliminar');
+
+// Invitación a un grupo: sin sesión manda al acceso; con sesión, al panel,
+// donde el chat muestra el modal de la invitación.
+Route::get('/chat/grupo/invitacion/{token}', [GroupModerationController::class, 'verInvitacion'])
+    ->name('chat.grupo.invitacion');
+
+Route::get('/chat/grupo/invitacion/{token}/datos', [GroupModerationController::class, 'datosInvitacion'])
+    ->middleware('auth')
+    ->name('chat.grupo.invitacion.datos');
+
+Route::post('/chat/grupo/invitacion/{token}/aceptar', [GroupModerationController::class, 'aceptar'])
+    ->middleware('auth')
+    ->name('chat.grupo.aceptar');
+
+Route::post('/chat/grupo/invitacion/{token}/rechazar', [GroupModerationController::class, 'rechazar'])
+    ->middleware('auth')
+    ->name('chat.grupo.rechazar');
+
+Route::post('/chat/grupo/{conversation}/invitar', [GroupModerationController::class, 'invitar'])
+    ->middleware('auth')
+    ->name('chat.grupo.invitar');
+
+Route::post('/chat/grupo/{conversation}/suspender/{user}', [GroupModerationController::class, 'suspender'])
+    ->middleware('auth')
+    ->name('chat.grupo.suspender');
+
+Route::post('/chat/grupo/{conversation}/banear/{user}', [GroupModerationController::class, 'banear'])
+    ->middleware('auth')
+    ->name('chat.grupo.banear');
+
+Route::delete('/chat/grupo/{conversation}/banear/{user}', [GroupModerationController::class, 'desbanear'])
+    ->middleware('auth')
+    ->name('chat.grupo.desbanear');
+
+Route::get('/chat/grupo/{conversation}/baneados', [GroupModerationController::class, 'baneados'])
+    ->middleware('auth')
+    ->name('chat.grupo.baneados');
+
+Route::get('/chat/grupo/{conversation}/miembros', [ChatController::class, 'miembros'])
+    ->middleware('auth')
+    ->name('chat.grupo.miembros');
 
 Route::post('/chat/{conversation}/moderar', [ChatController::class, 'moderar'])
     ->middleware('auth')
@@ -181,10 +332,18 @@ Route::get('/chat/{conversation}/media', [ChatController::class, 'media'])
     ->middleware('auth')
     ->name('chat.media');
 
+Route::get('/chat/{conversation}/perfil', [ChatController::class, 'perfil'])
+    ->middleware('auth')
+    ->name('chat.perfil');
+
 // Eventos (tarjetas, planificación y ciclo de vida).
 Route::get('/eventos/eventos', [EventosController::class, 'index'])
     ->middleware('auth')
     ->name('eventos.index');
+
+Route::get('/eventos/estado', [EventosController::class, 'estado'])
+    ->middleware('auth')
+    ->name('eventos.estado');
 
 Route::post('/eventos', [EventosController::class, 'crear'])
     ->middleware('auth')

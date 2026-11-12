@@ -19,16 +19,20 @@
             </div>
 
             @if ($shell['showNotifications'])
+                @php($unreadCount = (int) $shell['notificationsCount'])
                 <button class="btn dashboard-notifications-btn"
                         type="button"
                         id="notifications-open"
+                        data-count="{{ $unreadCount }}"
                         data-bs-toggle="offcanvas"
                         data-bs-target="#notifications-panel"
                         aria-controls="notifications-panel"
-                        aria-label="Notificaciones: {{ $shell['notificationsCount'] }}">
+                        aria-label="Notificaciones: {{ $unreadCount }}">
                     <i class="fa-regular fa-bell" aria-hidden="true"></i>
-                    <span class="dashboard-notifications-label">Notificaciones</span>
-                    <span class="dashboard-notifications-count" id="notifications-count">{{ $shell['notificationsCount'] }}</span>
+                    <span class="dashboard-notifications-dot" id="notifications-dot"
+                          @if ($unreadCount !== 1) hidden @endif aria-hidden="true"></span>
+                    <span class="dashboard-notifications-count" id="notifications-count"
+                          @if ($unreadCount < 2) hidden @endif>{{ $unreadCount > 99 ? '+99' : $unreadCount }}</span>
                 </button>
             @endif
         </div>
@@ -36,7 +40,8 @@
         <div class="dashboard-meta">
             <div id="event-countdown"
                  class="dashboard-countdown @if (! $shell['event']?->exchange_at) dashboard-countdown--empty @endif"
-                 data-exchange-at="{{ $shell['event']?->exchange_at?->toIso8601String() }}">
+                 data-exchange-at="{{ $shell['event']?->exchange_at?->toIso8601String() }}"
+                 data-server-now="{{ now()->toIso8601String() }}">
                 <i class="fa-regular fa-clock" aria-hidden="true"></i>
                 <span>{{ $shell['event']?->exchange_at ? 'Calculando…' : 'Sin fecha de intercambio' }}</span>
             </div>
@@ -75,6 +80,7 @@
              data-bs-backdrop="true" data-bs-scroll="false"
              aria-labelledby="notifications-title"
              data-url-contador="{{ route('notificaciones.contador') }}"
+             data-url-lista="{{ route('notificaciones.lista') }}"
              data-url-leer-todas="{{ route('notificaciones.leer-todas') }}"
              data-url-leer="{{ route('notificaciones.leer', ['notification' => '__ID__']) }}"
              data-url-preferencias="{{ route('notificaciones.preferencias') }}"
@@ -126,19 +132,29 @@
                     @forelse ($shell['notifications'] as $notification)
                         <li class="alert-item {{ $notification->read_at ? '' : 'is-unread' }}"
                             data-id="{{ $notification->id }}">
-                            <button type="button" class="alert-item__button"
-                                    data-id="{{ $notification->id }}"
-                                    data-url="{{ $notification->url }}"
-                                    data-read="{{ $notification->read_at ? '1' : '0' }}">
-                                <span class="alert-item__dot" aria-hidden="true"></span>
-                                <span class="alert-item__text">
-                                    <span class="alert-item__title">{{ $notification->title() }}</span>
-                                    @if ($notification->body() !== '')
-                                        <span class="alert-item__body">{{ $notification->body() }}</span>
-                                    @endif
-                                    <span class="alert-item__date">{{ format_date($notification->created_at) }}</span>
-                                </span>
-                            </button>
+                            <div class="alert-item__row">
+                                <button type="button" class="alert-item__button"
+                                        data-id="{{ $notification->id }}"
+                                        data-url="{{ $notification->link() }}"
+                                        data-read="{{ $notification->read_at ? '1' : '0' }}">
+                                    <span class="alert-item__dot" aria-hidden="true"></span>
+                                    <span class="alert-item__text">
+                                        <span class="alert-item__title">{{ $notification->title() }}</span>
+                                        @if ($notification->body() !== '')
+                                            <span class="alert-item__body">{{ $notification->body() }}</span>
+                                        @endif
+                                        <span class="alert-item__date">{{ format_date($notification->created_at) }}</span>
+                                    </span>
+                                </button>
+
+                                @php($link = $notification->link())
+                                @if ($link)
+                                    <a class="alert-item__open" href="{{ $link }}" data-id="{{ $notification->id }}">
+                                        <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                                        <span>Abrir</span>
+                                    </a>
+                                @endif
+                            </div>
                         </li>
                     @empty
                         <li class="alert-empty">No tienes notificaciones.</li>
@@ -154,6 +170,22 @@
                 </div>
             </div>
         </div>
+
+        {{-- Detalle de una notificación: modal, sin recargar la página. --}}
+        <x-app-modal id="modal-notification-detail" title="Notificación">
+            <x-slot:body>
+                <p class="notification-detail__date" id="notification-detail-date"></p>
+                <p class="notification-detail__body" id="notification-detail-body"></p>
+            </x-slot:body>
+
+            <x-slot:footer>
+                <a class="btn btn-primary" id="notification-detail-open" href="#" hidden>
+                    <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                    <span>Abrir</span>
+                </a>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </x-slot:footer>
+        </x-app-modal>
     @endif
 </div>
 @endsection

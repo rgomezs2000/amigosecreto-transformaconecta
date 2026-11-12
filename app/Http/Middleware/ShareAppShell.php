@@ -87,6 +87,8 @@ class ShareAppShell
                 'notificationPreferences' => $notificationPreferences,
                 'canManageNotifications' => $menuModules->contains('slug', 'control-notificaciones'),
                 'dollarRate' => $dollarRate,
+                // Invitación a un grupo pendiente de mostrar como modal al entrar.
+                'chatInvitation' => $request->session()->get('chat.invitation'),
             ]);
         }
 

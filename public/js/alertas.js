@@ -16,6 +16,7 @@
         }
 
         var contadorUrl = $panel.data('url-contador');
+        var listaUrl = $panel.data('url-lista');
         var leerTodasUrl = $panel.data('url-leer-todas');
         var leerUrl = String($panel.data('url-leer') || '');
         var preferenciasUrl = $panel.data('url-preferencias');
@@ -23,10 +24,16 @@
         var sound = String($panel.data('sound')) === '1';
 
         var $count = $('#notifications-count');
+        var $dot = $('#notifications-dot');
         var $open = $('#notifications-open');
         var $markAll = $('#alert-mark-all');
-        var lastCount = parseInt($count.text(), 10) || 0;
+        var lastCount = parseInt($open.attr('data-count'), 10) || 0;
+        var lastListSignature = null;
         var audioContext = null;
+        var modalElement = document.getElementById('modal-notification-detail');
+        var notificationModal = modalElement && window.bootstrap
+            ? window.bootstrap.Modal.getOrCreateInstance(modalElement)
+            : null;
 
         function beep() {
             if (!sound) {
@@ -53,9 +60,43 @@
         function updateCount(count) {
             count = Math.max(0, parseInt(count, 10) || 0);
             lastCount = count;
-            $count.text(count);
-            $open.attr('aria-label', 'Notificaciones: ' + count);
+            $open.attr('data-count', count).attr('aria-label', 'Notificaciones: ' + count);
             $markAll.prop('disabled', count === 0);
+
+            if (count === 1) {
+                // Un solo aviso: punto rojo, sin número.
+                $dot.prop('hidden', false);
+                $count.prop('hidden', true).text('');
+            } else if (count >= 2) {
+                $dot.prop('hidden', true);
+                $count.prop('hidden', false).text(count > 99 ? '+99' : String(count));
+            } else {
+                $dot.prop('hidden', true);
+                $count.prop('hidden', true).text('');
+            }
+        }
+
+        function notificationActionLabel(url) {
+            return /conversacion=/.test(String(url || '')) ? 'Ir al chat' : 'Abrir';
+        }
+
+        function openNotificationDetail(title, body, date, url) {
+            $('#modal-notification-detail-title').text(title || 'Notificación');
+            $('#notification-detail-date').text(date || '');
+            $('#notification-detail-body').text(body || '').prop('hidden', !body);
+
+            var $action = $('#notification-detail-open');
+
+            if (url) {
+                $action.attr('href', url).prop('hidden', false);
+                $action.find('span').text(notificationActionLabel(url));
+            } else {
+                $action.attr('href', '#').prop('hidden', true);
+            }
+
+            if (notificationModal) {
+                notificationModal.show();
+            }
         }
 
         function prefValue(name) {
@@ -83,18 +124,97 @@
             return $chat.length > 0 && !$chat.prop('hidden');
         }
 
+        function renderList(items) {
+            var $list = $('#alert-list');
+
+            $list.empty();
+
+            if (!items || !items.length) {
+                $list.append($('<li class="alert-empty"></li>').text('No tienes notificaciones.'));
+                return;
+            }
+
+            items.forEach(function (item) {
+                var $item = $('<li class="alert-item"></li>').attr('data-id', item.id);
+
+                if (!item.read) {
+                    $item.addClass('is-unread');
+                }
+
+                var $button = $('<button type="button" class="alert-item__button"></button>')
+                    .attr('data-id', item.id)
+                    .attr('data-url', item.url || '')
+                    .attr('data-read', item.read ? '1' : '0');
+
+                var $text = $('<span class="alert-item__text"></span>');
+
+                $text.append($('<span class="alert-item__title"></span>').text(item.title || 'Notificación'));
+
+                if (item.body) {
+                    $text.append($('<span class="alert-item__body"></span>').text(item.body));
+                }
+
+                $text.append($('<span class="alert-item__date"></span>').text(item.date || ''));
+
+                $button.append($('<span class="alert-item__dot" aria-hidden="true"></span>'), $text);
+
+                var $row = $('<div class="alert-item__row"></div>');
+                $row.append($button);
+
+                if (item.url) {
+                    $row.append(
+                        $('<a class="alert-item__open"></a>')
+                            .attr('href', item.url)
+                            .attr('data-id', item.id)
+                            .append($('<i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>'))
+                            .append($('<span></span>').text('Abrir'))
+                    );
+                }
+
+                $item.append($row);
+                $list.append($item);
+            });
+        }
+
+        function loadList(force) {
+            if (!listaUrl) {
+                return;
+            }
+
+            $.getJSON(listaUrl)
+                .done(function (response) {
+                    var items = response.notifications || [];
+                    var signature = JSON.stringify(items);
+
+                    updateCount(response.count);
+
+                    // Si nada cambió, no se vuelve a pintar la lista.
+                    if (!force && signature === lastListSignature) {
+                        return;
+                    }
+
+                    lastListSignature = signature;
+                    renderList(items);
+                });
+        }
+
         function poll() {
             $.getJSON(contadorUrl)
                 .done(function (response) {
                     var count = parseInt(response.count, 10) || 0;
+                    var previous = lastCount;
 
                     // El chat ya avisa con su propio sonido cuando está abierto.
-                    if (count > lastCount && lastCount > 0 && !chatIsOpen()) {
+                    if (count > previous && previous > 0 && !chatIsOpen()) {
                         beep();
                     }
 
                     sound = !!response.sound;
                     updateCount(count);
+
+                    if ($panel.hasClass('show') && count !== previous) {
+                        loadList();
+                    }
                 });
         }
 
@@ -102,32 +222,109 @@
             var $button = $(this);
             var $item = $button.closest('.alert-item');
             var id = $button.data('id');
-            var url = $button.data('url');
-            var alreadyRead = String($button.attr('data-read')) === '1';
 
-            function go() {
-                if (url) {
-                    window.location.assign(url);
-                }
-            }
+            openNotificationDetail(
+                $item.find('.alert-item__title').text(),
+                $item.find('.alert-item__body').text(),
+                $item.find('.alert-item__date').text(),
+                String($button.attr('data-url') || '')
+            );
 
-            if (alreadyRead) {
-                go();
+            if (String($button.attr('data-read')) === '1') {
                 return;
             }
 
-            var target = leerUrl.replace('__ID__', encodeURIComponent(id));
-
-            post(target, {})
+            post(leerUrl.replace('__ID__', encodeURIComponent(id)), {})
                 .done(function (response) {
                     $item.removeClass('is-unread');
                     $button.attr('data-read', '1');
                     updateCount(response.count);
-                    go();
-                })
-                .fail(function () {
-                    go();
                 });
+        });
+
+        $('#alert-list').on('click', '.alert-item__open', function (event) {
+            var $link = $(this);
+            var href = $link.attr('href');
+            var id = $link.data('id');
+            var $item = $link.closest('.alert-item');
+            var $button = $item.find('.alert-item__button');
+            var conversationId = null;
+
+            if (!href) {
+                return;
+            }
+
+            try {
+                conversationId = new window.URL(href, window.location.origin).searchParams.get('conversacion');
+            } catch (error) {
+                conversationId = null;
+            }
+
+            function markRead() {
+                if (String($button.attr('data-read')) === '1') {
+                    return null;
+                }
+
+                return post(leerUrl.replace('__ID__', encodeURIComponent(id)), {})
+                    .done(function (response) {
+                        $item.removeClass('is-unread');
+                        $button.attr('data-read', '1');
+                        updateCount(response.count);
+                    });
+            }
+
+            if (conversationId && $('#chat-panel').length) {
+                // Abre el chat flotante en la conversación, sin recargar la página.
+                event.preventDefault();
+                markRead();
+                document.dispatchEvent(new CustomEvent('chat:open', {
+                    detail: { id: conversationId }
+                }));
+
+                return;
+            }
+
+            // Otros enlaces: navegación explícita, marcando antes como leída.
+            event.preventDefault();
+
+            var request = markRead();
+
+            if (request) {
+                request.always(function () {
+                    window.location.assign(href);
+                });
+            } else {
+                window.location.assign(href);
+            }
+        });
+
+        $('#notification-detail-open').on('click', function (event) {
+            var href = $(this).attr('href');
+            var conversationId = null;
+
+            if (!href || href === '#') {
+                event.preventDefault();
+
+                return;
+            }
+
+            try {
+                conversationId = new window.URL(href, window.location.origin).searchParams.get('conversacion');
+            } catch (error) {
+                conversationId = null;
+            }
+
+            if (conversationId && $('#chat-panel').length) {
+                event.preventDefault();
+
+                if (notificationModal) {
+                    notificationModal.hide();
+                }
+
+                document.dispatchEvent(new CustomEvent('chat:open', {
+                    detail: { id: conversationId }
+                }));
+            }
         });
 
         $markAll.on('click', function () {
@@ -172,9 +369,23 @@
         });
 
         $('#notifications-panel').on('shown.bs.offcanvas', function () {
+            loadList();
             poll();
         });
 
-        window.setInterval(poll, 30000);
+        // Sondeo ligero: no recarga la página y se pausa si la pestaña no está visible.
+        window.setInterval(function () {
+            if (!document.hidden) {
+                poll();
+            }
+        }, 10000);
+
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) {
+                poll();
+            }
+        });
+
+        updateCount(lastCount);
     });
 })(window.jQuery);

@@ -453,6 +453,15 @@ class User extends Authenticatable
         return $this->hasMany(SocialAccount::class);
     }
 
+    /**
+     * Usuarios que este usuario tiene bloqueados en el chat.
+     */
+    public function blockedUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'chat_blocks', 'blocker_id', 'blocked_id')
+            ->withTimestamps();
+    }
+
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);

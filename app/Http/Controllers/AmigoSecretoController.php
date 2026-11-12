@@ -11,9 +11,9 @@ use Illuminate\Http\Request;
 /**
  * Chat privado del amigo secreto.
  *
- * El nombre del asignado nunca se expone: la conversación se titula
- * "Amigo secreto" y solo se muestra si está en línea. La administración
- * puede moderar todas las conversaciones.
+ * Cada asignación tiene su propio chat. El usuario ve dos: el suyo como
+ * remitente (ahí sí ve a quién le tocó) y el que recibe (ahí el amigo secreto
+ * sigue siendo anónimo). La administración puede moderar estas conversaciones.
  */
 class AmigoSecretoController extends Controller
 {
@@ -54,12 +54,18 @@ class AmigoSecretoController extends Controller
                 ]);
             }
 
-            $other = $assignment->giver_id === $user->id ? $assignment->receiver : $assignment->giver;
+            // Quien regala sabe a quién le tocó; quien recibe no sabe quién es.
+            $isGiver = (int) $assignment->giver_id === (int) $user->id;
+            $other = $isGiver ? $assignment->receiver : $assignment->giver;
             $online = $other?->last_seen_at !== null && $other->last_seen_at->gte(now()->subMinutes(5));
 
             return [
                 'conversation_id' => $conversation->id,
-                'title' => 'Amigo secreto',
+                'title' => $isGiver
+                    ? 'Amigo secreto: '.($other?->name ?? 'asignado')
+                    : 'Amigo secreto',
+                'label' => $isGiver ? 'Tu asignado' : 'Incógnito',
+                'role' => $isGiver ? 'giver' : 'receiver',
                 'online' => $online,
                 'unread' => 0,
             ];
@@ -94,7 +100,14 @@ class AmigoSecretoController extends Controller
 
         $conversation->users()->syncWithoutDetaching([$assignment->giver_id, $assignment->receiver_id]);
 
-        return api_success('Conversación abierta.', ['conversation' => ['id' => $conversation->id, 'title' => 'Amigo secreto']]);
+        $conversation->load('users', 'assignment.receiver');
+
+        return api_success('Conversación abierta.', [
+            'conversation' => [
+                'id' => $conversation->id,
+                'title' => $conversation->titleFor($user),
+            ],
+        ]);
     }
 
     private function activeEvent(): ?Event

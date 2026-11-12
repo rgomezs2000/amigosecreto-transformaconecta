@@ -69,6 +69,16 @@
             in_app_enabled: 'in_app'
         };
 
+        function applyPreferences($row, preferences) {
+            $row.find('.pref-switch').each(function () {
+                var key = fields[$(this).data('field')];
+
+                if (key) {
+                    $(this).prop('checked', !!preferences[key]);
+                }
+            });
+        }
+
         $('.pref-switch').on('change', function () {
             var $input = $(this);
             var $row = $input.closest('tr');
@@ -81,13 +91,7 @@
             post($row.data('url'), payload)
                 .done(function (response) {
                     if (response.preferences) {
-                        $row.find('.pref-switch').each(function () {
-                            var key = fields[$(this).data('field')];
-
-                            if (key) {
-                                $(this).prop('checked', !!response.preferences[key]);
-                            }
-                        });
+                        applyPreferences($row, response.preferences);
                     }
 
                     var $status = $row.find('.pref-status');
@@ -114,13 +118,101 @@
             $button.prop('disabled', true);
 
             post($row.data('url'), { reset: 1 })
-                .done(function () {
-                    window.location.reload();
+                .done(function (response) {
+                    if (response.preferences) {
+                        applyPreferences($row, response.preferences);
+                    }
+
+                    var $status = $row.find('.pref-status');
+
+                    $status.text('Heredado');
+
+                    window.setTimeout(function () {
+                        $status.text('');
+                    }, 2000);
                 })
                 .fail(showError)
                 .always(function () {
                     $button.prop('disabled', false);
                 });
         });
+
+        /* ------------------------------------------------------------------
+           Contadores de tráfico: solo texto, sin recargar la página.
+           ------------------------------------------------------------------ */
+
+        var $live = $('#notificaciones-live');
+        var contadoresUrl = $live.length ? $live.attr('data-url-contadores') : '';
+        var numberFormat = window.Intl ? new window.Intl.NumberFormat('es-VE') : null;
+
+        function formatCount(value) {
+            var number = parseInt(value, 10) || 0;
+
+            return numberFormat ? numberFormat.format(number) : String(number);
+        }
+
+        function canRefreshCounters() {
+            if (!contadoresUrl || document.hidden) {
+                return false;
+            }
+
+            if (document.querySelector('.modal.show, .bootbox')) {
+                return false;
+            }
+
+            var active = document.activeElement;
+
+            return !(active && (active.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName)));
+        }
+
+        function refreshCounters() {
+            if (!canRefreshCounters()) {
+                return;
+            }
+
+            $.getJSON(contadoresUrl).done(function (response) {
+                var traffic = response.traffic || {};
+
+                ['push', 'emails', 'messages', 'reports'].forEach(function (key) {
+                    var data = traffic[key];
+
+                    if (!data) {
+                        return;
+                    }
+
+                    var $card = $('[data-traffic-card="' + key + '"]');
+
+                    $card.find('[data-traffic-today]').text(formatCount(data.today));
+                    $card.find('[data-traffic-week]').text(formatCount(data.week));
+                    $card.find('[data-traffic-total]').text(formatCount(data.total));
+                });
+
+                var emails = traffic.emails || {};
+
+                $('[data-traffic-card="emails"] [data-traffic-extra]').text(
+                    formatCount(emails.failed) + ' fallidos · ' + formatCount(emails.skipped) + ' omitidos'
+                );
+
+                var conversations = traffic.conversations || {};
+
+                $('[data-conversations="direct"]').text(formatCount(conversations.direct));
+                $('[data-conversations="group"]').text(formatCount(conversations.group));
+                $('[data-conversations="reports"]').text(formatCount(conversations.reports));
+            });
+        }
+
+        if (contadoresUrl) {
+            window.setInterval(function () {
+                if (!document.hidden) {
+                    refreshCounters();
+                }
+            }, 20000);
+
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) {
+                    refreshCounters();
+                }
+            });
+        }
     });
 })(window.jQuery);

@@ -20,6 +20,7 @@
         initDashboardClock();
         initEventCountdown();
         initOffcanvasDismiss();
+        initNotificationModalEscape();
         initProfilePasswordToggles();
         initPerfilUsernameCheck();
         initPerfilPasswordForm();
@@ -47,6 +48,13 @@
                 return;
             }
 
+            // Un modal (o un diálogo de Bootbox) está por encima del panel:
+            // sus clics no deben cerrar el offcanvas de abajo. Se comprueba
+            // también el destino porque Bootstrap quita ".show" al ocultarlo.
+            if (document.querySelector('.modal.show') || target.closest('.modal, .modal-backdrop, .bootbox')) {
+                return;
+            }
+
             panels.forEach(function (panel) {
                 if (panel.contains(target)) {
                     return;
@@ -59,6 +67,28 @@
                 window.bootstrap.Offcanvas.getOrCreateInstance(panel).hide();
             });
         });
+    }
+
+    /**
+     * Con el modal de una notificación abierto, Escape cierra solo el modal:
+     * el panel de notificaciones que está detrás debe seguir abierto.
+     */
+    function initNotificationModalEscape() {
+        document.addEventListener('keydown', function (event) {
+            if (event.key !== 'Escape' || !window.bootstrap || !window.bootstrap.Modal) {
+                return;
+            }
+
+            var modal = document.getElementById('modal-notification-detail');
+
+            if (!modal || !modal.classList.contains('show')) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            window.bootstrap.Modal.getOrCreateInstance(modal).hide();
+        }, true);
     }
 
     /**
@@ -267,56 +297,144 @@
     }
 
     /**
-     * Cuenta regresiva hasta el intercambio. El texto se mantiene en días y
-     * horas para reducir la incertidumbre sin saturar.
+     * Cuenta regresiva hasta el intercambio, actualizada en vivo.
+     *
+     * Un solo temporizador de un segundo escribe el texto únicamente cuando
+     * cambia; se pausa si la pestaña queda en segundo plano y se detiene al
+     * llegar a la fecha. No consulta al servidor: no compite con el sondeo del
+     * chat ni con el de los avisos, y no toca nada más de la página.
      */
     function initEventCountdown() {
-        var $countdown = $('#event-countdown');
+        var countdown = document.getElementById('event-countdown');
 
-        if (!$countdown.length) {
+        if (!countdown) {
             return;
         }
 
-        var $text = $countdown.find('span');
-        var exchangeAt = $countdown.attr('data-exchange-at');
+        var label = countdown.querySelector('span');
+        var end = Date.parse(countdown.getAttribute('data-exchange-at') || '');
 
-        if (!exchangeAt) {
-            $countdown.addClass('dashboard-countdown--empty');
-            $text.text('Sin fecha de intercambio');
+        if (!label) {
             return;
         }
 
-        var end = new Date(exchangeAt).getTime();
+        if (isNaN(end)) {
+            countdown.classList.add('dashboard-countdown--empty');
+            label.textContent = 'Sin fecha de intercambio';
+            return;
+        }
 
-        function update() {
-            var diff = end - Date.now();
+        // La hora del servidor corrige el desfase si el reloj del equipo está mal.
+        var servedAt = Date.parse(countdown.getAttribute('data-server-now') || '');
+        var skew = isNaN(servedAt) ? 0 : Date.now() - servedAt;
+        var dayFormat = null;
+        var timer = null;
+        var lastText = '';
+        var finished = false;
 
+        function now() {
+            return Date.now() - skew;
+        }
+
+        function dayKey(timestamp) {
+            if (!dayFormat) {
+                dayFormat = new Intl.DateTimeFormat('es-VE', {
+                    timeZone: 'America/Caracas',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                });
+            }
+
+            var values = {};
+
+            dayFormat.formatToParts(timestamp).forEach(function (part) {
+                values[part.type] = part.value;
+            });
+
+            return values.year + '-' + values.month + '-' + values.day;
+        }
+
+        function pad(value) {
+            return value < 10 ? '0' + value : String(value);
+        }
+
+        function caption(diff) {
             if (diff <= 0) {
-                $countdown.removeClass('dashboard-countdown--empty');
-                $text.text('El intercambio es hoy');
-                return;
+                return dayKey(end) === dayKey(now())
+                    ? 'El intercambio es hoy'
+                    : 'El intercambio ya pasó';
             }
 
             var days = Math.floor(diff / 86400000);
             var hours = Math.floor((diff % 86400000) / 3600000);
             var minutes = Math.floor((diff % 3600000) / 60000);
-            var parts = [];
+            var seconds = Math.floor((diff % 60000) / 1000);
+            var head = '';
+            var clock = [];
 
             if (days > 0) {
-                parts.push(days + (days === 1 ? ' día' : ' días'));
-                parts.push(hours + (hours === 1 ? ' hora' : ' horas'));
-            } else if (hours > 0) {
-                parts.push(hours + (hours === 1 ? ' hora' : ' horas'));
-                parts.push(minutes + (minutes === 1 ? ' minuto' : ' minutos'));
-            } else {
-                parts.push(minutes + (minutes === 1 ? ' minuto' : ' minutos'));
+                head = days + (days === 1 ? ' día, ' : ' días, ');
             }
 
-            $text.text('Faltan ' + parts.join(' y ') + ' para el intercambio');
+            if (hours > 0) {
+                clock.push(hours + ' h');
+            }
+
+            if (minutes > 0 || hours > 0 || days > 0) {
+                clock.push(pad(minutes) + ' min');
+            }
+
+            clock.push(pad(seconds) + ' s');
+
+            return 'Faltan ' + head + clock.join(' ') + ' para el intercambio';
         }
 
-        update();
-        window.setInterval(update, 60000);
+        function stop() {
+            if (timer !== null) {
+                window.clearInterval(timer);
+                timer = null;
+            }
+        }
+
+        function paint() {
+            var diff = end - now();
+            var text = caption(diff);
+
+            if (text !== lastText) {
+                lastText = text;
+                label.textContent = text;
+            }
+
+            if (diff <= 0) {
+                finished = true;
+                stop();
+            }
+        }
+
+        function start() {
+            stop();
+
+            if (!finished) {
+                timer = window.setInterval(paint, 1000);
+            }
+        }
+
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) {
+                stop();
+                return;
+            }
+
+            paint();
+            start();
+        });
+
+        paint();
+
+        if (!document.hidden) {
+            start();
+        }
     }
 
     /**

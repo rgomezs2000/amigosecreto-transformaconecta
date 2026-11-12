@@ -164,6 +164,29 @@ class NotificacionesTest extends TestCase
         $this->assertSame(0, $user->unreadNotifications()->count());
     }
 
+    public function test_el_listado_ajax_devuelve_las_notificaciones(): void
+    {
+        $user = $this->makeUser('Ana', UserRole::Participant, ['notificaciones']);
+
+        app(PushNotifier::class)->send(
+            $user,
+            'prueba.lista',
+            'Título de lista',
+            'Cuerpo de lista',
+            [],
+            '/destino'
+        );
+
+        $this->actingAs($user)
+            ->getJson('/notificaciones/lista')
+            ->assertOk()
+            ->assertJsonPath('count', 1)
+            ->assertJsonPath('notifications.0.title', 'Título de lista')
+            ->assertJsonPath('notifications.0.body', 'Cuerpo de lista')
+            ->assertJsonPath('notifications.0.url', '/destino')
+            ->assertJsonPath('notifications.0.read', false);
+    }
+
     public function test_el_mensaje_del_chat_crea_notificacion_y_espejo_nosql(): void
     {
         $ana = $this->makeUser('Ana', UserRole::Participant, ['chat']);
@@ -213,6 +236,67 @@ class NotificacionesTest extends TestCase
 
         $this->assertSame('direct', $mirror['type']);
         $this->assertCount(2, $mirror['participants']);
+    }
+
+    public function test_leer_la_conversacion_marca_sus_notificaciones_de_chat_como_leidas(): void
+    {
+        $ana = $this->makeUser('Ana', UserRole::Participant, ['chat']);
+        $luis = $this->makeUser('Luis', UserRole::Participant, ['chat']);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $luis->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($luis)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => 'Hola Ana'])
+            ->assertOk();
+
+        $notification = Notification::query()
+            ->where('notifiable_id', $ana->id)
+            ->where('type', 'chat.mensaje')
+            ->firstOrFail();
+
+        $this->assertNull($notification->read_at);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/resumen')
+            ->assertOk()
+            ->assertJsonPath('unread', 1);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
+            ->assertOk();
+
+        $this->assertNotNull($notification->fresh()->read_at);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/resumen')
+            ->assertOk()
+            ->assertJsonPath('unread', 0);
+    }
+
+    public function test_un_participante_puede_crear_un_grupo_desde_la_pestana_grupos(): void
+    {
+        $ana = $this->makeUser('Ana', UserRole::Participant, ['chat']);
+        $luis = $this->makeUser('Luis', UserRole::Participant, ['chat']);
+
+        $response = $this->actingAs($ana)
+            ->postJson('/chat/grupo', [
+                'name' => 'Grupo de prueba',
+                'user_ids' => [$luis->id],
+            ])
+            ->assertOk();
+
+        $conversation = Conversation::query()->findOrFail($response->json('conversation.id'));
+
+        $this->assertSame('group', $conversation->type);
+        $this->assertCount(2, $conversation->users);
+        $this->assertSame('moderator', $conversation->users->firstWhere('id', $ana->id)->pivot->role);
+
+        $this->actingAs($ana)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertSee('data-tab="groups"', false)
+            ->assertSee('Crear grupo');
     }
 
     public function test_el_correo_se_registra_en_sql_y_en_firestore(): void
@@ -282,7 +366,10 @@ class NotificacionesTest extends TestCase
             ->assertSee('Cómo quieres tus avisos')
             ->assertSee('Título visible')
             ->assertSee('Marcar todas como leídas')
-            ->assertSee('Sonido');
+            ->assertSee('Sonido')
+            ->assertSee('modal-notification-detail', false)
+            ->assertSee('notification-detail-body', false)
+            ->assertDontSee('dashboard-notifications-label', false);
     }
 
     public function test_el_menu_enlaza_al_panel_de_control(): void
