@@ -173,6 +173,67 @@ class ChatTest extends TestCase
         $this->assertSame($admin->id, $message->deleted_by);
     }
 
+    public function test_adjunto_se_guarda_en_carpeta_de_la_conversacion(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+
+        $admin = $this->userWithChat('Admin', UserRole::Admin);
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $file = \Illuminate\Http\UploadedFile::fake()->image('foto.jpg');
+
+        $this->actingAs($ana)
+            ->postJson('/chat/' . $conversation->id . '/mensajes', ['file' => $file])
+            ->assertOk();
+
+        $message = ChatMessage::query()->latest('id')->firstOrFail();
+
+        $this->assertStringStartsWith(
+            'chat/conversations/' . $conversation->id . '/image/',
+            $message->attachment_path
+        );
+
+        \Illuminate\Support\Facades\Storage::disk('public')->assertExists($message->attachment_path);
+
+        $group = Conversation::create(['type' => 'group', 'name' => 'Grupo', 'created_by' => $admin->id]);
+        $group->users()->attach([$admin->id, $ana->id]);
+
+        $this->actingAs($admin)
+            ->postJson('/chat/' . $group->id . '/mensajes', ['file' => \Illuminate\Http\UploadedFile::fake()->image('grupo.jpg')])
+            ->assertOk();
+
+        $groupMessage = ChatMessage::query()->latest('id')->firstOrFail();
+
+        $this->assertStringStartsWith('chat/groups/' . $group->id . '/image/', $groupMessage->attachment_path);
+    }
+
+    public function test_mensajes_con_lectura_registrada_no_falla(): void
+    {
+        $admin = $this->userWithChat('Admin', UserRole::Admin);
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $ana->id,
+            'body' => 'Mensaje con lectura',
+        ]);
+
+        $conversation->users()->updateExistingPivot($luis->id, ['last_read_at' => now()]);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/' . $conversation->id . '/mensajes')
+            ->assertOk()
+            ->assertJsonPath('messages.0.read', true);
+    }
+
     public function test_reportar_mensaje_crea_reporte_y_avisa_al_administrador(): void
     {
         \Illuminate\Support\Facades\Mail::fake();

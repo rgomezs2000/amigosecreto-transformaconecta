@@ -14,6 +14,7 @@
 
         var crearUrl = $config.attr('data-url-crear');
         var indexUrl = $config.attr('data-url-index');
+        var reiniciarUrl = $config.attr('data-url-reiniciar');
         var participantesBase = $config.attr('data-url-participantes');
         var token = $('#eventos-csrf').val();
 
@@ -207,33 +208,123 @@
         });
 
         // Participantes ----------------------------------------------------
+        var modalParticipants = [];
+        var modalParticipantsPage = 0;
+
+        function renderModalParticipants() {
+            var perPage = parseInt($('#evento-modal-participants-length').val(), 10) || 2;
+            var total = modalParticipants.length;
+            var pages = Math.max(1, Math.ceil(total / perPage));
+
+            modalParticipantsPage = Math.min(modalParticipantsPage, pages - 1);
+
+            var start = modalParticipantsPage * perPage;
+            var pageItems = modalParticipants.slice(start, start + perPage);
+
+            $('#evento-participantes-list').html(
+                pageItems.map(function (participant) {
+                    return '<div class="evento-participant">' +
+                        '<span class="status-badge status-badge--active evento-participant__status">' +
+                        $('<div>').text(participant.status).html() + '</span>' +
+                        '<div class="evento-participant__data">' +
+                        '<p class="evento-participant__name">' + $('<div>').text(participant.name).html() + '</p>' +
+                        '<p class="evento-participant__email">' + $('<div>').text(participant.email).html() + '</p>' +
+                        (participant.notes ? '<p class="evento-card__note">' + $('<div>').text(participant.notes).html() + '</p>' : '') +
+                        '</div>' +
+                        '</div>';
+                }).join('') || '<p class="menu-empty">El evento no tiene participantes.</p>'
+            );
+
+            $('#evento-modal-participants-info').text(
+                total === 0 ? '0 de 0' : (start + 1) + '–' + Math.min(start + perPage, total) + ' de ' + total
+            );
+
+            $('#evento-modal-participants-prev').prop('disabled', modalParticipantsPage === 0);
+            $('#evento-modal-participants-next').prop('disabled', modalParticipantsPage >= pages - 1);
+        }
+
         $('.btn-evento-participantes').on('click', function () {
             var id = eventId(this);
 
             $.getJSON(participantesBase + '/' + id + '/participantes')
                 .done(function (response) {
-                    var items = response.participants || [];
+                    modalParticipants = response.participants || [];
+                    modalParticipantsPage = 0;
 
                     $('#evento-participantes-count').text('Participantes activos: ' + response.count);
-                    $('#evento-participantes-list').html(
-                        items.map(function (participant) {
-                            return '<div class="evento-participant">' +
-                                '<div class="evento-participant__data">' +
-                                '<p class="evento-participant__name">' + $('<div>').text(participant.name).html() + '</p>' +
-                                '<p class="evento-participant__email">' + $('<div>').text(participant.email).html() + '</p>' +
-                                '<span class="status-badge status-badge--active">' + $('<div>').text(participant.status).html() + '</span>' +
-                                (participant.notes ? '<p class="evento-card__note">' + $('<div>').text(participant.notes).html() + '</p>' : '') +
-                                '</div>' +
-                                '</div>';
-                        }).join('') || '<p class="menu-empty">El evento no tiene participantes.</p>'
-                    );
 
+                    renderModalParticipants();
                     modal('modal-evento-participantes').show();
                 })
                 .fail(showError);
         });
 
-        // Iniciar ----------------------------------------------------------
+        $('#evento-modal-participants-length').on('change', function () {
+            modalParticipantsPage = 0;
+            renderModalParticipants();
+        });
+
+        $('#evento-modal-participants-prev').on('click', function () {
+            modalParticipantsPage = Math.max(0, modalParticipantsPage - 1);
+            renderModalParticipants();
+        });
+
+        $('#evento-modal-participants-next').on('click', function () {
+            modalParticipantsPage += 1;
+            renderModalParticipants();
+        });
+
+        // Reiniciar --------------------------------------------------------
+        $('.btn-evento-reiniciar').on('click', function () {
+            var year = $(this).data('year');
+
+            $('#evento-reiniciar-log').text('');
+            $('#evento-reiniciar-progress').css('width', '0%').removeClass('bg-danger');
+            $('#evento-reiniciar-confirm').data('year', year).prop('disabled', false);
+            modal('modal-evento-reiniciar').show();
+        });
+
+        $('#evento-reiniciar-confirm').on('click', function () {
+            var $button = $(this);
+            var year = $button.data('year');
+            var $progress = $('#evento-reiniciar-progress');
+            var $log = $('#evento-reiniciar-log');
+
+            $button.prop('disabled', true);
+            $progress.css('width', '15%');
+            $log.text('Ejecutando el proceso...');
+
+            var timer = window.setInterval(function () {
+                var width = parseInt($progress[0].style.width, 10) || 0;
+
+                if (width < 90) {
+                    $progress.css('width', (width + 12) + '%');
+                }
+            }, 400);
+
+            $.ajax({
+                url: reiniciarUrl,
+                method: 'POST',
+                dataType: 'json',
+                data: { _token: token, year: year }
+            }).done(function (response) {
+                window.clearInterval(timer);
+                $progress.css('width', '100%');
+                $log.text(response.data && response.data.output ? response.data.output : response.message);
+
+                window.setTimeout(function () {
+                    window.location.reload();
+                }, 1500);
+            }).fail(function (xhr) {
+                window.clearInterval(timer);
+                $progress.css('width', '100%').addClass('bg-danger');
+
+                var data = xhr.responseJSON || {};
+                $log.text((data.data && data.data.output) ? data.data.output : (data.message || 'No se pudo reiniciar el evento.'));
+
+                $button.prop('disabled', false);
+            });
+        });
         $('.btn-evento-iniciar').on('click', function () {
             var id = eventId(this);
 

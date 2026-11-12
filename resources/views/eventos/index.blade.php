@@ -19,7 +19,15 @@
                 <p class="eventos-subtitle">Un evento por año. Las tarjetas son de solo lectura; usa los botones para gestionar el evento.</p>
             </div>
 
-            <button type="button" class="btn btn-primary" id="eventos-new">
+            @php
+                $currentYearEvent = $events->firstWhere('year', now()->year);
+            @endphp
+
+            <button type="button" class="btn btn-primary" id="eventos-new"
+                    @disabled($currentYearEvent)
+                    title="{{ $currentYearEvent
+                        ? 'Ya existe un evento para el año ' . now()->year . '. Solo se permite uno por año.'
+                        : 'Crear un evento nuevo.' }}">
                 <i class="fa-solid fa-plus" aria-hidden="true"></i>
                 <span>Nuevo evento</span>
             </button>
@@ -65,7 +73,8 @@
 
                         @if ($event->status_reason)
                             <p class="evento-card__note">
-                                <strong>Observaciones:</strong> {{ $event->status_reason }}
+                                <span class="evento-card__note-label">Observaciones</span>
+                                <span>{{ $event->status_reason }}</span>
                             </p>
                         @endif
 
@@ -109,8 +118,10 @@
                                 </button>
                             @endif
 
-                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled
-                                    title="Disponible en una próxima fase" aria-label="Reiniciar, disponible próximamente">
+                            <button type="button" class="btn btn-sm btn-outline-secondary btn-evento-reiniciar"
+                                    data-year="{{ $event->year }}"
+                                    title="Reiniciar el evento de {{ $event->year }}"
+                                    aria-label="Reiniciar el evento de {{ $event->year }}">
                                 <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
                                 <span>Reiniciar</span>
                             </button>
@@ -126,6 +137,7 @@
     <div id="eventos-config"
          data-url-crear="{{ route('eventos.crear') }}"
          data-url-index="{{ route('eventos.index') }}"
+         data-url-reiniciar="{{ route('eventos.reiniciar') }}"
          data-url-participantes="{{ url('/eventos') }}"
          hidden></div>
 
@@ -206,10 +218,45 @@
         </x-slot:footer>
     </x-app-modal>
 
+    <x-app-modal id="modal-evento-reiniciar" title="Reiniciar evento">
+        <x-slot:body>
+            <p class="evento-modal__text">
+                Se eliminará el evento del año y toda su dinámica: participaciones, listas de deseos,
+                asignaciones, pistas y regalos. Los usuarios del sistema no se borran.
+            </p>
+            <div class="progress evento-reiniciar__progress" role="progressbar" aria-label="Progreso del reinicio"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="progress-bar" id="evento-reiniciar-progress" style="width: 0%"></div>
+            </div>
+            <pre class="evento-reiniciar__log" id="evento-reiniciar-log" aria-live="polite"></pre>
+            <div class="evento-modal__actions">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="evento-reiniciar-confirm">Reiniciar</button>
+            </div>
+        </x-slot:body>
+    </x-app-modal>
+
     <x-app-modal id="modal-evento-participantes" title="Participantes del evento">
         <x-slot:body>
             <p class="evento-participants__count" id="evento-participantes-count"></p>
             <div class="evento-participants__list" id="evento-participantes-list"></div>
+
+            <div class="evento-participants__pager">
+                <div class="evento-participants__length">
+                    <label for="evento-modal-participants-length">Mostrar</label>
+                    <select id="evento-modal-participants-length" class="form-select form-select-sm">
+                        <option value="2" selected>2</option>
+                        <option value="5">5</option>
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                    </select>
+                </div>
+                <div class="evento-participants__nav">
+                    <span id="evento-modal-participants-info"></span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="evento-modal-participants-prev">Anterior</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="evento-modal-participants-next">Siguiente</button>
+                </div>
+            </div>
         </x-slot:body>
 
         <x-slot:footer>

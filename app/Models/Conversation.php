@@ -15,6 +15,8 @@ class Conversation extends Model
         'name',
         'type',
         'created_by',
+        'event_id',
+        'assignment_id',
         'is_moderated',
     ];
 
@@ -28,7 +30,8 @@ class Conversation extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'chat_conversation_user')
-            ->withPivot(['role', 'last_read_at'])
+            ->withPivot(['role', 'last_read_at', 'muted_at', 'cleared_at'])
+            ->withCasts(['last_read_at' => 'datetime', 'muted_at' => 'datetime', 'cleared_at' => 'datetime'])
             ->withTimestamps();
     }
 
@@ -49,6 +52,10 @@ class Conversation extends Model
 
     public function titleFor(User $user): string
     {
+        if ($this->type === 'secret') {
+            return 'Amigo secreto';
+        }
+
         if ($this->isGroup()) {
             return $this->name ?: 'Grupo';
         }

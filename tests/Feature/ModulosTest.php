@@ -117,11 +117,13 @@ class ModulosTest extends TestCase
             'order' => [['column' => 2, 'dir' => 'asc']],
         ]);
 
+        $total = Module::query()->count();
+
         $this->actingAs($admin)
-            ->getJson('/modulos/datos?' . $baseQuery)
+            ->getJson('/modulos/datos?'.$baseQuery)
             ->assertOk()
-            ->assertJsonPath('recordsTotal', 4)
-            ->assertJsonPath('recordsFiltered', 4);
+            ->assertJsonPath('recordsTotal', $total)
+            ->assertJsonPath('recordsFiltered', $total);
 
         $filteredQuery = http_build_query([
             'draw' => 2,
@@ -132,7 +134,7 @@ class ModulosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/modulos/datos?' . $filteredQuery)
+            ->getJson('/modulos/datos?'.$filteredQuery)
             ->assertOk()
             ->assertJsonPath('recordsFiltered', 1)
             ->assertJsonPath('data.0.name', 'Reportes');
@@ -204,13 +206,13 @@ class ModulosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/modulos/' . $module->id)
+            ->getJson('/modulos/'.$module->id)
             ->assertOk()
             ->assertJsonPath('module.name', 'Reportes')
             ->assertJsonPath('module.category_id', $category->id);
 
         $this->actingAs($admin)
-            ->getJson('/modulos/' . $module->id . '/ver')
+            ->getJson('/modulos/'.$module->id.'/ver')
             ->assertOk()
             ->assertJsonPath('module.slug', 'reportes')
             ->assertJsonPath('module.url', $module->url());
@@ -231,7 +233,7 @@ class ModulosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->putJson('/modulos/' . $module->id, [
+            ->putJson('/modulos/'.$module->id, [
                 'name' => 'Reportes avanzados',
                 'category_id' => $category->id,
                 'slug' => 'reportes-avanzados',
@@ -266,7 +268,7 @@ class ModulosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->deleteJson('/modulos/' . $module->id)
+            ->deleteJson('/modulos/'.$module->id)
             ->assertStatus(409)
             ->assertJson(['success' => false, 'blocked_by' => 'access']);
 
@@ -292,7 +294,7 @@ class ModulosTest extends TestCase
         $module->permissions()->attach($permission->id);
 
         $this->actingAs($admin)
-            ->deleteJson('/modulos/' . $module->id)
+            ->deleteJson('/modulos/'.$module->id)
             ->assertStatus(409)
             ->assertJson(['success' => false, 'blocked_by' => 'permissions']);
 
@@ -314,7 +316,7 @@ class ModulosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->deleteJson('/modulos/' . $module->id)
+            ->deleteJson('/modulos/'.$module->id)
             ->assertOk()
             ->assertJson(['success' => true]);
 

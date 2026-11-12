@@ -21,13 +21,14 @@
             @if ($shell['showNotifications'])
                 <button class="btn dashboard-notifications-btn"
                         type="button"
+                        id="notifications-open"
                         data-bs-toggle="offcanvas"
                         data-bs-target="#notifications-panel"
                         aria-controls="notifications-panel"
                         aria-label="Notificaciones: {{ $shell['notificationsCount'] }}">
                     <i class="fa-regular fa-bell" aria-hidden="true"></i>
                     <span class="dashboard-notifications-label">Notificaciones</span>
-                    <span class="dashboard-notifications-count">{{ $shell['notificationsCount'] }}</span>
+                    <span class="dashboard-notifications-count" id="notifications-count">{{ $shell['notificationsCount'] }}</span>
                 </button>
             @endif
         </div>
@@ -72,30 +73,85 @@
     @if ($shell['showNotifications'])
         <div class="offcanvas offcanvas-end" tabindex="-1" id="notifications-panel"
              data-bs-backdrop="true" data-bs-scroll="false"
-             aria-labelledby="notifications-title">
+             aria-labelledby="notifications-title"
+             data-url-contador="{{ route('notificaciones.contador') }}"
+             data-url-leer-todas="{{ route('notificaciones.leer-todas') }}"
+             data-url-leer="{{ route('notificaciones.leer', ['notification' => '__ID__']) }}"
+             data-url-preferencias="{{ route('notificaciones.preferencias') }}"
+             data-csrf="{{ csrf_token() }}"
+             data-sound="{{ $shell['notificationPreferences']['sound'] ? '1' : '0' }}">
             <div class="offcanvas-header">
                 <h2 class="offcanvas-title" id="notifications-title">Notificaciones</h2>
                 <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
             </div>
             <div class="offcanvas-body">
-                <table id="notifications-table" class="table table-sm align-middle w-100">
-                    <thead>
-                        <tr>
-                            <th scope="col">Fecha</th>
-                            <th scope="col">Título</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach ($shell['notifications'] as $notification)
-                            <tr>
-                                <td data-order="{{ $notification->created_at->toIso8601String() }}">
-                                    {{ format_date($notification->created_at) }}
-                                </td>
-                                <td>{{ $notification->data['title'] ?? 'Notificación' }}</td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
+                <section class="alert-prefs" aria-label="Preferencias de aviso">
+                    <p class="alert-prefs__title">Cómo quieres tus avisos</p>
+
+                    <div class="alert-prefs__row">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input alert-pref" type="checkbox" role="switch"
+                                   id="pref-push" data-field="push_enabled"
+                                   @checked($shell['notificationPreferences']['push'])>
+                            <label class="form-check-label" for="pref-push">Alertas push</label>
+                        </div>
+
+                        <div class="form-check form-switch">
+                            <input class="form-check-input alert-pref" type="checkbox" role="switch"
+                                   id="pref-sound" data-field="sound_enabled"
+                                   @checked($shell['notificationPreferences']['sound'])>
+                            <label class="form-check-label" for="pref-sound">Sonido</label>
+                        </div>
+
+                        <div class="form-check form-switch">
+                            <input class="form-check-input alert-pref" type="checkbox" role="switch"
+                                   id="pref-in-app" data-field="in_app_enabled"
+                                   @checked($shell['notificationPreferences']['in_app'])>
+                            <label class="form-check-label" for="pref-in-app">Avisos visuales</label>
+                        </div>
+                    </div>
+
+                    <p class="alert-prefs__hint">
+                        Si desactivas el sonido, los avisos quedan solo a la vista para evitar
+                        estímulos auditivos inesperados.
+                        @if ($shell['canManageNotifications'])
+                            <a href="{{ route('notificaciones.index') }}">Configuración global</a>
+                        @endif
+                    </p>
+
+                    <p class="alert-prefs__status" id="alert-prefs-status" role="status" aria-live="polite"></p>
+                </section>
+
+                <ul class="alert-list" id="alert-list">
+                    @forelse ($shell['notifications'] as $notification)
+                        <li class="alert-item {{ $notification->read_at ? '' : 'is-unread' }}"
+                            data-id="{{ $notification->id }}">
+                            <button type="button" class="alert-item__button"
+                                    data-id="{{ $notification->id }}"
+                                    data-url="{{ $notification->url }}"
+                                    data-read="{{ $notification->read_at ? '1' : '0' }}">
+                                <span class="alert-item__dot" aria-hidden="true"></span>
+                                <span class="alert-item__text">
+                                    <span class="alert-item__title">{{ $notification->title() }}</span>
+                                    @if ($notification->body() !== '')
+                                        <span class="alert-item__body">{{ $notification->body() }}</span>
+                                    @endif
+                                    <span class="alert-item__date">{{ format_date($notification->created_at) }}</span>
+                                </span>
+                            </button>
+                        </li>
+                    @empty
+                        <li class="alert-empty">No tienes notificaciones.</li>
+                    @endforelse
+                </ul>
+
+                <div class="alert-list__actions">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="alert-mark-all"
+                            @disabled($shell['notificationsCount'] === 0)>
+                        <i class="fa-solid fa-check-double" aria-hidden="true"></i>
+                        <span>Marcar todas como leídas</span>
+                    </button>
+                </div>
             </div>
         </div>
     @endif
@@ -103,57 +159,7 @@
 @endsection
 
 @if ($shell['showNotifications'])
-    @push('head')
-        <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
-    @endpush
-
-    @push('vendor')
-        <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
-        <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
-    @endpush
-
     @push('scripts')
-        <script>
-            (function ($) {
-                'use strict';
-
-                $(function () {
-                    var $table = $('#notifications-table');
-
-                    if (!$table.length || !$.fn.DataTable) {
-                        return;
-                    }
-
-                    var table = $table.DataTable({
-                        pageLength: 5,
-                        lengthMenu: [5, 10, 25],
-                        order: [[0, 'desc']],
-                        language: {
-                            emptyTable: 'No tienes notificaciones.',
-                            info: 'Mostrando _START_ a _END_ de _TOTAL_',
-                            infoEmpty: 'Sin notificaciones',
-                            infoFiltered: '(filtrado de _MAX_)',
-                            lengthMenu: 'Mostrar _MENU_',
-                            search: 'Buscar:',
-                            zeroRecords: 'No se encontraron notificaciones',
-                            paginate: {
-                                first: 'Primera',
-                                last: 'Última',
-                                next: 'Siguiente',
-                                previous: 'Anterior'
-                            }
-                        }
-                    });
-
-                    var panel = document.getElementById('notifications-panel');
-
-                    if (panel) {
-                        panel.addEventListener('shown.bs.offcanvas', function () {
-                            table.columns.adjust().draw();
-                        });
-                    }
-                });
-            })(window.jQuery);
-        </script>
+        <script src="{{ asset('js/alertas.js') }}?v={{ filemtime(public_path('js/alertas.js')) }}"></script>
     @endpush
 @endif

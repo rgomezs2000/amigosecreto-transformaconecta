@@ -32,6 +32,7 @@ class AccessSeeder extends Seeder
             'usuarios' => ['view', 'create', 'edit', 'delete', 'unlock', 'block'],
             'eventos' => ['view', 'edit', 'open', 'postpone', 'cancel', 'suspend', 'reset', 'reset_draw'],
             'control-notificaciones' => ['view', 'edit'],
+            'moderacion' => ['view'],
             'chat' => ['view'],
 
             'asignar-amigo' => ['assign'],
@@ -72,6 +73,8 @@ class AccessSeeder extends Seeder
             'usuarios',
             'eventos',
             'control-notificaciones',
+            'moderacion',
+            'notificaciones',
             'chat',
             'participantes',
             'usuarios-asociados',

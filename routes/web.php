@@ -1,15 +1,18 @@
 <?php
 
 use App\Http\Controllers\CategoriasController;
+use App\Http\Controllers\AmigoSecretoController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\EventoReinicioController;
 use App\Http\Controllers\EventosController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\LogoutController;
 use App\Http\Controllers\MatrizPerfilesController;
-use App\Http\Controllers\ModulosController;
+use App\Http\Controllers\ModeracionController;
 use App\Http\Controllers\ModuleController;
+use App\Http\Controllers\ModulosController;
 use App\Http\Controllers\NotificacionesController;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\PermisosController;
@@ -67,6 +70,36 @@ Route::post('/administracion/notificaciones', [NotificacionesController::class, 
     ->middleware('auth')
     ->name('notificaciones.guardar');
 
+Route::post('/administracion/notificaciones/usuarios/{user}', [NotificacionesController::class, 'preferenciasUsuario'])
+    ->middleware('auth')
+    ->name('notificaciones.usuarios.preferences');
+
+// Campana personal: contador, lectura y preferencias de cada usuario.
+Route::get('/notificaciones/contador', [NotificacionesController::class, 'contador'])
+    ->middleware('auth')
+    ->name('notificaciones.contador');
+
+Route::post('/notificaciones/leer-todas', [NotificacionesController::class, 'leerTodas'])
+    ->middleware('auth')
+    ->name('notificaciones.leer-todas');
+
+Route::post('/notificaciones/preferencias', [NotificacionesController::class, 'preferencias'])
+    ->middleware('auth')
+    ->name('notificaciones.preferencias');
+
+Route::post('/notificaciones/{notification}/leer', [NotificacionesController::class, 'leer'])
+    ->middleware('auth')
+    ->name('notificaciones.leer');
+
+// Moderación: reportes del chat, solo lectura, con acceso directo al chat.
+Route::get('/administracion/moderacion', [ModeracionController::class, 'index'])
+    ->middleware('auth')
+    ->name('moderacion.index');
+
+Route::get('/moderacion/datos', [ModeracionController::class, 'datos'])
+    ->middleware('auth')
+    ->name('moderacion.datos');
+
 // Chat (buzón universal, flotante).
 Route::get('/mensajes/chat', [ChatController::class, 'index'])
     ->middleware('auth')
@@ -96,6 +129,22 @@ Route::post('/chat/{conversation}/leer', [ChatController::class, 'leer'])
     ->middleware('auth')
     ->name('chat.leer');
 
+Route::post('/chat/{conversation}/silenciar', [ChatController::class, 'silenciar'])
+    ->middleware('auth')
+    ->name('chat.silenciar');
+
+Route::post('/chat/{conversation}/limpiar', [ChatController::class, 'limpiar'])
+    ->middleware('auth')
+    ->name('chat.limpiar');
+
+Route::post('/chat/usuarios/{user}/bloquear', [ChatController::class, 'bloquear'])
+    ->middleware('auth')
+    ->name('chat.bloquear');
+
+Route::delete('/chat/usuarios/{user}/bloquear', [ChatController::class, 'desbloquear'])
+    ->middleware('auth')
+    ->name('chat.desbloquear');
+
 Route::post('/chat/{conversation}/moderar', [ChatController::class, 'moderar'])
     ->middleware('auth')
     ->name('chat.moderar');
@@ -115,6 +164,22 @@ Route::post('/chat/mensajes/{message}/reaccionar', [ChatController::class, 'reac
 Route::post('/chat/mensajes/{message}/reportar', [ChatController::class, 'reportar'])
     ->middleware('auth')
     ->name('chat.reportar');
+
+Route::get('/chat/amigo-secreto', [AmigoSecretoController::class, 'index'])
+    ->middleware('auth')
+    ->name('chat.amigo-secreto');
+
+Route::post('/chat/amigo-secreto/{assignment}/abrir', [AmigoSecretoController::class, 'abrir'])
+    ->middleware('auth')
+    ->name('chat.amigo-secreto.abrir');
+
+Route::get('/chat/enlace', [ChatController::class, 'enlace'])
+    ->middleware('auth')
+    ->name('chat.enlace');
+
+Route::get('/chat/{conversation}/media', [ChatController::class, 'media'])
+    ->middleware('auth')
+    ->name('chat.media');
 
 // Eventos (tarjetas, planificación y ciclo de vida).
 Route::get('/eventos/eventos', [EventosController::class, 'index'])
@@ -140,6 +205,10 @@ Route::post('/eventos/{event}/suspender', [EventosController::class, 'suspender'
 Route::post('/eventos/{event}/posponer', [EventosController::class, 'posponer'])
     ->middleware('auth')
     ->name('eventos.posponer');
+
+Route::post('/eventos/reiniciar', [EventoReinicioController::class, 'reiniciar'])
+    ->middleware('auth')
+    ->name('eventos.reiniciar');
 
 Route::post('/eventos/{event}/cancelar', [EventosController::class, 'cancelar'])
     ->middleware('auth')

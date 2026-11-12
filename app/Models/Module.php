@@ -98,11 +98,21 @@ class Module extends Model
             return route('login');
         }
 
+        // Módulos con página propia fuera de /[categoria]/[modulo].
+        $explicitRoutes = [
+            'control-notificaciones' => 'notificaciones.index',
+            'moderacion' => 'moderacion.index',
+        ];
+
+        if (isset($explicitRoutes[$this->slug])) {
+            return route($explicitRoutes[$this->slug]);
+        }
+
         $categorySlug = $this->category?->slug;
 
         return $categorySlug
-            ? url('/' . $categorySlug . '/' . $this->slug)
-            : url('/' . $this->slug);
+            ? url('/'.$categorySlug.'/'.$this->slug)
+            : url('/'.$this->slug);
     }
 
     /**
@@ -144,7 +154,7 @@ class Module extends Model
             return $query;
         }
 
-        $like = '%' . $term . '%';
+        $like = '%'.$term.'%';
 
         return $query->where(function (Builder $query) use ($like) {
             $query->where('name', 'like', $like)

@@ -1,0 +1,52 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Notifications\DatabaseNotification;
+use Illuminate\Notifications\DatabaseNotificationCollection;
+
+/**
+ * Notificación push/visual de un usuario.
+ *
+ * Usa la tabla estándar `notifications`, ampliada con los campos de entrega
+ * (canal, sonido, aviso visual, enlace y origen) para que el panel de control
+ * pueda contar el tráfico y respetar las preferencias sensoriales.
+ *
+ * @property array<string, mixed> $data
+ */
+class Notification extends DatabaseNotification
+{
+    /**
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'data' => 'array',
+        'read_at' => 'datetime',
+        'sound' => 'boolean',
+        'visual' => 'boolean',
+    ];
+
+    protected static string $collectionClass = DatabaseNotificationCollection::class;
+
+    public function user(): ?User
+    {
+        return $this->notifiable instanceof User ? $this->notifiable : null;
+    }
+
+    /**
+     * Título corto para la campana de notificaciones.
+     */
+    public function title(): string
+    {
+        $data = is_array($this->data) ? $this->data : [];
+
+        return (string) ($data['title'] ?? 'Notificación');
+    }
+
+    public function body(): string
+    {
+        $data = is_array($this->data) ? $this->data : [];
+
+        return (string) ($data['body'] ?? '');
+    }
+}

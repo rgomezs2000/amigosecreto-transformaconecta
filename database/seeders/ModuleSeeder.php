@@ -23,6 +23,7 @@ class ModuleSeeder extends Seeder
             ['name' => 'Usuarios', 'slug' => 'usuarios', 'group' => 'Usuarios', 'icon' => 'fa-users', 'order' => 40],
             ['name' => 'Eventos', 'slug' => 'eventos', 'group' => 'Eventos', 'icon' => 'fa-calendar-days', 'order' => 50],
             ['name' => 'Control de Notificaciones', 'slug' => 'control-notificaciones', 'group' => 'Administración', 'icon' => 'fa-bell-slash', 'order' => 55],
+            ['name' => 'Moderación', 'slug' => 'moderacion', 'group' => 'Administración', 'icon' => 'fa-shield-halved', 'order' => 57],
             ['name' => 'Chat', 'slug' => 'chat', 'group' => 'Mensajes', 'icon' => 'fa-comments', 'order' => 56],
 
             // Participantes: todos cuelgan del grupo Amigo secreto.

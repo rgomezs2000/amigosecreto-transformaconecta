@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -220,11 +222,11 @@ class User extends Authenticatable
 
         return send_mail(
             $this->email,
-            'Tu cuenta está lista · ' . $appName,
+            'Tu cuenta está lista · '.$appName,
             'Tu cuenta está lista',
             [
-                'Hola, ' . $this->name . '.',
-                'Tu cuenta en ' . $appName . ' fue creada correctamente.',
+                'Hola, '.$this->name.'.',
+                'Tu cuenta en '.$appName.' fue creada correctamente.',
                 'Ya puedes entrar con tu usuario o correo electrónico.',
             ],
             [
@@ -250,16 +252,16 @@ class User extends Authenticatable
 
         return send_mail(
             $this->email,
-            'Tus datos de acceso · ' . $appName,
+            'Tus datos de acceso · '.$appName,
             'Tu cuenta está lista',
             [
-                'Hola, ' . $this->name . '.',
-                'Tu cuenta en ' . $appName . ' fue creada correctamente.',
-                'Nombre: ' . $this->name,
-                'Usuario: ' . $this->username,
-                'Correo: ' . $this->email,
-                'Rol: ' . $roleName,
-                'Clave: ' . $plainPassword,
+                'Hola, '.$this->name.'.',
+                'Tu cuenta en '.$appName.' fue creada correctamente.',
+                'Nombre: '.$this->name,
+                'Usuario: '.$this->username,
+                'Correo: '.$this->email,
+                'Rol: '.$roleName,
+                'Clave: '.$plainPassword,
                 'Puedes cambiar la clave cuando quieras desde tu perfil.',
             ],
             [
@@ -269,7 +271,7 @@ class User extends Authenticatable
             [
                 'recipient_name' => $this->name,
                 'eyebrow' => 'Cuenta creada',
-                'preheader' => 'Tus datos de acceso a ' . $appName . '.',
+                'preheader' => 'Tus datos de acceso a '.$appName.'.',
             ]
         );
     }
@@ -283,13 +285,13 @@ class User extends Authenticatable
 
         return send_mail(
             $this->email,
-            'Tu contraseña fue restablecida · ' . $appName,
+            'Tu contraseña fue restablecida · '.$appName,
             'Tu contraseña fue restablecida',
             [
-                'Hola, ' . $this->name . '.',
+                'Hola, '.$this->name.'.',
                 'El administrador restableció tu contraseña.',
-                'Usuario: ' . $this->username,
-                'Nueva clave: ' . $plainPassword,
+                'Usuario: '.$this->username,
+                'Nueva clave: '.$plainPassword,
                 'Al entrar, puedes cambiarla desde tu perfil.',
             ],
             [
@@ -315,7 +317,7 @@ class User extends Authenticatable
             return $query;
         }
 
-        $like = '%' . $term . '%';
+        $like = '%'.$term.'%';
 
         return $query->where(function (Builder $query) use ($like) {
             $query->where('name', 'like', $like)
@@ -327,6 +329,28 @@ class User extends Authenticatable
     public function profile(): BelongsTo
     {
         return $this->belongsTo(Profile::class);
+    }
+
+    /**
+     * Notificaciones del usuario con los campos de entrega del sistema
+     * (canal, sonido, aviso visual, enlace y origen).
+     */
+    public function notifications(): MorphMany
+    {
+        return $this->morphMany(Notification::class, 'notifiable')->latest();
+    }
+
+    /**
+     * Preferencias individuales de notificación (sonido, push, avisos).
+     */
+    public function notificationPreference(): HasOne
+    {
+        return $this->hasOne(NotificationPreference::class);
+    }
+
+    public function emailLogs(): HasMany
+    {
+        return $this->hasMany(EmailLog::class);
     }
 
     /**

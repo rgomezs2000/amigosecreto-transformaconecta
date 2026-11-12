@@ -15,6 +15,13 @@ class ChatMessage extends Model
         'user_id',
         'body',
         'is_moderation',
+        'link_url',
+        'link_title',
+        'link_description',
+        'link_image',
+        'latitude',
+        'longitude',
+        'delivered_at',
         'type',
         'attachment_path',
         'attachment_name',
@@ -32,6 +39,7 @@ class ChatMessage extends Model
             'is_moderation' => 'boolean',
             'edited_at' => 'datetime',
             'deleted_at' => 'datetime',
+            'delivered_at' => 'datetime',
             'deleted_by_admin' => 'boolean',
             'attachment_size' => 'integer',
         ];
@@ -50,6 +58,11 @@ class ChatMessage extends Model
     public function reactions(): HasMany
     {
         return $this->hasMany(ChatReaction::class, 'message_id');
+    }
+
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(ChatMessageAttachment::class, 'message_id');
     }
 
     public function reports(): HasMany

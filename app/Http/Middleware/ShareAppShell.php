@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Enums\EventStatus;
 use App\Models\Event;
 use App\Models\Module;
+use App\Models\NotificationPreference;
 use App\Models\NotificationSetting;
 use App\Services\ExchangeRateService;
 use Closure;
@@ -58,12 +59,15 @@ class ShareAppShell
                 && $user->hasModuleAccess($notificationsModule);
 
             $notifications = $showNotifications
-                ? $user->notifications()->latest()->get()
+                ? $user->notifications()->limit(20)->get()
                 : collect();
 
             $notificationsCount = $showNotifications
                 ? $user->unreadNotifications()->count()
                 : 0;
+
+            $notificationSettings = NotificationSetting::current();
+            $notificationPreferences = NotificationPreference::forUser($user)->resolved($notificationSettings);
 
             $dollar = bcv_dollar();
             $dollarRate = $dollar['promedio']
@@ -79,7 +83,9 @@ class ShareAppShell
                 'showNotifications' => $showNotifications,
                 'notifications' => $notifications,
                 'notificationsCount' => $notificationsCount,
-                'notificationSettings' => NotificationSetting::current(),
+                'notificationSettings' => $notificationSettings,
+                'notificationPreferences' => $notificationPreferences,
+                'canManageNotifications' => $menuModules->contains('slug', 'control-notificaciones'),
                 'dollarRate' => $dollarRate,
             ]);
         }
