@@ -66,6 +66,7 @@ pruebas en Ubuntu y, si pasan, el despliegue por SSH al servidor Windows
 | [Invoke-RemoteDeploy.ps1](.github/scripts/Invoke-RemoteDeploy.ps1) | runner | Carga, valida, comprime y envía el script; revisa el código de salida |
 | [deploy-remote.ps1](.github/scripts/deploy-remote.ps1) | servidor | Pull, Composer, cachés, `storage:link` y reinicio de Apache |
 | [migrate-remote.ps1](.github/scripts/migrate-remote.ps1) | servidor | `migrate --force` y `db:seed --force` |
+| [enable-php-extension.ps1](.github/scripts/enable-php-extension.ps1) | servidor | Activa una extensión en el `php.ini` del servidor (manual) |
 
 ### Variables del repositorio
 
@@ -103,6 +104,28 @@ y `php artisan`; el workflow avisa cuando la versión detectada no cumple el
   ejecutable nativo. En `deploy-remote.ps1` no uses `php -r "echo ..."` con
   comillas dobles dentro: usa `php -v` / `php -m` o construye el código PHP sin
   comillas, o PHP recibirá código roto.
+
+### Extensiones de PHP que faltan
+
+`composer install` se detiene si el servidor no tiene cargada alguna extensión
+que exija `composer.lock`. El caso típico en este proyecto:
+
+```
+lcobucci/jwt requires ext-sodium * -> it is missing from your system
+```
+
+El despliegue lo comprueba *antes* de llamar a Composer y nombra las que faltan.
+Para resolverlo hay dos caminos.
+
+**A mano (1 minuto, en el servidor por RDP):** abrir `C:\xampp\php\php.ini`,
+buscar `;extension=sodium`, quitarle el `;` (o añadir `extension=sodium` al
+final), guardar y reiniciar Apache. Comprobar con `php -m | findstr sodium`.
+
+**Desde Actions:** *Actions → Extensiones PHP → Run workflow*, con `sodium` como
+entrada. El workflow busca el `php.ini` que PHP carga de verdad, guarda una copia
+(`php.ini.bak-<fecha>`), añade la línea, comprueba con `php -m` que la extensión
+carga y reinicia Apache. Si la comprobación falla, restaura el original y explica
+el motivo. Es idempotente: si ya está activa, no toca nada.
 
 ## License
 
