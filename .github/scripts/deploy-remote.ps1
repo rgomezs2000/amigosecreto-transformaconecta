@@ -74,21 +74,26 @@ try {
   Write-Host "php: $php"
   Write-Host "git: $git"
 
-  Invoke-Native $php @('-v') 'php -v'
+  # Ojo: nada de 'php -r "...comillas dobles..."'. Windows PowerShell 5.1
+  # elimina las comillas dobles al pasarlas a un ejecutable nativo y PHP recibe
+  # código roto ("PHP Parse error: syntax error, unexpected token"). 'php -v' y
+  # 'php -m' dan la misma información sin comillas.
+  $phpInfo = ((& $php -v) -join "`n").Trim()
+  Write-Host $phpInfo
 
-  $phpVersion = ((& $php -r 'echo PHP_VERSION;') -join '').Trim()
-  if ([string]::IsNullOrWhiteSpace($phpVersion)) { $phpVersion = 'desconocida' }
-  $phpExtensions = ((& $php -r 'echo implode(", ", get_loaded_extensions());') -join '').Trim()
+  $phpVersion = 'desconocida'
+  if ($phpInfo -match 'PHP (\d+)\.(\d+)\.(\d+)') {
+    $phpMajor = [int]$Matches[1]
+    $phpMinor = [int]$Matches[2]
+    $phpVersion = '{0}.{1}.{2}' -f $Matches[1], $Matches[2], $Matches[3]
+  }
 
+  $phpExtensions = (((& $php -m) | Where-Object { $_ -and $_ -notmatch '^\[' }) -join ', ').Trim()
   Write-Host "Versión de PHP: $phpVersion"
   Write-Host "Extensiones PHP: $phpExtensions"
 
-  if ($phpVersion -match '^(\d+)\.(\d+)') {
-    $phpMajor = [int]$Matches[1]
-    $phpMinor = [int]$Matches[2]
-    if ($phpMajor -lt 8 -or ($phpMajor -eq 8 -and $phpMinor -lt 2)) {
-      Write-Host "ADVERTENCIA: composer.json exige PHP ^8.2 y el servidor reporta $phpVersion. Composer fallará hasta que se actualice PHP."
-    }
+  if ($phpVersion -ne 'desconocida' -and ($phpMajor -lt 8 -or ($phpMajor -eq 8 -and $phpMinor -lt 2))) {
+    Write-Host "ADVERTENCIA: composer.json exige PHP ^8.2 y el servidor reporta $phpVersion. Composer fallará hasta que se actualice PHP."
   }
 
   Invoke-Native $composerExe ($composerArgs + @('--version', '--no-ansi')) 'composer --version'

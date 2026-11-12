@@ -61,13 +61,11 @@ pruebas en Ubuntu y, si pasan, el despliegue por SSH al servidor Windows
 (XAMPP + Apache). Las migraciones son manuales
 ([migrate.yml](.github/workflows/migrate.yml)).
 
-El script que se ejecuta en el servidor está versionado en
-[deploy-remote.ps1](.github/scripts/deploy-remote.ps1), así que se puede revisar y
-probar en local sin pasar por Actions:
-
-```powershell
-pwsh -NoProfile -File .github/scripts/deploy-remote.ps1
-```
+| Archivo | Dónde corre | Qué hace |
+| --- | --- | --- |
+| [Invoke-RemoteDeploy.ps1](.github/scripts/Invoke-RemoteDeploy.ps1) | runner | Carga, valida, comprime y envía el script; revisa el código de salida |
+| [deploy-remote.ps1](.github/scripts/deploy-remote.ps1) | servidor | Pull, Composer, cachés, `storage:link` y reinicio de Apache |
+| [migrate-remote.ps1](.github/scripts/migrate-remote.ps1) | servidor | `migrate --force` y `db:seed --force` |
 
 ### Variables del repositorio
 
@@ -84,15 +82,27 @@ pwsh -NoProfile -File .github/scripts/deploy-remote.ps1
 
 ### Diagnóstico
 
-El log del despliegue muestra la versión de PHP, las extensiones cargadas y la
-versión de Composer antes de tocar nada. Cualquier comando que falle se registra
-con su ruta, sus argumentos, su salida y su código de salida, seguido de una
-línea `ERROR: ...` con la causa. El `stderr` del servidor se fusiona en el log,
-así que un fallo de PHP o de Composer ya no aparece como un `ExitStatus 1` mudo.
+El log muestra la versión de PHP, las extensiones cargadas y la versión de
+Composer antes de tocar nada. Cada comando que falla se registra con su ruta, sus
+argumentos, su salida y su código de salida, seguido de una línea `ERROR: ...` con
+la causa. El `stderr` del servidor se fusiona en el log, así que un fallo de PHP o
+de Composer ya no aparece como un `ExitStatus 1` mudo.
 
-Si el servidor tiene varios PHP, define `PHP_BIN` para fijar el que usa Composer
+Si el servidor tiene varios PHP, define `PHP_BIN` para fijar el que usan Composer
 y `php artisan`; el workflow avisa cuando la versión detectada no cumple el
 `^8.2` que exige [composer.json](composer.json).
+
+### Dos límites del servidor que condicionan estos scripts
+
+- **Línea de comandos de `cmd.exe`: 8191 caracteres.** El shell por defecto de
+  OpenSSH en Windows es `cmd.exe`, así que el script remoto no puede viajar en
+  crudo (`-EncodedCommand` de un script de 10 KB ocupa ~25 000 caracteres y falla
+  con `The command line is too long.`). Por eso se envía comprimido con GZip y se
+  descomprime en memoria en el servidor.
+- **Windows PowerShell 5.1 destroza las comillas dobles** al pasarlas a un
+  ejecutable nativo. En `deploy-remote.ps1` no uses `php -r "echo ..."` con
+  comillas dobles dentro: usa `php -v` / `php -m` o construye el código PHP sin
+  comillas, o PHP recibirá código roto.
 
 ## License
 

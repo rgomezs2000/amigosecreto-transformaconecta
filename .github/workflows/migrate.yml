@@ -33,6 +33,7 @@ jobs:
             Install-Module Posh-SSH -Scope CurrentUser -Force
           }
 
+      # Mismo transporte que el despliegue: ver .github/scripts/Invoke-RemoteDeploy.ps1
       - name: Aplicar migraciones y seeders
         shell: pwsh
         env:
@@ -42,73 +43,4 @@ jobs:
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           PHP_BIN: ${{ vars.PHP_BIN }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Import-Module Posh-SSH
-
-          if ([string]::IsNullOrWhiteSpace($env:SSH_HOST) -or
-              [string]::IsNullOrWhiteSpace($env:SSH_USER) -or
-              [string]::IsNullOrWhiteSpace($env:SSH_PASSWORD) -or
-              [string]::IsNullOrWhiteSpace($env:DEPLOY_PATH)) {
-            throw 'Faltan datos: SSH_HOST, SSH_USER, SSH_PASSWORD o DEPLOY_PATH.'
-          }
-
-          # ---- Script que se ejecutará en el servidor -------------------------
-          $scriptPath = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/migrate-remote.ps1'
-          if (-not (Test-Path -LiteralPath $scriptPath)) {
-            throw "No se encontró el script remoto: $scriptPath"
-          }
-
-          $remoteScript = (Get-Content -LiteralPath $scriptPath -Raw).
-            Replace('__DEPLOY_PATH__', ($env:DEPLOY_PATH -replace "'", "''")).
-            Replace('__PHP_BIN__', ("$env:PHP_BIN" -replace "'", "''"))
-
-          # Valida la sintaxis ANTES de conectar: un error de PowerShell en el
-          # servidor se vería como un simple "ExitStatus 1" sin explicación.
-          $tokens = $null
-          $parseErrors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseInput($remoteScript, [ref]$tokens, [ref]$parseErrors)
-          if ($parseErrors -and $parseErrors.Count -gt 0) {
-            throw "El script remoto tiene errores de sintaxis: $($parseErrors[0].Message)"
-          }
-
-          $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
-          # 2>&1 fusiona stderr con stdout para que los errores de PHP se vean en el log.
-          $command = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1"
-
-          $securePassword = ConvertTo-SecureString $env:SSH_PASSWORD -AsPlainText -Force
-          $credential = [pscredential]::new($env:SSH_USER, $securePassword)
-
-          Write-Host "Conectando a $($env:SSH_HOST):$($env:SSH_PORT) como $($env:SSH_USER)..."
-
-          $session = New-SSHSession `
-            -ComputerName $env:SSH_HOST `
-            -Port ([int]$env:SSH_PORT) `
-            -Credential $credential `
-            -AcceptKey
-
-          try {
-            Write-Host 'Ejecutando migraciones...'
-            $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $command -TimeOut 900
-
-            if ($result.Output) {
-              $result.Output | ForEach-Object { Write-Host $_ }
-            }
-
-            if ($result.Error) {
-              Write-Host '--- stderr del servidor ---'
-              $result.Error | ForEach-Object { Write-Host $_ }
-            }
-
-            if ($result.ExitStatus -ne 0) {
-              throw "Las migraciones fallaron con ExitStatus $($result.ExitStatus). Revisa las líneas 'ERROR:' del log anterior."
-            }
-
-            Write-Host 'Migraciones y seeders aplicados correctamente.'
-          }
-          finally {
-            if ($session) {
-              Remove-SSHSession -SessionId $session.SessionId | Out-Null
-              Write-Host 'Sesión SSH cerrada.'
-            }
-          }
+        run: ./.github/scripts/Invoke-RemoteDeploy.ps1 -RemoteScriptPath '.github/scripts/migrate-remote.ps1' -TimeoutSeconds 900
