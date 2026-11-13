@@ -13,6 +13,8 @@ class ChatMessage extends Model
     protected $fillable = [
         'conversation_id',
         'user_id',
+        'reply_to_id',
+        'forwarded_from_id',
         'body',
         'is_moderation',
         'link_url',
@@ -53,6 +55,32 @@ class ChatMessage extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Mensaje al que responde esta burbuja (se pinta citado dentro de ella).
+     */
+    public function replyTo(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reply_to_id');
+    }
+
+    /**
+     * Mensaje original que se reenvió a esta conversación.
+     */
+    public function forwardedFrom(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'forwarded_from_id');
+    }
+
+    public function isReply(): bool
+    {
+        return $this->reply_to_id !== null;
+    }
+
+    public function isForwarded(): bool
+    {
+        return $this->forwarded_from_id !== null;
     }
 
     public function reactions(): HasMany

@@ -187,6 +187,16 @@ Route::post('/chat/grupo', [ChatController::class, 'grupo'])
     ->middleware('auth')
     ->name('chat.grupo');
 
+// Reenvío de mensajes: destinos posibles (grupos, administradores, amigos
+// secretos y personas) y envío del mensaje a los elegidos.
+Route::get('/chat/destinatarios', [ChatController::class, 'destinatarios'])
+    ->middleware('auth')
+    ->name('chat.destinatarios');
+
+Route::post('/chat/mensajes/{message}/reenviar', [ChatController::class, 'reenviar'])
+    ->middleware('auth')
+    ->name('chat.reenviar');
+
 Route::get('/chat/{conversation}/mensajes', [ChatController::class, 'mensajes'])
     ->middleware('auth')
     ->name('chat.mensajes');

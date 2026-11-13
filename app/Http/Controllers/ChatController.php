@@ -392,7 +392,7 @@ class ChatController extends Controller
         $clearedAt = $conversation->users->firstWhere('id', $user->id)?->pivot->cleared_at;
 
         $base = function () use ($conversation, $clearedAt) {
-            $query = $conversation->messages()->with(['user', 'attachments']);
+            $query = $conversation->messages()->with(['user', 'attachments', 'replyTo.user']);
 
             if ($clearedAt !== null) {
                 // Se incluye el mismo segundo del borrado para no ocultar mensajes nuevos.
@@ -468,7 +468,8 @@ class ChatController extends Controller
             $others,
             $reactions,
             $reported,
-            $this->canDeleteContent($message, $user, $conversation)
+            $this->canDeleteContent($message, $user, $conversation),
+            $clearedAt
         );
 
         $recentPayload = $recent->map($map)->values();
@@ -493,7 +494,7 @@ class ChatController extends Controller
      * @param  array<int, int>  $reported
      * @return array<string, mixed>
      */
-    private function messageData(ChatMessage $message, User $user, $others, array $reactions, array $reported, bool $canDelete = false): array
+    private function messageData(ChatMessage $message, User $user, $others, array $reactions, array $reported, bool $canDelete = false, $clearedAt = null): array
     {
         $deleted = $message->isDeleted();
         $read = $others->isNotEmpty() && $others->every(function ($other) use ($message) {
@@ -542,7 +543,77 @@ class ChatController extends Controller
             'can_edit' => $message->user_id === $user->id && ! $deleted,
             'can_delete' => ! $deleted && $canDelete,
             'reported' => in_array((int) $message->id, $reported, true),
+            // Cita del mensaje respondido: se pinta dentro de la burbuja para
+            // que la respuesta se entienda sin salir de ella.
+            'reply' => $this->replyQuote($message, $clearedAt),
+            'forwarded' => $message->isForwarded(),
         ];
+    }
+
+    /**
+     * Datos del mensaje citado por una respuesta, ya recortados para la
+     * burbuja. No expone nada que el usuario no esté viendo ya: la respuesta
+     * solo puede apuntar a un mensaje de la misma conversación.
+     *
+     * @return array{id:int|null,sender:string,body:string,deleted:bool}|null
+     */
+    private function replyQuote(ChatMessage $message, $clearedAt = null): ?array
+    {
+        if (! $message->isReply()) {
+            return null;
+        }
+
+        $original = $message->replyTo;
+        $cleared = $clearedAt !== null ? Carbon::parse($clearedAt) : null;
+
+        // Sin original, o con un original que el usuario ya había vaciado de
+        // su lado: la cita no puede resucitar el texto.
+        if ($original === null
+            || ($cleared !== null && $original->created_at !== null && $original->created_at->lt($cleared))) {
+            return [
+                'id' => null,
+                'sender' => 'Mensaje',
+                'body' => 'El mensaje original ya no está disponible.',
+                'deleted' => true,
+            ];
+        }
+
+        return [
+            'id' => (int) $original->id,
+            'sender' => $original->is_moderation ? 'Moderación' : ($original->user?->name ?? 'Sistema'),
+            'body' => $this->messageQuote($original),
+            'deleted' => $original->isDeleted(),
+        ];
+    }
+
+    /**
+     * Texto corto de un mensaje para citarlo dentro de otra burbuja.
+     */
+    private function messageQuote(ChatMessage $message): string
+    {
+        if ($message->isDeleted()) {
+            return 'Mensaje eliminado';
+        }
+
+        $body = trim((string) preg_replace('/\s+/', ' ', strip_tags((string) $message->body)));
+
+        if ($body !== '') {
+            return Str::limit($body, 180);
+        }
+
+        if ($message->link_title) {
+            return Str::limit($message->link_title, 180);
+        }
+
+        return match ($message->type) {
+            'image' => 'Foto',
+            'video' => 'Video',
+            'audio' => 'Audio',
+            'pdf' => 'PDF',
+            'contact' => 'Contacto',
+            'location' => 'Ubicación',
+            default => $message->attachment_name ?: 'Mensaje adjunto',
+        };
     }
 
     /**
@@ -647,6 +718,7 @@ class ChatController extends Controller
 
         $validator = Validator::make($request->all(), [
             'body' => ['nullable', 'string', 'max:2000'],
+            'reply_to_id' => ['nullable', 'integer'],
             'file' => ['nullable', 'file', 'max:20480'],
             'files' => ['nullable', 'array', 'max:6'],
             'files.*' => ['file', 'max:20480'],
@@ -672,6 +744,22 @@ class ChatController extends Controller
 
         if ($files === [] && ($data['body'] ?? '') === '' && ! isset($data['latitude'], $data['longitude'])) {
             return api_error('Escribe un mensaje o adjunta un archivo.', 422);
+        }
+
+        // La respuesta solo puede citar un mensaje de esta misma conversación
+        // y que siga visible: una cita a algo borrado no aporta nada.
+        $replyTo = null;
+
+        if (! empty($data['reply_to_id'])) {
+            $replyTo = $conversation->messages()->whereKey((int) $data['reply_to_id'])->first();
+
+            if ($replyTo === null) {
+                return api_error('El mensaje que quieres responder no está en esta conversación.', 422);
+            }
+
+            if ($replyTo->isDeleted()) {
+                return api_error('No puedes responder a un mensaje eliminado.', 422);
+            }
         }
 
         $types = array_map(fn ($item) => $this->attachmentType($item), $files);
@@ -726,6 +814,7 @@ class ChatController extends Controller
             $message = ChatMessage::create([
                 'conversation_id' => $conversation->id,
                 'user_id' => $user->id,
+                'reply_to_id' => $replyTo?->id,
                 'body' => $this->sanitizeBody($data['body'] ?? ''),
                 'is_moderation' => ! $isMember && $user->role === UserRole::Admin,
                 'link_url' => $linkUrl,
@@ -779,6 +868,296 @@ class ChatController extends Controller
 
             return api_error('No se pudo enviar el mensaje. Intenta de nuevo.', 500);
         }
+    }
+
+    /**
+     * Destinos posibles para reenviar un mensaje.
+     *
+     * Se agrupan como en el buzón: grupos, administradores, amigos secretos y
+     * personas. Los chats de solo lectura no aparecen porque no reciben
+     * mensajes reenviados.
+     */
+    public function destinatarios(Request $request): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $user = $request->user();
+        $excluded = array_unique(array_merge($this->blockedIds($user), $this->blockedByIds($user)));
+
+        $conversations = Conversation::query()
+            ->whereHas('users', fn ($query) => $query->whereKey($user->id))
+            ->where('is_read_only', false)
+            ->whereIn('type', ['group', 'secret'])
+            ->with(['users', 'assignment.receiver'])
+            ->get();
+
+        $groups = $conversations
+            ->where('type', 'group')
+            ->sortBy(fn (Conversation $item) => mb_strtolower((string) $item->name))
+            ->map(fn (Conversation $item) => [
+                'kind' => 'group',
+                'target' => 'conversation',
+                'id' => (int) $item->id,
+                'label' => $item->name ?: 'Grupo',
+                'meta' => $item->users->count() === 1
+                    ? '1 integrante'
+                    : $item->users->count().' integrantes',
+            ])
+            ->values();
+
+        $secrets = $conversations
+            ->where('type', 'secret')
+            ->map(fn (Conversation $item) => [
+                'kind' => 'secret',
+                'target' => 'conversation',
+                'id' => (int) $item->id,
+                'label' => $item->titleFor($user),
+                'meta' => 'Chat de amigo secreto',
+            ])
+            ->values();
+
+        $people = User::query()
+            ->whereKeyNot($user->id)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get()
+            ->reject(fn (User $item) => in_array((int) $item->id, $excluded, true));
+
+        $personData = fn (User $item, string $kind, string $meta) => [
+            'kind' => $kind,
+            'target' => 'user',
+            'id' => (int) $item->id,
+            'label' => $item->name,
+            'meta' => $meta,
+        ];
+
+        $admins = $people
+            ->filter(fn (User $item) => $item->role === UserRole::Admin)
+            ->map(fn (User $item) => $personData($item, 'admin', 'Administrador'))
+            ->values();
+
+        $users = $people
+            ->reject(fn (User $item) => $item->role === UserRole::Admin)
+            ->map(fn (User $item) => $personData($item, 'user', $item->role?->label() ?? 'Participante'))
+            ->values();
+
+        return api_success('Destinatarios para reenviar.', [
+            'groups' => $groups,
+            'admins' => $admins,
+            'secrets' => $secrets,
+            'users' => $users,
+        ]);
+    }
+
+    /**
+     * Reenvía un mensaje a una o varias conversaciones.
+     *
+     * Se puede reenviar desde cualquier chat al que se tenga acceso, incluidos
+     * los de solo lectura: ahí no se responde ni se recibe nada, pero el
+     * mensaje que se lee sí se puede reenviar. El destino, en cambio, nunca
+     * puede ser de solo lectura.
+     */
+    public function reenviar(Request $request, ChatMessage $message): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $user = $request->user();
+        $source = $message->conversation;
+
+        if ($source === null || ! $this->canAccess($source, $user)) {
+            return api_error('No tienes acceso a este mensaje.', 403);
+        }
+
+        if ($message->isDeleted()) {
+            return api_error('No puedes reenviar un mensaje eliminado.', 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'conversation_ids' => ['nullable', 'array', 'max:25'],
+            'conversation_ids.*' => ['integer'],
+            'user_ids' => ['nullable', 'array', 'max:25'],
+            'user_ids.*' => ['integer'],
+        ], [
+            'conversation_ids.max' => 'Puedes reenviar a un máximo de 25 conversaciones a la vez.',
+            'user_ids.max' => 'Puedes reenviar a un máximo de 25 personas a la vez.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $validated = $validator->validated();
+
+        $conversationIds = collect($validated['conversation_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        $userIds = collect($validated['user_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->reject(fn ($id) => $id === (int) $user->id)
+            ->values();
+
+        if ($conversationIds->isEmpty() && $userIds->isEmpty()) {
+            return api_error('Elige al menos un destinatario.', 422);
+        }
+
+        $targets = collect();
+
+        foreach ($conversationIds as $conversationId) {
+            $conversation = Conversation::query()->with('users')->find($conversationId);
+
+            if ($conversation === null) {
+                return api_error('Una de las conversaciones ya no existe.', 422);
+            }
+
+            if ($conversation->is_read_only) {
+                return api_error(
+                    '«'.$conversation->titleFor($user).'» es de solo lectura: no recibe mensajes reenviados.',
+                    422
+                );
+            }
+
+            if (! $conversation->users->contains('id', $user->id)) {
+                return api_error('Solo puedes reenviar a grupos y conversaciones a los que perteneces.', 403);
+            }
+
+            $suspended = $this->ensureNotSuspended($conversation, $user);
+
+            if ($suspended !== null) {
+                return $suspended;
+            }
+
+            $targets->push($conversation);
+        }
+
+        foreach ($userIds as $userId) {
+            $person = User::query()->whereKey($userId)->where('is_active', true)->first();
+
+            if ($person === null) {
+                return api_error('Una de las personas ya no está disponible.', 422);
+            }
+
+            if (ChatBlock::existsBetween($user->id, $person->id)) {
+                return api_error('No puedes reenviar a '.$person->name.': hay un bloqueo entre ustedes.', 422);
+            }
+
+            $targets->push($this->directConversationWith($user, $person));
+        }
+
+        $targets = $targets->unique(fn (Conversation $item) => (int) $item->id)->values();
+
+        try {
+            foreach ($targets as $target) {
+                $copy = $this->forwardMessage($target, $message, $user);
+
+                ChatMentions::handle($copy, $target, $user);
+
+                $target->touch();
+                $target->users()->updateExistingPivot($user->id, ['last_read_at' => now()]);
+
+                $copy->load(['user', 'attachments', 'conversation']);
+
+                $this->firestore->recordMessage($copy);
+                $this->firestore->recordConversationActivity($target, $copy, $user->name);
+                $this->notifyConversation($target, $copy, $user);
+            }
+        } catch (Throwable $exception) {
+            Log::error('Error al reenviar el mensaje', ['error' => $exception->getMessage()]);
+
+            return api_error('No se pudo reenviar el mensaje. Intenta de nuevo.', 500);
+        }
+
+        return api_success('Mensaje reenviado.', [
+            'count' => $targets->count(),
+            'conversation_ids' => $targets->pluck('id')->map(fn ($id) => (int) $id)->all(),
+        ]);
+    }
+
+    /**
+     * Copia un mensaje a otra conversación.
+     *
+     * Los archivos se duplican en la carpeta del destino: borrar el reenvío no
+     * puede dejar sin adjunto al mensaje original (ni al revés).
+     */
+    private function forwardMessage(Conversation $target, ChatMessage $source, User $sender): ChatMessage
+    {
+        $type = (string) $source->type;
+        $bucket = match ($target->type) {
+            'group' => 'groups',
+            'reports' => 'moderations',
+            default => 'conversations',
+        };
+
+        $source->loadMissing('attachments');
+
+        $copied = [];
+
+        $copy = function (string $path) use (&$copied, $bucket, $target, $type): ?string {
+            if (array_key_exists($path, $copied)) {
+                return $copied[$path];
+            }
+
+            $extension = pathinfo($path, PATHINFO_EXTENSION);
+            $newPath = 'chat/'.$bucket.'/'.$target->id.'/'.$type.'/'
+                .Str::random(40).($extension !== '' ? '.'.$extension : '');
+
+            try {
+                $disk = Storage::disk('public');
+                $done = $disk->exists($path) && $disk->copy($path, $newPath);
+            } catch (Throwable) {
+                $done = false;
+            }
+
+            return $copied[$path] = $done ? $newPath : null;
+        };
+
+        $legacyPath = $source->attachment_path ? $copy($source->attachment_path) : null;
+
+        $attachments = $source->attachments
+            ->map(function (ChatMessageAttachment $attachment) use ($copy) {
+                $path = $copy($attachment->path);
+
+                if ($path === null) {
+                    return null;
+                }
+
+                return [
+                    'type' => $attachment->type,
+                    'path' => $path,
+                    'name' => $attachment->name,
+                    'mime' => $attachment->mime,
+                    'size' => $attachment->size,
+                ];
+            })
+            ->filter()
+            ->values();
+
+        $message = ChatMessage::create([
+            'conversation_id' => $target->id,
+            'user_id' => $sender->id,
+            'forwarded_from_id' => $source->id,
+            'body' => $source->body,
+            'is_moderation' => false,
+            'link_url' => $source->link_url,
+            'link_title' => $source->link_title,
+            'link_description' => $source->link_description,
+            'link_image' => $source->link_image,
+            'latitude' => $source->latitude,
+            'longitude' => $source->longitude,
+            'type' => $type,
+            'attachment_path' => $legacyPath,
+            'attachment_name' => $legacyPath !== null ? $source->attachment_name : null,
+            'attachment_mime' => $legacyPath !== null ? $source->attachment_mime : null,
+            'attachment_size' => $legacyPath !== null ? $source->attachment_size : null,
+        ]);
+
+        if ($attachments->isNotEmpty()) {
+            $message->attachments()->createMany($attachments->all());
+        }
+
+        return $message;
     }
 
     public function editar(Request $request, ChatMessage $message): JsonResponse
@@ -1139,6 +1518,10 @@ class ChatController extends Controller
 
     /**
      * Avisa a los demás participantes del mensaje nuevo (push + Firestore).
+     *
+     * El silencio de una conversación frena los avisos normales, pero no una
+     * respuesta: quien recibe una respuesta recibe también su carga de
+     * notificación, aunque tenga silenciado al remitente.
      */
     private function notifyConversation(Conversation $conversation, ChatMessage $message, User $sender): void
     {
@@ -1147,35 +1530,55 @@ class ChatController extends Controller
         }
 
         try {
-            // Quien silenció la conversación no recibe push ni aviso interno:
-            // el mensaje sigue contando en la lista, pero sin interrumpir.
+            $isReply = $message->isReply();
+            $isForward = $message->isForwarded();
+
             $recipients = $conversation->users()
                 ->whereKeyNot($sender->id)
-                ->get()
-                ->reject(fn (User $recipient) => $recipient->pivot?->muted_at !== null);
+                ->get();
+
+            // Quien silenció la conversación no recibe push ni aviso interno:
+            // el mensaje sigue contando en la lista, pero sin interrumpir. La
+            // respuesta es la excepción: atraviesa el silencio.
+            if (! $isReply) {
+                $recipients = $recipients->reject(fn (User $recipient) => $recipient->pivot?->muted_at !== null);
+            }
 
             if ($recipients->isEmpty()) {
                 return;
             }
 
             $isGroup = $conversation->isGroup();
+            $isSecret = $conversation->type === 'secret';
 
             $title = $message->is_moderation
                 ? 'Mensaje de moderación'
-                : ($isGroup
-                    ? 'Nuevo mensaje en '.($conversation->name ?: 'el grupo')
-                    : 'Nuevo mensaje de '.$sender->name);
+                : ($isSecret
+                    ? ($isReply
+                        ? 'Tienes una respuesta en tu chat de amigo secreto'
+                        : 'Nuevo mensaje en tu chat de amigo secreto')
+                    : ($isReply
+                        ? ($isGroup
+                            ? $sender->name.' respondió en '.($conversation->name ?: 'el grupo')
+                            : $sender->name.' te respondió')
+                        : ($isGroup
+                            ? 'Nuevo mensaje en '.($conversation->name ?: 'el grupo')
+                            : 'Nuevo mensaje de '.$sender->name)));
 
             $this->push->sendMany(
                 $recipients,
                 'chat.mensaje',
                 $title,
-                $this->messagePreview($message),
+                $isForward ? 'Mensaje reenviado: '.$this->messagePreview($message) : $this->messagePreview($message),
                 [
                     'conversation_id' => (int) $conversation->id,
                     'message_id' => (int) $message->id,
-                    'sender' => $sender->name,
+                    // En el amigo secreto no se revela quién escribe.
+                    'sender' => $isSecret ? 'Amigo secreto' : $sender->name,
                     'is_group' => $isGroup,
+                    'is_reply' => $isReply,
+                    'is_forward' => $isForward,
+                    'reply_to_id' => $message->reply_to_id,
                 ],
                 module_url('chat').'?conversacion='.$conversation->id,
                 'chat'

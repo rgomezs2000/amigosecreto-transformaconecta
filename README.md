@@ -54,6 +54,15 @@ In order to ensure that the Laravel community is welcoming to all, please review
 
 If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
 
+## Desarrollo local
+
+El entorno de XAMPP deja cacheada la configuración
+(`bootstrap/cache/config.php`): así las peticiones no leen `.env` en cada
+llamada y no aparece el error intermitente «No application encryption key has
+been specified». Si cambias el `.env`, ejecuta `php artisan config:cache`; para
+volver a leerlo siempre, `php artisan config:clear`. Las pruebas no usan esa
+caché. Detalle: [docs/entorno-local.md](docs/entorno-local.md).
+
 ## Despliegue (CI/CD)
 
 Cada push a `main` ejecuta [deploy.yml](.github/workflows/deploy.yml): primero las

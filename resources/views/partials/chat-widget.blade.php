@@ -5,6 +5,7 @@
      data-url-grupo="{{ route('chat.grupo') }}"
      data-url-secret="{{ route('chat.amigo-secreto') }}"
      data-url-chat="{{ url('/chat') }}"
+     data-url-destinatarios="{{ route('chat.destinatarios') }}"
      data-url-preferencias="{{ route('notificaciones.preferencias') }}"
      data-sound="{{ ($shell['notificationPreferences']['chat_sound'] ?? false) ? '1' : '0' }}"
      data-in-app="{{ ($shell['notificationPreferences']['in_app'] ?? true) ? '1' : '0' }}"
@@ -144,6 +145,22 @@
             </div>
 
             <div class="chat-messages" id="chat-messages" aria-live="polite"></div>
+
+            {{-- Cita del mensaje que se está respondiendo. Se levanta sobre la
+                 barra del mensaje y se cierra sin enviar nada. --}}
+            <div class="chat-reply" id="chat-reply" hidden>
+                <i class="fa-solid fa-reply" aria-hidden="true"></i>
+                <div class="chat-reply__text">
+                    <p class="chat-reply__label">
+                        Respondiendo a <span id="chat-reply-sender"></span>
+                    </p>
+                    <p class="chat-reply__body" id="chat-reply-body"></p>
+                </div>
+                <button type="button" class="chat-reply__close" id="chat-reply-cancel"
+                        aria-label="Cancelar respuesta" title="Cancelar respuesta">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
+            </div>
 
             <div class="chat-tray" id="chat-attachment-tray" hidden>
                 <div class="chat-tray__items" id="chat-tray-items"></div>
@@ -297,6 +314,8 @@
 
         <div class="chat-context-menu" id="chat-context-menu" hidden>
             <button type="button" class="chat-context-item" data-action="resend" hidden>Volver a enviar</button>
+            <button type="button" class="chat-context-item" data-action="reply" hidden>Responder</button>
+            <button type="button" class="chat-context-item" data-action="forward" hidden>Reenviar</button>
             <button type="button" class="chat-context-item" data-action="copy">Copiar</button>
             <button type="button" class="chat-context-item" data-action="reaction">Reaccionar</button>
             <button type="button" class="chat-context-item" data-action="pin" hidden>Fijar mensaje</button>
@@ -388,6 +407,40 @@
     <x-slot:footer>
         <button type="button" class="btn btn-primary" id="chat-group-create">Crear grupo</button>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+    </x-slot:footer>
+</x-app-modal>
+
+{{-- Reenviar un mensaje: se eligen uno o varios destinatarios entre grupos,
+     administradores, amigos secretos y personas. --}}
+<x-app-modal id="modal-chat-forward" title="Reenviar mensaje" size="lg" scrollable>
+    <x-slot:body>
+        <div class="chat-forward">
+            <div class="chat-forward__preview">
+                <p class="chat-forward__label">Mensaje</p>
+                <p class="chat-forward__preview-body" id="chat-forward-preview"></p>
+            </div>
+
+            <label class="chat-forward__search">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="search" id="chat-forward-search"
+                       placeholder="Buscar grupo, administrador o persona..." autocomplete="off">
+            </label>
+
+            <p class="chat-hint" id="chat-forward-hint">
+                Puedes elegir más de un destinatario. Los chats de solo lectura no reciben reenvíos.
+            </p>
+
+            <div class="chat-forward__list" id="chat-forward-list">
+                <p class="chat-hint">Cargando destinatarios...</p>
+            </div>
+
+            <p class="chat-forward__error" id="chat-forward-error" role="status" aria-live="polite"></p>
+        </div>
+    </x-slot:body>
+
+    <x-slot:footer>
+        <button type="button" class="btn btn-primary" id="chat-forward-send" disabled>Reenviar</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
     </x-slot:footer>
 </x-app-modal>
 

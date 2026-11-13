@@ -332,6 +332,8 @@ class FirestoreService
             'body' => $deleted ? '' : $this->cleanBody($message->body),
             'type' => (string) $message->type,
             'is_moderation' => (bool) $message->is_moderation,
+            'reply_to_id' => $message->isReply() ? (int) $message->reply_to_id : null,
+            'forwarded_from_id' => $message->isForwarded() ? (int) $message->forwarded_from_id : null,
             'deleted' => $deleted,
             'deleted_by_admin' => (bool) $message->deleted_by_admin,
             'link_url' => $message->link_url,

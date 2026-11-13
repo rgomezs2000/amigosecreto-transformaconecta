@@ -26,6 +26,7 @@
         var grupoUrl = $widget.attr('data-url-grupo');
         var secretUrl = $widget.attr('data-url-secret');
         var chatBase = $widget.attr('data-url-chat');
+        var destinatariosUrl = $widget.attr('data-url-destinatarios');
         var preferenciasUrl = $widget.attr('data-url-preferencias');
         var soundEnabled = $widget.attr('data-sound') === '1';
         var inAppEnabled = $widget.attr('data-in-app') === '1';
@@ -56,6 +57,12 @@
         var activeConversation = null;
         var activeUser = null;
         var lastUsers = [];
+
+        /** Mensaje citado por la respuesta que se está escribiendo. */
+        var replyTarget = null;
+        /** Mensaje que se está reenviando y destinos disponibles del modal. */
+        var forwardSource = null;
+        var forwardDestinations = null;
 
         /** Etiquetas de la conversación abierta: token -> {name, label, kind}. */
         var mentionIndex = {};
@@ -431,17 +438,37 @@
                     ' title="' + (message.read ? 'Leído' : (message.delivered ? 'Entregado' : 'Enviado')) + '" aria-hidden="true"></i>';
             }
 
+            // Cita del mensaje respondido: va dentro de la burbuja, arriba del
+            // contenido, y al pulsarla se salta al mensaje original.
+            var quote = '';
+
+            if (message.reply) {
+                quote = '<div class="chat-quote' + (message.reply.deleted ? ' chat-quote--deleted' : '') + '"' +
+                    (message.reply.id ? ' data-reply-to="' + message.reply.id + '"' : '') +
+                    ' role="button" tabindex="0" title="Ir al mensaje">' +
+                    '<span class="chat-quote__sender">' + escape(message.reply.sender) + '</span>' +
+                    '<span class="chat-quote__body">' + escape(message.reply.body) + '</span>' +
+                    '</div>';
+            }
+
+            var forwarded = message.forwarded
+                ? '<span class="chat-message__forwarded">Reenviado</span> '
+                : '';
+
             return '<div class="chat-message' +
                 (message.mine ? ' chat-message--mine' : '') +
                 (message.is_moderation ? ' chat-message--moderation' : '') +
                 (message.deleted ? ' chat-message--deleted' : '') + '"' +
                 ' data-message-id="' + message.id + '"' +
                 ' data-body="' + escape(message.body) + '"' +
+                ' data-sender="' + escape(message.sender) + '"' +
+                ' data-deleted="' + (message.deleted ? '1' : '0') + '"' +
                 ' data-can-edit="' + (message.can_edit ? '1' : '0') + '"' +
                 ' data-can-delete="' + (message.can_delete ? '1' : '0') + '"' +
                 ' data-reported="' + (message.reported ? '1' : '0') + '">' +
-                attachment + body + linkCard +
+                quote + attachment + body + linkCard +
                 '<p class="chat-message__meta">' + escape(message.sender) + ' · ' + escape(message.created_at) + ' ' +
+                forwarded +
                 (message.edited ? '<span class="chat-message__edited">editado</span> ' : '') + check + '</p>' +
                 (reactions ? '<div class="chat-message__reactions">' + reactions + '</div>' : '') +
                 '</div>';
@@ -519,9 +546,15 @@
                 ? '<i class="fa-solid fa-xmark chat-failed" title="Falló el envío"></i>'
                 : '<i class="fa-regular fa-clock chat-clock" title="Enviando"></i>';
             var content = pending.body || (pending.files && pending.files.length ? pending.files[0].name : '');
+            var quote = pending.reply
+                ? '<div class="chat-quote">' +
+                    '<span class="chat-quote__sender">' + escape(pending.reply.sender) + '</span>' +
+                    '<span class="chat-quote__body">' + escape(pending.reply.body) + '</span></div>'
+                : '';
 
             return '<div class="chat-message chat-message--mine chat-message--pending" data-pending-id="' + pending.id + '"' +
                 ' data-body="' + escape(content) + '">' +
+                quote +
                 '<p class="chat-message__body">' + escape(content) + '</p>' +
                 '<p class="chat-message__meta">Tú · ' + indicator + '</p></div>';
         }
@@ -646,11 +679,14 @@
                 return;
             }
 
-            // Lo que cambia el contenido repinta solo esa burbuja.
+            // Lo que cambia el contenido repinta solo esa burbuja. La cita se
+            // incluye: si borran o editan el mensaje citado, cambia con ella.
             if (before.body !== message.body ||
                 before.deleted !== message.deleted ||
                 before.edited !== message.edited ||
                 before.deleted_label !== message.deleted_label ||
+                before.forwarded !== message.forwarded ||
+                JSON.stringify(before.reply) !== JSON.stringify(message.reply) ||
                 JSON.stringify(before.attachments) !== JSON.stringify(message.attachments) ||
                 before.link_url !== message.link_url) {
                 $node.replaceWith(messageHtml(message));
@@ -695,10 +731,12 @@
             }
 
             $node.attr('data-body', message.body)
+                .attr('data-sender', message.sender)
+                .attr('data-deleted', message.deleted ? '1' : '0')
                 .attr('data-can-edit', message.can_edit ? '1' : '0')
                 .attr('data-can-delete', message.can_delete ? '1' : '0')
                 .attr('data-reported', message.reported ? '1' : '0')
-                .removeData('body can-edit can-delete reported');
+                .removeData('body sender deleted can-edit can-delete reported');
 
             rememberMessage(message);
         }
@@ -976,18 +1014,114 @@
             return 'offline';
         }
 
-        // Chat del evento: sin cuadro de escritura, solo avisos.
+        // Chat del evento y demás canales de solo lectura: sin cuadro de
+        // escritura, sin respuestas y sin reenvíos entrantes.
         function applyReadOnly(conversation) {
             var readOnly = !!(conversation && conversation.read_only);
 
             $('#chat-widget').toggleClass('is-read-only', readOnly);
             $('#chat-readonly').prop('hidden', !readOnly);
+
+            if (readOnly) {
+                clearReply();
+            }
+        }
+
+        function isReadOnlyChat() {
+            return $('#chat-widget').hasClass('is-read-only');
+        }
+
+        /* ------------------------------------------------------------------
+           Responder: cita del mensaje sobre la barra de escritura
+           ------------------------------------------------------------------ */
+
+        function clearReply() {
+            replyTarget = null;
+            $('#chat-reply').prop('hidden', true);
+            $('#chat-reply-sender').text('');
+            $('#chat-reply-body').text('');
+        }
+
+        function showReply(message) {
+            if (!message || !message.id) {
+                return;
+            }
+
+            replyTarget = message;
+            $('#chat-reply-sender').text(message.sender || '');
+            $('#chat-reply-body').text(message.body || '');
+            $('#chat-reply').prop('hidden', false);
+            $('#chat-input').trigger('focus');
+        }
+
+        /**
+         * Resumen legible de una burbuja para citarla en la respuesta o en el
+         * modal de reenvío.
+         */
+        function messageSummary($message) {
+            var text = $.trim($message.find('.chat-message__body').first().text());
+
+            if (!text) {
+                var $media = $message.find('.chat-media').first();
+
+                if ($media.length) {
+                    text = $media.data('type') === 'video' ? 'Video' : 'Foto';
+                } else if ($message.find('.chat-attachment__audio').length) {
+                    text = 'Audio';
+                } else if ($message.find('.chat-attachment__pdf').length) {
+                    text = 'PDF';
+                } else if ($message.find('.chat-attachment__location').length) {
+                    text = 'Ubicación';
+                } else if ($message.find('.chat-attachment__contact').length) {
+                    text = 'Contacto';
+                } else if ($message.find('.chat-attachment__file').length) {
+                    text = 'Archivo';
+                } else {
+                    text = 'Mensaje adjunto';
+                }
+            }
+
+            return text;
+        }
+
+        function replyPayloadFor($message) {
+            var id = parseInt($message.data('message-id'), 10);
+
+            return {
+                id: isNaN(id) ? null : id,
+                sender: $message.attr('data-sender') || '',
+                body: messageSummary($message)
+            };
+        }
+
+        // Pulsar la cita lleva al mensaje original y lo destaca un instante.
+        function goToMessage(id) {
+            if (!id) {
+                return;
+            }
+
+            var $target = $('#chat-messages .chat-message[data-message-id="' + id + '"]');
+
+            if (!$target.length) {
+                return;
+            }
+
+            if ($target[0].scrollIntoView) {
+                $target[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+
+            $target.addClass('is-highlight');
+            window.setTimeout(function () {
+                $target.removeClass('is-highlight');
+            }, 1400);
         }
 
         function openConversation(id, title, subtitle, moderation) {
             currentId = id;
             currentModeration = moderation === true;
             closeChatProfile();
+            // La respuesta en curso es de la conversación anterior: no viaja.
+            applyReadOnly(null);
             forgetPaintedMessages();
             setMentionCatalog([]);
             hideMentionSuggestions();
@@ -1307,6 +1441,8 @@
             currentId = null;
             currentModeration = false;
             closeChatProfile();
+            clearReply();
+            applyReadOnly(null);
             $('#chat-conversation').prop('hidden', true).removeClass('is-gallery');
             $('#chat-gallery-panel').prop('hidden', true);
             $('#chat-panel > .chat-tabs').show();
@@ -1459,13 +1595,22 @@
             activeMessage = $message;
 
             var $menu = $('#chat-context-menu');
+            var deleted = $message.attr('data-deleted') === '1';
+            var readOnly = isReadOnlyChat();
+            var pendingId = $message.data('pending-id');
+
+            // Responder: en cualquier chat con escritura, nunca en los de solo
+            // lectura ni sobre un mensaje en envío o eliminado.
+            $menu.find('[data-action="reply"]').prop('hidden', readOnly || !!pendingId || deleted);
+
+            // Reenviar: también desde los chats de solo lectura (lo que se lee
+            // se puede reenviar), pero no desde un mensaje eliminado.
+            $menu.find('[data-action="forward"]').prop('hidden', !!pendingId || deleted);
 
             $menu.find('[data-action="edit"]').prop('hidden', $message.data('can-edit') !== 1);
             $menu.find('[data-action="delete"]').prop('hidden', $message.data('can-delete') !== 1);
             $menu.find('[data-action="report"]').prop('hidden',
                 $message.data('can-edit') === 1 || $message.data('reported') === 1);
-
-            var pendingId = $message.data('pending-id');
 
             pendingActive = pendingId
                 ? currentPending().find(function (item) { return item.id === pendingId; })
@@ -1485,7 +1630,7 @@
             var canPin = !currentModeration
                 && !pendingId
                 && messageId !== null
-                && $message.data('deleted') !== 1;
+                && !deleted;
 
             $menu.find('[data-action="pin"]').prop('hidden', !canPin || messageId === pinnedId);
             $menu.find('[data-action="unpin"]').prop('hidden', !canPin || messageId !== pinnedId);
@@ -1564,7 +1709,9 @@
                 return;
             }
 
-            if ($(target).closest('#chat-widget').length) {
+            // Los modales del chat (reenviar, crear grupo, avisos) viven fuera
+            // del widget para quedar por encima: usarlos no cierra el panel.
+            if ($(target).closest('#chat-widget, .modal, .modal-backdrop, .bootbox').length) {
                 return;
             }
 
@@ -2046,6 +2193,16 @@
 
             hideContextMenu();
 
+            if (action === 'reply') {
+                showReply(replyPayloadFor($message));
+                return;
+            }
+
+            if (action === 'forward') {
+                openForwardModal($message);
+                return;
+            }
+
             if (action === 'resend') {
                 if (targetPending && targetPending.status === 'failed') {
                     sendPending(targetPending);
@@ -2129,6 +2286,25 @@
                             alertDialog((xhr.responseJSON || {}).message || 'No se pudo reportar.');
                         });
                 });
+            }
+        });
+
+        // Cancelar la respuesta: se cierra la cita y no se envía nada.
+        $('#chat-reply-cancel').on('click', function () {
+            clearReply();
+            $('#chat-input').trigger('focus');
+        });
+
+        // Pulsar la cita de una respuesta o de un reenvío lleva al original.
+        $(document).on('click', '.chat-quote[data-reply-to]', function (event) {
+            event.stopPropagation();
+            goToMessage(parseInt($(this).attr('data-reply-to'), 10));
+        });
+
+        $(document).on('keydown', '.chat-quote[data-reply-to]', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                goToMessage(parseInt($(this).attr('data-reply-to'), 10));
             }
         });
 
@@ -2335,6 +2511,202 @@
         });
 
         /* ------------------------------------------------------------------
+           Reenviar: modal para elegir uno o varios destinatarios
+           ------------------------------------------------------------------ */
+
+        var forwardModalElement = document.getElementById('modal-chat-forward');
+        var forwardModal = forwardModalElement && window.bootstrap && window.bootstrap.Modal
+            ? window.bootstrap.Modal.getOrCreateInstance(forwardModalElement)
+            : null;
+
+        var FORWARD_SECTIONS = [
+            { key: 'groups', title: 'Grupos' },
+            { key: 'admins', title: 'Administradores' },
+            { key: 'secrets', title: 'Amigos secretos' },
+            { key: 'users', title: 'Personas' }
+        ];
+
+        // Número de la última carga de destinos: si se abre el modal dos veces
+        // seguidas, la respuesta vieja no pinta sobre la nueva.
+        var forwardRequest = 0;
+
+        function forwardItemHtml(item) {
+            return '<label class="chat-forward__item">' +
+                '<input type="checkbox" class="chat-forward-target"' +
+                ' data-target="' + escape(item.target) + '"' +
+                ' data-id="' + (parseInt(item.id, 10) || 0) + '">' +
+                '<span class="chat-forward__text">' +
+                '<span class="chat-forward__name">' + escape(item.label) + '</span>' +
+                '<span class="chat-forward__meta">' + escape(item.meta || '') + '</span>' +
+                '</span></label>';
+        }
+
+        function renderForwardDestinations() {
+            var data = forwardDestinations || {};
+            var html = '';
+
+            FORWARD_SECTIONS.forEach(function (section) {
+                var items = data[section.key] || [];
+
+                if (!items.length) {
+                    return;
+                }
+
+                html += '<p class="chat-forward__group">' + escape(section.title) + '</p>' +
+                    items.map(forwardItemHtml).join('');
+            });
+
+            $('#chat-forward-list').html(
+                html || '<p class="chat-hint">No hay destinatarios disponibles.</p>'
+            );
+
+            filterForwardDestinations($('#chat-forward-search').val());
+            updateForwardCount();
+        }
+
+        // Filtra sin volver a pintar: las casillas ya marcadas se conservan.
+        function filterForwardDestinations(term) {
+            var needle = $.trim((term || '').toLowerCase());
+            var $items = $('#chat-forward-list .chat-forward__item');
+
+            $items.each(function () {
+                var haystack = $(this).text().toLowerCase();
+                $(this).toggleClass('is-hidden', needle !== '' && haystack.indexOf(needle) === -1);
+            });
+
+            $('#chat-forward-list .chat-forward__group').each(function () {
+                var visible = $(this)
+                    .nextUntil('.chat-forward__group')
+                    .filter('.chat-forward__item')
+                    .not('.is-hidden')
+                    .length;
+
+                $(this).toggleClass('is-hidden', visible === 0);
+            });
+        }
+
+        function forwardSelection() {
+            var conversationIds = [];
+            var userIds = [];
+
+            $('#chat-forward-list .chat-forward-target:checked').each(function () {
+                var id = parseInt($(this).attr('data-id'), 10);
+
+                if (!id) {
+                    return;
+                }
+
+                if ($(this).attr('data-target') === 'conversation') {
+                    conversationIds.push(id);
+                } else {
+                    userIds.push(id);
+                }
+            });
+
+            return { conversationIds: conversationIds, userIds: userIds };
+        }
+
+        function updateForwardCount() {
+            var selection = forwardSelection();
+            var count = selection.conversationIds.length + selection.userIds.length;
+            var $send = $('#chat-forward-send');
+
+            $send.prop('disabled', count === 0)
+                .text(count > 1 ? 'Reenviar a ' + count : 'Reenviar');
+        }
+
+        function openForwardModal($message) {
+            var id = parseInt($message.data('message-id'), 10);
+
+            if (!id) {
+                return;
+            }
+
+            forwardSource = { id: id, text: messageSummary($message) };
+            forwardDestinations = null;
+
+            $('#chat-forward-preview').text(forwardSource.text);
+            $('#chat-forward-search').val('');
+            $('#chat-forward-error').text('');
+            $('#chat-forward-list').html('<p class="chat-hint">Cargando destinatarios...</p>');
+            updateForwardCount();
+
+            if (forwardModal) {
+                forwardModal.show();
+            }
+
+            var requestId = ++forwardRequest;
+
+            $.getJSON(destinatariosUrl)
+                .done(function (response) {
+                    if (requestId !== forwardRequest) {
+                        return;
+                    }
+
+                    forwardDestinations = response;
+                    renderForwardDestinations();
+                })
+                .fail(function (xhr) {
+                    if (requestId !== forwardRequest) {
+                        return;
+                    }
+
+                    $('#chat-forward-list').html('<p class="chat-hint">No se pudieron cargar los destinatarios.</p>');
+                    $('#chat-forward-error').text(
+                        (xhr.responseJSON || {}).message || 'No se pudieron cargar los destinatarios.'
+                    );
+                });
+        }
+
+        $('#chat-forward-search').on('input', function () {
+            filterForwardDestinations($(this).val());
+        });
+
+        $('#chat-forward-list').on('change', '.chat-forward-target', updateForwardCount);
+
+        $('#chat-forward-send').on('click', function () {
+            if (!forwardSource) {
+                return;
+            }
+
+            var selection = forwardSelection();
+
+            if (!selection.conversationIds.length && !selection.userIds.length) {
+                $('#chat-forward-error').text('Elige al menos un destinatario.');
+                return;
+            }
+
+            var $send = $(this).prop('disabled', true);
+            $('#chat-forward-error').text('');
+
+            post(chatBase + '/mensajes/' + forwardSource.id + '/reenviar', {
+                conversation_ids: selection.conversationIds,
+                user_ids: selection.userIds
+            }).done(function (response) {
+                if (forwardModal) {
+                    forwardModal.hide();
+                }
+
+                var count = parseInt(response && response.count, 10) || 1;
+
+                // Si el chat abierto está entre los destinos, se pinta lo nuevo.
+                if (currentId && selection.conversationIds.indexOf(parseInt(currentId, 10)) !== -1) {
+                    loadMessages();
+                }
+
+                refresh();
+                alertDialog(count > 1 ? 'Mensaje reenviado a ' + count + ' destinos.' : 'Mensaje reenviado.');
+            }).fail(function (xhr) {
+                $('#chat-forward-error').text(
+                    (xhr.responseJSON || {}).message || 'No se pudo reenviar el mensaje.'
+                );
+            }).always(function () {
+                $send.prop('disabled', false);
+                updateForwardCount();
+            });
+        });
+
+        /* ------------------------------------------------------------------
            Invitación a un grupo: modal al entrar al sistema
            ------------------------------------------------------------------ */
 
@@ -2457,6 +2829,10 @@
                 data.append('body', pending.body);
             }
 
+            if (pending.reply && pending.reply.id) {
+                data.append('reply_to_id', pending.reply.id);
+            }
+
             (pending.files || []).forEach(function (file) {
                 data.append('files[]', file);
             });
@@ -2526,12 +2902,18 @@
                 files: files || [],
                 link: link || null,
                 coords: coords || null,
+                // La respuesta viaja con la burbuja: si falla, «Volver a enviar»
+                // mantiene la cita.
+                reply: replyTarget,
                 status: 'sending'
             };
 
             currentPending().push(pending);
             paintPending();
             sendPending(pending);
+
+            // Ya está en la cola: la cita deja de ocupar la barra de escritura.
+            clearReply();
         }
 
         function fileIcon(name) {
