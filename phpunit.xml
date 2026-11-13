@@ -34,5 +34,10 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Las pruebas no leen bootstrap/cache/config.php: si la aplicación
+             tiene la configuración cacheada, cada prueba seguiría usando la
+             configuración real (y su base de datos). Con esta ruta propia la
+             caché se ignora y el .env de pruebas manda. -->
+        <env name="APP_CONFIG_CACHE" value="bootstrap/cache/config.testing.php" force="true"/>
     </php>
 </phpunit>
