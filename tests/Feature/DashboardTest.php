@@ -33,7 +33,6 @@ class DashboardTest extends TestCase
         ]);
     }
 
-
     /**
      * @return array{0: User, 1: Module}
      */
@@ -80,7 +79,7 @@ class DashboardTest extends TestCase
         $this->actingAs($user)
             ->get('/dashboard')
             ->assertOk()
-            ->assertSee('Hola: ' . $user->name)
+            ->assertSee('Hola: '.$user->name)
             ->assertSee($module->name)
             ->assertSee('dashboard-clock', false)
             ->assertSee('US$/Bs (BCV)')
@@ -152,6 +151,13 @@ class DashboardTest extends TestCase
             ->assertSee('Error del servidor');
     }
 
+    public function test_la_pagina_de_error_419_se_puede_renderizar(): void
+    {
+        $this->view('errors.419')
+            ->assertSee('Error 419')
+            ->assertSee('Sesión expirada');
+    }
+
     public function test_dashboard_muestra_la_fase_activa_y_la_cuenta_regresiva(): void
     {
         [$user] = $this->userWithModule();
@@ -209,7 +215,7 @@ class DashboardTest extends TestCase
             ->get('/dashboard')
             ->assertOk()
             ->assertSee('Inicio')
-            ->assertSee('href="' . route('home') . '"', false)
+            ->assertSee('href="'.route('home').'"', false)
             ->assertDontSee('module-tile__name">Inicio', false);
     }
 }

@@ -48,6 +48,9 @@
 
         var currentId = null;
         var currentModeration = false;
+        // Si la conversación abierta es un chat de caso (ticket), al volver se
+        // deja la pestaña Reportes a la vista.
+        var currentIsReport = false;
         var pollTimer = null;
         var messageTimer = null;
         var counterTimer = null;
@@ -149,7 +152,9 @@
                 return;
             }
 
-            var items = (response.conversations || []).concat(response.moderation || []);
+            var items = (response.conversations || [])
+                .concat(response.moderation || [])
+                .concat(response.reports || []);
             var found = null;
             var fromUrl = pendingFromUrl;
 
@@ -438,6 +443,13 @@
                     ' title="' + (message.read ? 'Leído' : (message.delivered ? 'Entregado' : 'Enviado')) + '" aria-hidden="true"></i>';
             }
 
+            // Etiqueta de rol del sistema junto al nombre. No se pinta en los
+            // mensajes de moderación (ya dicen «Moderación») ni en el amigo
+            // secreto (el servidor no lo envía para no revelar quién es).
+            var adminBadge = message.sender_is_admin
+                ? '<span class="chat-badge chat-badge--admin" title="Administrador del sistema">Administrador</span>'
+                : '';
+
             // Cita del mensaje respondido: va dentro de la burbuja, arriba del
             // contenido, y al pulsarla se salta al mensaje original.
             var quote = '';
@@ -446,7 +458,11 @@
                 quote = '<div class="chat-quote' + (message.reply.deleted ? ' chat-quote--deleted' : '') + '"' +
                     (message.reply.id ? ' data-reply-to="' + message.reply.id + '"' : '') +
                     ' role="button" tabindex="0" title="Ir al mensaje">' +
-                    '<span class="chat-quote__sender">' + escape(message.reply.sender) + '</span>' +
+                    '<span class="chat-quote__sender">' + escape(message.reply.sender) +
+                    (message.reply.sender_is_admin
+                        ? ' <span class="chat-badge chat-badge--admin">Administrador</span>'
+                        : '') +
+                    '</span>' +
                     '<span class="chat-quote__body">' + escape(message.reply.body) + '</span>' +
                     '</div>';
             }
@@ -467,7 +483,9 @@
                 ' data-can-delete="' + (message.can_delete ? '1' : '0') + '"' +
                 ' data-reported="' + (message.reported ? '1' : '0') + '">' +
                 quote + attachment + body + linkCard +
-                '<p class="chat-message__meta">' + escape(message.sender) + ' · ' + escape(message.created_at) + ' ' +
+                '<p class="chat-message__meta">' + escape(message.sender) +
+                (adminBadge ? ' ' + adminBadge : '') +
+                ' · ' + escape(message.created_at) + ' ' +
                 forwarded +
                 (message.edited ? '<span class="chat-message__edited">editado</span> ' : '') + check + '</p>' +
                 (reactions ? '<div class="chat-message__reactions">' + reactions + '</div>' : '') +
@@ -686,6 +704,7 @@
                 before.edited !== message.edited ||
                 before.deleted_label !== message.deleted_label ||
                 before.forwarded !== message.forwarded ||
+                before.sender_is_admin !== message.sender_is_admin ||
                 JSON.stringify(before.reply) !== JSON.stringify(message.reply) ||
                 JSON.stringify(before.attachments) !== JSON.stringify(message.attachments) ||
                 before.link_url !== message.link_url) {
@@ -905,9 +924,15 @@
                         return;
                     }
 
+                    // El solo lectura se refresca en cada respuesta: un caso
+                    // cerrado deshabilita el chat sin recargar la página.
+                    if (typeof response.read_only !== 'undefined') {
+                        applyReadOnlyState(response.read_only, response.read_only_label);
+                    }
+
                     if (!painted) {
                         lastData = response;
-                        applyReadOnly(response.conversation);
+                        applyConversation(response.conversation);
                         setMentionCatalog(response.mentionables || []);
                         renderMessages();
                         return;
@@ -1014,17 +1039,26 @@
             return 'offline';
         }
 
-        // Chat del evento y demás canales de solo lectura: sin cuadro de
-        // escritura, sin respuestas y sin reenvíos entrantes.
-        function applyReadOnly(conversation) {
-            var readOnly = !!(conversation && conversation.read_only);
+        // Solo lectura: se aplica al abrir y también en cada sondeo, para que
+        // un caso cerrado deshabilite el chat sin recargar.
+        function applyReadOnlyState(readOnly, label) {
+            var locked = !!readOnly;
 
-            $('#chat-widget').toggleClass('is-read-only', readOnly);
-            $('#chat-readonly').prop('hidden', !readOnly);
+            $('#chat-widget').toggleClass('is-read-only', locked);
+            $('#chat-readonly').prop('hidden', !locked);
 
-            if (readOnly) {
+            if (locked) {
+                $('#chat-readonly-label').text(label || 'Chat de solo lectura.');
                 clearReply();
             }
+        }
+
+        // Estado de la conversación abierta: solo lectura y etiqueta de rol
+        // del sistema junto al nombre en la barra del chat.
+        function applyConversation(conversation) {
+            currentIsReport = !!(conversation && conversation.is_report);
+            applyReadOnlyState(conversation && conversation.read_only, conversation && conversation.read_only_label);
+            $('#chat-title-badge').prop('hidden', !(conversation && conversation.other_is_admin));
         }
 
         function isReadOnlyChat() {
@@ -1121,7 +1155,7 @@
             currentModeration = moderation === true;
             closeChatProfile();
             // La respuesta en curso es de la conversación anterior: no viaja.
-            applyReadOnly(null);
+            applyConversation(null);
             forgetPaintedMessages();
             setMentionCatalog([]);
             hideMentionSuggestions();
@@ -1145,6 +1179,7 @@
         var usersSignature = null;
         var moderationSignature = null;
         var groupUsersSignature = null;
+        var reportsSignature = null;
 
         function renderUsers(items) {
             var list = items || [];
@@ -1292,6 +1327,62 @@
             }
         }
 
+        /* ------------------------------------------------------------------
+           Pestaña Reportes: un chat por ticket
+           ------------------------------------------------------------------ */
+
+        function renderReports(items) {
+            var list = items || [];
+            var signature = JSON.stringify(list.map(function (item) {
+                return [item.id, item.title, item.subtitle, item.unread, item.read_only];
+            }));
+
+            if (signature === reportsSignature) {
+                return;
+            }
+
+            reportsSignature = signature;
+
+            var $list = $('#chat-reports');
+
+            if (!list.length) {
+                $list.html('<p class="chat-hint">Aún no tienes chats de reportes.</p>');
+                return;
+            }
+
+            $list.html(list.map(function (item) {
+                var nuevos = item.unread > 0
+                    ? ' · ' + (item.unread === 1 ? '1 nuevo' : item.unread + ' nuevos')
+                    : '';
+                var lock = item.read_only
+                    ? ' <i class="fa-solid fa-lock" title="Solo lectura" aria-hidden="true"></i>'
+                    : '';
+
+                return '<button type="button" class="chat-item chat-report-open" data-id="' + item.id + '"' +
+                    ' data-title="' + escape(item.title) + '"' +
+                    ' data-subtitle="' + escape(item.subtitle || 'Reporte') + '">' +
+                    '<span class="chat-item__title">' +
+                    '<i class="fa-solid fa-ticket" aria-hidden="true"></i> ' +
+                    escape(item.title) + lock + '</span>' +
+                    '<span class="chat-item__meta">' + escape(item.subtitle || 'Reporte') + nuevos + '</span>' +
+                    '</button>';
+            }).join(''));
+        }
+
+        function renderReportsCount(count) {
+            var $count = $('#chat-reports-count');
+
+            if (!$count.length) {
+                return;
+            }
+
+            if (count > 0) {
+                $count.prop('hidden', false).text(count > 99 ? '+99' : count);
+            } else {
+                $count.prop('hidden', true).text('0');
+            }
+        }
+
         // Parchea la lista de conversaciones: reutiliza las filas que no
         // cambiaron, reemplaza solo las que sí y las reordena sin recrearlas.
         function renderConversations(items) {
@@ -1415,6 +1506,10 @@
                     renderGroups(response.conversations);
                     renderArchived(response.archived);
                     renderArchivedCount((response.archived || []).length);
+                    renderReports(response.reports);
+                    renderReportsCount((response.reports || []).reduce(function (total, item) {
+                        return total + (parseInt(item.unread, 10) || 0);
+                    }, 0));
                     renderUsers(response.users);
                     renderModeration(response.moderation);
 
@@ -1438,17 +1533,32 @@
         }
 
         function showList() {
+            // Al volver de un chat de caso, la pestaña Reportes queda visible.
+            var backToReports = currentIsReport;
+
             currentId = null;
             currentModeration = false;
             closeChatProfile();
             clearReply();
-            applyReadOnly(null);
+            applyConversation(null);
             $('#chat-conversation').prop('hidden', true).removeClass('is-gallery');
             $('#chat-gallery-panel').prop('hidden', true);
             $('#chat-panel > .chat-tabs').show();
             $('#chat-body').show();
             stopChatPolling();
             startSummaryPolling();
+
+            if (backToReports) {
+                selectTab('reports');
+            }
+        }
+
+        // Cambia de pestaña en la bandeja (sin recargar).
+        function selectTab(tab) {
+            $('.chat-tab').removeClass('is-active');
+            $('.chat-tab[data-tab="' + tab + '"]').addClass('is-active');
+            $('.chat-tab-panel').prop('hidden', true);
+            $('.chat-tab-panel[data-panel="' + tab + '"]').prop('hidden', false);
         }
 
         function hideContextMenu() {
@@ -1723,12 +1833,9 @@
         $('.chat-tab').on('click', function () {
             var tab = $(this).data('tab');
 
-            $('.chat-tab').removeClass('is-active');
-            $(this).addClass('is-active');
-            $('.chat-tab-panel').prop('hidden', true);
-            $('.chat-tab-panel[data-panel="' + tab + '"]').prop('hidden', false);
+            selectTab(tab);
 
-            if (tab === 'users' || tab === 'groups') {
+            if (tab === 'users' || tab === 'groups' || tab === 'reports') {
                 refresh();
             }
 
@@ -1774,6 +1881,15 @@
                 $(this).data('title'),
                 $(this).data('subtitle'),
                 $(this).hasClass('chat-moderation-open')
+            );
+        });
+
+        // Chats de caso (ticket): se abren igual, sin menú de conversación.
+        $widget.on('click', '.chat-report-open', function () {
+            openConversation(
+                $(this).data('id'),
+                $(this).data('title'),
+                $(this).data('subtitle')
             );
         });
 
@@ -5367,6 +5483,18 @@
             $('#chat-panel').prop('hidden', false);
             $('#chat-toggle').attr('aria-expanded', 'true');
             startSummaryPolling();
+            refresh();
+        });
+
+        // El caso se remitió a otro administrador: si su chat estaba abierto,
+        // se cierra y desaparece de la pestaña Reportes.
+        document.addEventListener('chat:leave', function (event) {
+            var id = parseInt(event.detail && event.detail.id, 10);
+
+            if (id && currentId === id) {
+                showList();
+            }
+
             refresh();
         });
 

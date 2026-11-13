@@ -1193,6 +1193,98 @@ textarea:focus-visible,
     overflow-wrap: anywhere;
 }
 
+/* Remisiones del caso: historial y combobox de administradores. */
+.perfil-data__item--wide {
+    grid-column: 1 / -1;
+}
+
+.moderacion-referrals {
+    display: grid;
+    gap: .4rem;
+    font-weight: 400;
+}
+
+.moderacion-referrals__empty {
+    margin: 0;
+    color: var(--muted);
+    font-weight: 400;
+}
+
+.moderacion-referral {
+    padding: .5rem .6rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.moderacion-referral__head {
+    margin: 0;
+    color: var(--muted);
+    font-size: .8125rem;
+    font-weight: 700;
+}
+
+.moderacion-referral__body {
+    margin: .15rem 0 0;
+    font-size: .9375rem;
+    font-weight: 400;
+    overflow-wrap: anywhere;
+}
+
+.moderacion-combobox {
+    position: relative;
+}
+
+.moderacion-combobox__list {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + .2rem);
+    right: 0;
+    left: 0;
+    max-height: 14rem;
+    padding: .25rem;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 12px 30px rgba(30, 41, 59, .18);
+}
+
+.moderacion-combobox__list[hidden] {
+    display: none;
+}
+
+.moderacion-combobox__option {
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+    width: 100%;
+    padding: .45rem .55rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
+}
+
+.moderacion-combobox__option:hover,
+.moderacion-combobox__option.is-active {
+    background: #F1F5F9;
+}
+
+.moderacion-combobox__option small {
+    color: var(--muted);
+    font-size: .75rem;
+}
+
+.moderacion-combobox__empty {
+    margin: 0;
+    padding: .5rem .6rem;
+    color: var(--muted);
+    font-size: .875rem;
+}
+
 .perfil-table {
     margin: 0;
 }
@@ -2354,6 +2446,55 @@ textarea:focus-visible,
 .chat-message.is-highlight {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+}
+
+/* Etiqueta de rol del sistema junto al nombre: identifica a la
+   administración tanto en la burbuja como en la barra del chat. */
+.chat-badge {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    margin-left: .3rem;
+    padding: 0 .35rem;
+    border-radius: 999px;
+    font-size: .65rem;
+    font-weight: 700;
+    line-height: 1.5;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.chat-badge[hidden] {
+    display: none;
+}
+
+.chat-badge--admin {
+    background: var(--error-soft);
+    color: var(--error);
+}
+
+/* Chat del caso (ticket) en la pestaña Reportes. */
+.chat-report-open .chat-item__title i {
+    margin-right: .3rem;
+    color: var(--muted);
+}
+
+.chat-conversation__heading {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.chat-conversation__heading .chat-badge {
+    margin-left: 0;
+}
+
+.chat-conversation__heading .chat-conversation__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .chat-form {
@@ -6049,3 +6190,43 @@ div.dt-processing {
     }
 }
 
+
+/* Paginación de la campana de notificaciones */
+.alert-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    margin: 0 0 .75rem;
+}
+
+.alert-pagination[hidden] {
+    display: none;
+}
+
+.alert-pagination__size {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    margin: 0;
+    color: var(--muted);
+    font-size: .8125rem;
+    font-weight: 600;
+}
+
+.alert-pagination__size .form-select {
+    width: auto;
+}
+
+.alert-pagination__nav {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.alert-pagination__info {
+    color: var(--muted);
+    font-size: .8125rem;
+    white-space: nowrap;
+}

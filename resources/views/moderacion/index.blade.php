@@ -67,6 +67,8 @@
                         <option value="all">Todos los reportes</option>
                         <option value="date">Por fecha</option>
                         <option value="status">Estado</option>
+                        <option value="manager">Gestionado por</option>
+                        <option value="referred">Remitido a</option>
                     </select>
 
                     <div class="moderacion-filter__panel" id="moderacion-filter-date" hidden>
@@ -90,6 +92,30 @@
                             </select>
                         </label>
                     </div>
+
+                    <div class="moderacion-filter__panel" id="moderacion-filter-manager-panel" hidden>
+                        <label class="moderacion-filter__field">
+                            <span>Gestionado por</span>
+                            <select class="form-select" id="moderacion-filter-manager">
+                                <option value="">Todos los administradores</option>
+                                @foreach ($admins as $admin)
+                                    <option value="{{ $admin->id }}">{{ $admin->name }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                    </div>
+
+                    <div class="moderacion-filter__panel" id="moderacion-filter-referred-panel" hidden>
+                        <label class="moderacion-filter__field">
+                            <span>Remitido a</span>
+                            <select class="form-select" id="moderacion-filter-referred">
+                                <option value="">Todos los administradores</option>
+                                @foreach ($admins as $admin)
+                                    <option value="{{ $admin->id }}">{{ $admin->name }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="roles-actions">
@@ -104,8 +130,11 @@
                 <table id="moderacion-table" class="table table-striped align-middle w-100 roles-table">
                     <thead>
                         <tr>
+                            <th scope="col" class="roles-id">Nº Ticket</th>
                             <th scope="col" class="roles-id">Fecha</th>
                             <th scope="col" class="roles-name">Estado</th>
+                            <th scope="col" class="roles-name">Gestionado por</th>
+                            <th scope="col" class="roles-name">Remitido a</th>
                             <th scope="col" class="roles-name">Reportado por</th>
                             <th scope="col" class="roles-name">Autor del mensaje</th>
                             <th scope="col" class="roles-name">Motivo</th>
@@ -234,12 +263,18 @@
          data-url-contadores="{{ route('moderacion.contadores') }}"
          data-url-tomar="{{ route('moderacion.reportes.tomar', ['report' => '__ID__']) }}"
          data-url-cerrar="{{ route('moderacion.reportes.cerrar', ['report' => '__ID__']) }}"
+         data-url-remitir="{{ route('moderacion.reportes.remitir', ['report' => '__ID__']) }}"
+         data-url-admins="{{ route('moderacion.administradores') }}"
          data-csrf="{{ csrf_token() }}"
          hidden></div>
 
     <x-app-modal id="modal-moderacion-detail" title="Detalle del reporte">
         <x-slot:body>
             <dl class="perfil-data">
+                <div class="perfil-data__item">
+                    <dt>Ticket Nº:</dt>
+                    <dd id="moderacion-detail-ticket"></dd>
+                </div>
                 <div class="perfil-data__item">
                     <dt>Fecha</dt>
                     <dd id="moderacion-detail-date"></dd>
@@ -251,6 +286,14 @@
                 <div class="perfil-data__item">
                     <dt>Asignado a</dt>
                     <dd id="moderacion-detail-assigned"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Gestionado por</dt>
+                    <dd id="moderacion-detail-manager"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Remitido a</dt>
+                    <dd id="moderacion-detail-referred"></dd>
                 </div>
                 <div class="perfil-data__item">
                     <dt>Tomado el</dt>
@@ -292,6 +335,12 @@
                     <dt>Observación de cierre</dt>
                     <dd id="moderacion-detail-close-observation"></dd>
                 </div>
+                <div class="perfil-data__item perfil-data__item--wide">
+                    <dt>Remisiones</dt>
+                    <dd>
+                        <div class="moderacion-referrals" id="moderacion-detail-referrals"></div>
+                    </dd>
+                </div>
             </dl>
         </x-slot:body>
 
@@ -304,11 +353,52 @@
                 <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
                 <span>Cerrar caso</span>
             </button>
+            {{-- Remitir el caso a otro administrador (solo el gestor actual). --}}
+            <button type="button" class="btn btn-outline-primary" id="moderacion-detail-refer" hidden>
+                <i class="fa-solid fa-share" aria-hidden="true"></i>
+                <span>Remitir caso</span>
+            </button>
             <a class="btn btn-primary" id="moderacion-detail-chat" href="#" hidden>
                 <i class="fa-solid fa-comments" aria-hidden="true"></i>
                 <span>Ir al chat</span>
             </a>
+            {{-- Chat del ticket: se abre al tomar el caso y sigue disponible,
+                 en solo lectura, después de cerrarlo. --}}
+            <a class="btn btn-outline-secondary" id="moderacion-detail-ticket-chat" href="#" hidden>
+                <i class="fa-solid fa-ticket" aria-hidden="true"></i>
+                <span>Chat del ticket</span>
+            </a>
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+        </x-slot:footer>
+    </x-app-modal>
+
+    <x-app-modal id="modal-moderacion-refer" title="Remitir caso">
+        <x-slot:body>
+            <p class="chat-hint">
+                El caso pasa al administrador que elijas. Dejarás de gestionarlo y
+                de tener acceso a su chat; podrás volver a gestionarlo solo si el
+                nuevo gestor te lo remite de vuelta.
+            </p>
+
+            <label class="form-label" for="moderacion-refer-search">Administrador</label>
+            <div class="moderacion-combobox" id="moderacion-refer-combobox">
+                <input type="text" class="form-control" id="moderacion-refer-search"
+                       placeholder="Buscar administrador..." autocomplete="off"
+                       role="combobox" aria-expanded="false" aria-controls="moderacion-refer-list"
+                       aria-autocomplete="list">
+                <input type="hidden" id="moderacion-refer-admin-id">
+                <div class="moderacion-combobox__list" id="moderacion-refer-list" role="listbox" hidden></div>
+            </div>
+            <p class="field-message" id="moderacion-refer-selected" role="status"></p>
+
+            <label class="form-label" for="moderacion-refer-observation">Observación (motivo de la remisión)</label>
+            <textarea class="form-control" id="moderacion-refer-observation" rows="3" maxlength="1000"></textarea>
+            <p class="field-message" id="moderacion-refer-error" role="status"></p>
+        </x-slot:body>
+
+        <x-slot:footer>
+            <button type="button" class="btn btn-primary" id="moderacion-refer-confirm">Remitir caso</button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
         </x-slot:footer>
     </x-app-modal>
 

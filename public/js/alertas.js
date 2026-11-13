@@ -29,6 +29,9 @@
         var $markAll = $('#alert-mark-all');
         var lastCount = parseInt($open.attr('data-count'), 10) || 0;
         var lastListSignature = null;
+        var currentPage = 1;
+        var perPage = 10;
+        var lastPage = 1;
         var audioContext = null;
         var modalElement = document.getElementById('modal-notification-detail');
         var notificationModal = modalElement && window.bootstrap
@@ -176,17 +179,31 @@
             });
         }
 
-        function loadList(force) {
+        function loadList(force, page) {
             if (!listaUrl) {
                 return;
             }
 
-            $.getJSON(listaUrl)
+            if (typeof page !== 'undefined') {
+                currentPage = Math.max(1, parseInt(page, 10) || 1);
+            }
+
+            $.getJSON(listaUrl, { page: currentPage, per_page: perPage })
                 .done(function (response) {
                     var items = response.notifications || [];
-                    var signature = JSON.stringify(items);
+                    var pagination = response.pagination || {};
 
                     updateCount(response.count);
+
+                    if (pagination.last_page && currentPage > pagination.last_page) {
+                        currentPage = pagination.last_page;
+                        loadList(true);
+                        return;
+                    }
+
+                    renderPagination(pagination);
+
+                    var signature = currentPage + '|' + perPage + '|' + JSON.stringify(items);
 
                     // Si nada cambió, no se vuelve a pintar la lista.
                     if (!force && signature === lastListSignature) {
@@ -196,6 +213,41 @@
                     lastListSignature = signature;
                     renderList(items);
                 });
+        }
+
+        function renderPagination(pagination) {
+            var $pager = $('#alert-pagination');
+            var total = parseInt(pagination.total, 10) || 0;
+
+            lastPage = Math.max(1, parseInt(pagination.last_page, 10) || 1);
+
+            if (!total) {
+                $pager.prop('hidden', true);
+                return;
+            }
+
+            $pager.prop('hidden', false);
+            $('#alert-page-info').text(
+                'Mostrando ' + (pagination.from || 0) + ' a ' + (pagination.to || 0) + ' de ' + total
+            );
+            $('#alert-page-prev').prop('disabled', currentPage <= 1);
+            $('#alert-page-next').prop('disabled', currentPage >= lastPage);
+            $('#alert-page-size').val(String(pagination.per_page || perPage));
+        }
+
+        function goToPage(page) {
+            if (page < 1 || page > lastPage || page === currentPage) {
+                return;
+            }
+
+            currentPage = page;
+            loadList(true);
+
+            var body = document.querySelector('#notifications-panel .offcanvas-body');
+
+            if (body) {
+                body.scrollTop = 0;
+            }
         }
 
         function poll() {
@@ -341,6 +393,20 @@
                 });
         });
 
+        $('#alert-page-prev').on('click', function () {
+            goToPage(currentPage - 1);
+        });
+
+        $('#alert-page-next').on('click', function () {
+            goToPage(currentPage + 1);
+        });
+
+        $('#alert-page-size').on('change', function () {
+            perPage = parseInt($(this).val(), 10) || 10;
+            currentPage = 1;
+            loadList(true);
+        });
+
         $panel.find('.alert-pref').on('change', function () {
             var $input = $(this);
             var field = $input.data('field');
@@ -369,7 +435,8 @@
         });
 
         $('#notifications-panel').on('shown.bs.offcanvas', function () {
-            loadList();
+            currentPage = 1;
+            loadList(true);
             poll();
         });
 

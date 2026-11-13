@@ -247,7 +247,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('messages.0.read', true);
     }
 
-    public function test_reportar_mensaje_crea_reporte_y_avisa_al_administrador(): void
+    public function test_reportar_mensaje_abre_el_chat_del_caso_en_solo_lectura(): void
     {
         Mail::fake();
 
@@ -274,13 +274,33 @@ class ChatTest extends TestCase
             'reason' => 'Lenguaje ofensivo',
         ]);
 
-        $reports = Conversation::query()->where('type', 'reports')->firstOrFail();
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $conversation = $report->conversation;
 
-        $this->assertTrue($reports->messages()->where('body', 'like', '%Lenguaje ofensivo%')->exists());
+        // El caso abre su chat en solo lectura y solo con el beneficiario.
+        $this->assertNotNull($conversation);
+        $this->assertSame('report', $conversation->type);
+        $this->assertTrue($conversation->is_read_only);
+        $this->assertSame([$ana->id], $conversation->load('users')->users->pluck('id')->map(fn ($id) => (int) $id)->all());
+        $this->assertSame('Reporte Nº: '.$report->id, $conversation->messages()->orderBy('id')->value('body'));
 
-        Mail::assertSent(NotificationMail::class, function ($mail) use ($admin) {
-            return $mail->hasTo($admin->email);
-        });
+        // El beneficiario recibe el correo de apertura; la administración, el
+        // aviso push. El correo del caso para gestionar sale al tomarlo.
+        $this->assertDatabaseHas('email_logs', [
+            'to_email' => $ana->email,
+            'source' => 'reporte',
+        ]);
+        $this->assertDatabaseMissing('email_logs', [
+            'to_email' => $admin->email,
+            'source' => 'reporte',
+        ]);
+
+        $this->assertTrue(
+            Notification::query()
+                ->where('notifiable_id', $admin->id)
+                ->where('type', 'chat.reporte')
+                ->exists()
+        );
     }
 
     public function test_silenciar_marca_la_conversacion_y_la_excluye_del_contador_global(): void
@@ -1135,7 +1155,7 @@ class ChatTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_reportar_a_un_usuario_avisa_a_la_administracion(): void
+    public function test_reportar_a_un_usuario_avisa_al_beneficiario_y_a_la_administracion(): void
     {
         Mail::fake();
 
@@ -1160,9 +1180,21 @@ class ChatTest extends TestCase
                 ->exists()
         );
 
-        Mail::assertSent(NotificationMail::class, function ($mail) use ($admin) {
-            return $mail->hasTo($admin->email);
-        });
+        // El caso abre su chat en solo lectura y el beneficiario recibe el
+        // correo de apertura; la administración recibe el push.
+        $conversation = $report->conversation;
+
+        $this->assertNotNull($conversation);
+        $this->assertTrue($conversation->is_read_only);
+
+        $this->assertDatabaseHas('email_logs', [
+            'to_email' => $ana->email,
+            'source' => 'reporte',
+        ]);
+        $this->assertDatabaseMissing('email_logs', [
+            'to_email' => $admin->email,
+            'source' => 'reporte',
+        ]);
 
         // Sin motivo se guarda un texto por defecto con el nombre.
         $this->actingAs($luis)
@@ -1175,7 +1207,7 @@ class ChatTest extends TestCase
         ]);
     }
 
-    public function test_reportar_una_conversacion_tambien_avisa_por_push_y_correo(): void
+    public function test_reportar_una_conversacion_avisa_al_beneficiario_y_a_la_administracion(): void
     {
         Mail::fake();
 
@@ -1192,9 +1224,9 @@ class ChatTest extends TestCase
             'body' => 'Mensaje para reportar la conversación',
         ]);
 
-        $this->actingAs($ana)
-            ->postJson('/chat/'.$conversation->id.'/reportar-conversacion')
-            ->assertOk();
+        $respuesta = $this->actingAs($ana)->postJson('/chat/'.$conversation->id.'/reportar-conversacion');
+        $respuesta->dump();
+        $respuesta->assertOk();
 
         $this->assertDatabaseHas('chat_reports', [
             'message_id' => $conversation->messages()->latest('id')->value('id'),
@@ -1210,9 +1242,17 @@ class ChatTest extends TestCase
                 ->exists()
         );
 
-        Mail::assertSent(NotificationMail::class, function ($mail) use ($admin) {
-            return $mail->hasTo($admin->email);
-        });
+        // El caso abre su chat en solo lectura y el beneficiario recibe el
+        // correo de apertura.
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $ticketChat = $report->conversation;
+
+        $this->assertNotNull($ticketChat);
+        $this->assertTrue($ticketChat->is_read_only);
+        $this->assertDatabaseHas('email_logs', [
+            'to_email' => $ana->email,
+            'source' => 'reporte',
+        ]);
 
         $count = Notification::query()
             ->where('notifiable_id', $admin->id)
@@ -2274,3 +2314,4 @@ class ChatTest extends TestCase
             ->assertJsonPath('conversations.0.pinned_message.id', $message->id);
     }
 }
+

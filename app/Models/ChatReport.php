@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ChatReport extends Model
 {
@@ -21,6 +23,8 @@ class ChatReport extends Model
         'reason',
         'status',
         'assigned_to',
+        'taken_by',
+        'referred_to_id',
         'taken_at',
         'attention_observation',
         'closed_at',
@@ -55,9 +59,41 @@ class ChatReport extends Model
         return $this->belongsTo(User::class, 'assigned_to');
     }
 
+    /**
+     * Administrador que tomó y gestionó el caso originalmente.
+     */
+    public function takenBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'taken_by');
+    }
+
+    /**
+     * Último administrador al que se remitió el caso.
+     */
+    public function referredTo(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'referred_to_id');
+    }
+
     public function closedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'closed_by');
+    }
+
+    /**
+     * Chat del caso (ticket). Se crea cuando un administrador toma el reporte.
+     */
+    public function conversation(): HasOne
+    {
+        return $this->hasOne(Conversation::class, 'report_id');
+    }
+
+    /**
+     * Remisiones del caso, en orden de llegada.
+     */
+    public function referrals(): HasMany
+    {
+        return $this->hasMany(ChatReportReferral::class, 'report_id')->orderBy('id');
     }
 
     public function isPending(): bool

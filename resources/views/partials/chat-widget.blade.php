@@ -39,6 +39,10 @@
         <div class="chat-tabs" role="tablist">
             <button type="button" class="chat-tab is-active" data-tab="conversations" role="tab">Conversaciones</button>
             <button type="button" class="chat-tab" data-tab="groups" role="tab">Grupos</button>
+            <button type="button" class="chat-tab" data-tab="reports" role="tab">
+                Reportes
+                <span class="chat-tab__count" id="chat-reports-count" hidden>0</span>
+            </button>
             <button type="button" class="chat-tab" data-tab="archived" role="tab">
                 Archivadas
                 <span class="chat-tab__count" id="chat-archived-count" hidden>0</span>
@@ -75,6 +79,16 @@
                         <i class="fa-solid fa-users" aria-hidden="true"></i>
                         <span>Crear grupo</span>
                     </button>
+                </div>
+            </div>
+
+            <div class="chat-tab-panel" data-panel="reports" hidden>
+                <p class="chat-hint">
+                    Chats de tus casos de reporte, uno por ticket. Se abren cuando un
+                    administrador toma el caso y quedan en solo lectura al cerrarlo.
+                </p>
+                <div class="chat-list" id="chat-reports">
+                    <p class="chat-hint">Aún no tienes chats de reportes.</p>
                 </div>
             </div>
 
@@ -118,7 +132,12 @@
                 </button>
                 <button type="button" class="chat-conversation__identity" id="chat-profile-open"
                         aria-label="Abrir perfil de la conversación">
-                    <span class="chat-conversation__title" id="chat-title"></span>
+                    <span class="chat-conversation__heading">
+                        <span class="chat-conversation__title" id="chat-title"></span>
+                        {{-- Etiqueta de rol del sistema: se muestra cuando con
+                             quien se habla es administrador. --}}
+                        <span class="chat-badge chat-badge--admin" id="chat-title-badge" hidden>Administrador</span>
+                    </span>
                     <span class="chat-conversation__hint">
                         <span class="chat-status" id="chat-status" aria-hidden="true"></span>
                         <span id="chat-subtitle"></span>
@@ -175,7 +194,7 @@
 
             <p class="chat-readonly" id="chat-readonly" hidden>
                 <i class="fa-solid fa-lock" aria-hidden="true"></i>
-                <span>Chat del evento: solo lectura.</span>
+                <span id="chat-readonly-label">Chat del evento: solo lectura.</span>
             </p>
 
             <form class="chat-form" id="chat-form">

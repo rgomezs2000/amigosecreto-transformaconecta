@@ -83,16 +83,27 @@
         var takeModal = takeElement ? window.bootstrap.Modal.getOrCreateInstance(takeElement) : null;
         var closeElement = document.getElementById('modal-moderacion-close');
         var closeModal = closeElement ? window.bootstrap.Modal.getOrCreateInstance(closeElement) : null;
+        var referElement = document.getElementById('modal-moderacion-refer');
+        var referModal = referElement ? window.bootstrap.Modal.getOrCreateInstance(referElement) : null;
         var tomarUrl = $config.attr('data-url-tomar') || '';
         var cerrarUrl = $config.attr('data-url-cerrar') || '';
+        var remitirUrl = $config.attr('data-url-remitir') || '';
+        var adminsUrl = $config.attr('data-url-admins') || '';
         var detailReportId = null;
+        var detailTicketChatId = null;
+
+        function escapeText(value) {
+            return $('<div>').text(value == null ? '' : value).html();
+        }
 
         function reportFilterData() {
             return {
                 filter_type: $('#moderacion-filter-type').val() || 'all',
                 date_from: $('#moderacion-filter-from').val() || '',
                 date_to: $('#moderacion-filter-to').val() || '',
-                status: $('#moderacion-filter-status').val() || ''
+                status: $('#moderacion-filter-status').val() || '',
+                manager_id: $('#moderacion-filter-manager').val() || '',
+                referred_to_id: $('#moderacion-filter-referred').val() || ''
             };
         }
 
@@ -101,6 +112,8 @@
 
             $('#moderacion-filter-date').prop('hidden', type !== 'date');
             $('#moderacion-filter-status-panel').prop('hidden', type !== 'status');
+            $('#moderacion-filter-manager-panel').prop('hidden', type !== 'manager');
+            $('#moderacion-filter-referred-panel').prop('hidden', type !== 'referred');
         }
 
         var reportesTable = $('#moderacion-table').DataTable({
@@ -115,8 +128,11 @@
                 }
             },
             columns: [
+                { data: 'ticket', className: 'roles-id' },
                 { data: 'date' },
                 { data: 'status' },
+                { data: 'manager' },
+                { data: 'referred_to' },
                 { data: 'reporter' },
                 { data: 'author' },
                 { data: 'reason' },
@@ -124,9 +140,9 @@
                 { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
             ],
             columnDefs: [
-                { orderable: false, targets: [5, 6] }
+                { orderable: false, targets: [8, 9] }
             ],
-            order: [[0, 'desc']],
+            order: [[1, 'desc']],
             pageLength: 10,
             lengthMenu: [[10, 25, 50], [10, 25, 50]],
             searching: true,
@@ -160,8 +176,14 @@
             $('#moderacion-filter-from').val('');
             $('#moderacion-filter-to').val('');
             $('#moderacion-filter-status').val('pendiente');
+            $('#moderacion-filter-manager').val('');
+            $('#moderacion-filter-referred').val('');
             toggleReportFilter();
             reportesTable.search('').ajax.reload(null, true);
+        });
+
+        $('#moderacion-filter-manager, #moderacion-filter-referred').on('change', function () {
+            reportesTable.ajax.reload(null, true);
         });
 
         $('#moderacion-filter-type').on('change', function () {
@@ -183,10 +205,17 @@
             }
 
             detailReportId = row.id;
+            detailTicketChatId = row.ticket_chat_id || null;
 
+            $('#modal-moderacion-detail-title').text(
+                'Detalle del reporte Nº: ' + (row.ticket || row.id)
+            );
+            $('#moderacion-detail-ticket').text(row.ticket || row.id || '—');
             $('#moderacion-detail-date').text(row.date || '—');
             $('#moderacion-detail-status').html(row.status_html || row.status || '—');
             $('#moderacion-detail-assigned').text(row.assigned_raw || '—');
+            $('#moderacion-detail-manager').text(row.manager_raw || '—');
+            $('#moderacion-detail-referred').text(row.referred_to_raw || '—');
             $('#moderacion-detail-taken').text(row.taken_at || '—');
             $('#moderacion-detail-attention').text(row.attention_observation || '—');
             $('#moderacion-detail-reporter').text(row.reporter_raw || row.reporter || '—');
@@ -200,6 +229,10 @@
 
             $('#moderacion-detail-take').prop('hidden', !row.can_take);
             $('#moderacion-detail-close').prop('hidden', !row.can_close);
+            // Remitir: solo el administrador que gestiona el caso.
+            $('#moderacion-detail-refer').prop('hidden', !row.can_refer);
+
+            renderReferrals(row.referrals);
 
             var $chat = $('#moderacion-detail-chat');
 
@@ -207,6 +240,16 @@
                 $chat.attr('href', row.conversation_url).prop('hidden', false);
             } else {
                 $chat.prop('hidden', true).removeAttr('href');
+            }
+
+            // Chat del ticket: existe desde que el caso se toma y se mantiene
+            // (en solo lectura) después de cerrarlo.
+            var $ticketChat = $('#moderacion-detail-ticket-chat');
+
+            if (row.ticket_chat_url) {
+                $ticketChat.attr('href', row.ticket_chat_url).prop('hidden', false);
+            } else {
+                $ticketChat.prop('hidden', true).removeAttr('href');
             }
 
             if (modal) {
@@ -247,6 +290,244 @@
             return response.message || 'No se pudo completar la operación.';
         }
 
+        /* ------------------------------------------------------------------
+           Remitir el caso a otro administrador
+           ------------------------------------------------------------------ */
+
+        var referAdmins = null;
+        var referAdminId = null;
+        var referActive = -1;
+
+        function renderReferrals(list) {
+            var $box = $('#moderacion-detail-referrals');
+            var items = list || [];
+
+            if (!items.length) {
+                $box.html('<p class="moderacion-referrals__empty">Sin remisiones.</p>');
+                return;
+            }
+
+            $box.html(items.map(function (item) {
+                return '<div class="moderacion-referral">' +
+                    '<p class="moderacion-referral__head">' + escapeText(item.date) +
+                    ' · ' + escapeText(item.from) + ' → ' + escapeText(item.to) + '</p>' +
+                    '<p class="moderacion-referral__body">' + escapeText(item.observation) + '</p>' +
+                    '</div>';
+            }).join(''));
+        }
+
+        function referFilter(term) {
+            var needle = $.trim(String(term || '')).toLowerCase();
+
+            return (referAdmins || []).filter(function (admin) {
+                if (!needle) {
+                    return true;
+                }
+
+                return (admin.name + ' ' + admin.username).toLowerCase().indexOf(needle) !== -1;
+            });
+        }
+
+        function renderReferOptions(term) {
+            var items = referFilter(term);
+            var $list = $('#moderacion-refer-list');
+
+            referActive = -1;
+
+            if (!items.length) {
+                $list.html('<p class="moderacion-combobox__empty">Sin coincidencias.</p>').prop('hidden', false);
+                return;
+            }
+
+            $list.html(items.map(function (admin) {
+                return '<button type="button" class="moderacion-combobox__option" role="option"' +
+                    ' data-id="' + admin.id + '" data-name="' + escapeText(admin.name) + '">' +
+                    '<span>' + escapeText(admin.name) + '</span>' +
+                    '<small>@' + escapeText(admin.username) + '</small>' +
+                    '</button>';
+            }).join('')).prop('hidden', false);
+        }
+
+        function selectReferAdmin($option) {
+            referAdminId = parseInt($option.attr('data-id'), 10) || null;
+            $('#moderacion-refer-admin-id').val(referAdminId || '');
+            $('#moderacion-refer-search').val($option.attr('data-name') || '');
+            $('#moderacion-refer-selected')
+                .text(referAdminId ? 'Remitir a: ' + ($option.attr('data-name') || '') : '')
+                .removeAttr('data-kind');
+            $('#moderacion-refer-list').prop('hidden', true).empty();
+            $('#moderacion-refer-search').attr('aria-expanded', 'false');
+        }
+
+        function closeReferOptions() {
+            $('#moderacion-refer-list').prop('hidden', true);
+            $('#moderacion-refer-search').attr('aria-expanded', 'false');
+            referActive = -1;
+        }
+
+        function loadReferAdmins() {
+            if (referAdmins !== null) {
+                renderReferOptions($('#moderacion-refer-search').val());
+                return;
+            }
+
+            $.getJSON(adminsUrl).done(function (response) {
+                referAdmins = (response && response.items) || [];
+                renderReferOptions($('#moderacion-refer-search').val());
+            }).fail(function () {
+                referAdmins = [];
+                renderReferOptions($('#moderacion-refer-search').val());
+            });
+        }
+
+        $('#moderacion-detail-refer').on('click', function () {
+            if (!detailReportId) {
+                return;
+            }
+
+            referAdminId = null;
+            $('#moderacion-refer-admin-id').val('');
+            $('#moderacion-refer-search').val('');
+            $('#moderacion-refer-selected').text('');
+            $('#moderacion-refer-observation').val('');
+            $('#moderacion-refer-error').text('').removeAttr('data-kind');
+            closeReferOptions();
+
+            loadReferAdmins();
+
+            if (referModal) {
+                referModal.show();
+            }
+
+            // Se oculta la ficha al abrir la remisión (orden inverso para que
+            // Bootstrap no deje las dos ventanas apiladas).
+            if (modal) {
+                modal.hide();
+            }
+        });
+
+        $('#moderacion-refer-search').on('input', function () {
+            referAdminId = null;
+            $('#moderacion-refer-admin-id').val('');
+            $('#moderacion-refer-selected').text('');
+            renderReferOptions($(this).val());
+            $(this).attr('aria-expanded', 'true');
+        });
+
+        $('#moderacion-refer-search').on('focus', function () {
+            loadReferAdmins();
+            renderReferOptions($(this).val());
+            $(this).attr('aria-expanded', 'true');
+        });
+
+        $('#moderacion-refer-search').on('keydown', function (event) {
+            var $options = $('#moderacion-refer-list .moderacion-combobox__option');
+
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                if (!$options.length) {
+                    return;
+                }
+
+                event.preventDefault();
+                referActive = event.key === 'ArrowDown'
+                    ? (referActive + 1) % $options.length
+                    : (referActive - 1 + $options.length) % $options.length;
+
+                $options.removeClass('is-active').eq(referActive).addClass('is-active');
+                return;
+            }
+
+            if (event.key === 'Enter' && referActive > -1) {
+                event.preventDefault();
+                selectReferAdmin($options.eq(referActive));
+                return;
+            }
+
+            if (event.key === 'Escape') {
+                closeReferOptions();
+            }
+        });
+
+        $('#moderacion-refer-list').on('click', '.moderacion-combobox__option', function () {
+            selectReferAdmin($(this));
+        });
+
+        $(document).on('click', function (event) {
+            if (!$(event.target).closest('#moderacion-refer-combobox').length) {
+                closeReferOptions();
+            }
+        });
+
+        $('#moderacion-refer-confirm').on('click', function () {
+            if (!detailReportId || !remitirUrl) {
+                return;
+            }
+
+            var $button = $(this);
+            var $error = $('#moderacion-refer-error');
+            var observation = $.trim($('#moderacion-refer-observation').val());
+
+            $error.text('').removeAttr('data-kind');
+
+            if (!referAdminId) {
+                $error.attr('data-kind', 'error').text('Elige el administrador al que remites el caso.');
+                return;
+            }
+
+            if (!observation) {
+                $error.attr('data-kind', 'error').text('Escribe la observación de la remisión.');
+                return;
+            }
+
+            $button.prop('disabled', true);
+
+            $.ajax({
+                url: remitirUrl.replace('__ID__', detailReportId),
+                method: 'POST',
+                dataType: 'json',
+                headers: {
+                    'X-CSRF-TOKEN': csrf,
+                    'Accept': 'application/json'
+                },
+                data: {
+                    admin_id: referAdminId,
+                    observation: observation
+                }
+            }).done(function (response) {
+                if (referModal) {
+                    referModal.hide();
+                }
+
+                // La ficha queda con datos viejos: se cierra.
+                if (modal) {
+                    modal.hide();
+                }
+
+                reportesTable.ajax.reload(null, false);
+                refreshModerationCounts();
+
+                // El chat del caso deja de estar en nuestra cuenta: si estaba
+                // abierto en el chat flotante, se cierra.
+                if (detailTicketChatId) {
+                    document.dispatchEvent(new CustomEvent('chat:leave', {
+                        detail: { id: parseInt(detailTicketChatId, 10) }
+                    }));
+                }
+
+                if (response && response.message && window.bootbox) {
+                    window.bootbox.alert({
+                        title: 'Aviso',
+                        message: response.message,
+                        centerVertical: true
+                    });
+                }
+            }).fail(function (xhr) {
+                $error.attr('data-kind', 'error').text(caseError(xhr));
+            }).always(function () {
+                $button.prop('disabled', false);
+            });
+        });
+
         $('#moderacion-take-confirm').on('click', function () {
             if (!detailReportId || !tomarUrl) {
                 return;
@@ -269,7 +550,7 @@
                 data: {
                     attention_observation: $('#moderacion-take-observation').val()
                 }
-            }).done(function () {
+            }).done(function (response) {
                 if (takeModal) {
                     takeModal.hide();
                 }
@@ -280,6 +561,16 @@
 
                 reportesTable.ajax.reload(null, false);
                 refreshModerationCounts();
+
+                // El caso ya tiene chat: se abre en la pestaña Reportes.
+                var chatId = response && (response.ticket_chat_id
+                    || (response.report && response.report.ticket_chat_id));
+
+                if (chatId) {
+                    document.dispatchEvent(new CustomEvent('chat:open', {
+                        detail: { id: parseInt(chatId, 10) }
+                    }));
+                }
             }).fail(function (xhr) {
                 $error.attr('data-kind', 'error').text(caseError(xhr));
             }).always(function () {
@@ -1199,3 +1490,4 @@
         activateTab('reportes');
     });
 })(window.jQuery);
+

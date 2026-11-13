@@ -82,12 +82,14 @@ class ModeracionTest extends TestCase
             ->get(module_url('moderacion'))
             ->assertOk()
             ->assertSee('Reportes del chat')
-            ->assertSee('tomar el caso');
+            ->assertSee('tomar el caso')
+            ->assertSee('Nº Ticket');
 
         $response = $this->actingAs($admin)
             ->getJson('/moderacion/datos?draw=1&start=0&length=10')
             ->assertOk()
             ->assertJsonPath('recordsTotal', 1)
+            ->assertJsonPath('data.0.ticket', ChatReport::query()->firstOrFail()->id)
             ->assertJsonPath('data.0.reporter', 'Ana')
             ->assertJsonPath('data.0.author', 'Luis')
             ->assertJsonPath('data.0.reason_full', 'Lenguaje ofensivo');
@@ -152,8 +154,15 @@ class ModeracionTest extends TestCase
                 ->exists()
         );
 
+        // El caso abre su chat en solo lectura y avisa al beneficiario por
+        // correo; la administración recibe el push.
+        $conversation = $report->conversation;
+
+        $this->assertNotNull($conversation);
+        $this->assertTrue($conversation->is_read_only);
+
         $this->assertDatabaseHas('email_logs', [
-            'to_email' => $admin->email,
+            'to_email' => $ana->email,
             'source' => 'reporte',
         ]);
     }

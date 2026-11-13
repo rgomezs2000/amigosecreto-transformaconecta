@@ -56,7 +56,7 @@ class ShareAppShell
                 && $user->hasModuleAccess($notificationsModule);
 
             $notifications = $showNotifications
-                ? $user->notifications()->limit(20)->get()
+                ? $user->notifications()->latest('created_at')->paginate(10)
                 : collect();
 
             $notificationsCount = $showNotifications

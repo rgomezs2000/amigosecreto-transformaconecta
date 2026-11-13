@@ -196,10 +196,15 @@ class NotificacionesController extends Controller
         $this->ensureBellAccess();
 
         $user = $request->user();
+        $perPage = (int) $request->input('per_page', 10);
+        $perPage = in_array($perPage, [10, 25, 50], true) ? $perPage : 10;
+        $page = max(1, (int) $request->input('page', 1));
 
-        $notifications = $user->notifications()
-            ->limit(20)
-            ->get()
+        $paginator = $user->notifications()
+            ->latest('created_at')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        $notifications = $paginator->getCollection()
             ->map(fn (Notification $notification) => [
                 'id' => $notification->id,
                 'title' => $notification->title(),
@@ -213,6 +218,14 @@ class NotificacionesController extends Controller
         return api_success('Notificaciones.', [
             'count' => $user->unreadNotifications()->count(),
             'notifications' => $notifications,
+            'pagination' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ],
         ]);
     }
 

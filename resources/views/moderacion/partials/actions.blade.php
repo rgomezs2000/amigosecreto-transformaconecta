@@ -5,6 +5,15 @@
         <i class="fa-solid fa-eye" aria-hidden="true"></i>
     </button>
 
+    {{-- Chat del caso (ticket): se abre al tomarlo y queda en solo lectura al
+         cerrarlo, por eso sigue disponible después del cierre. --}}
+    @if (! empty($ticketChatUrl))
+        <a class="btn btn-sm btn-outline-secondary" href="{{ $ticketChatUrl }}"
+           title="Chat del ticket" aria-label="Abrir el chat del ticket">
+            <i class="fa-solid fa-ticket" aria-hidden="true"></i>
+        </a>
+    @endif
+
     @if ($conversationUrl !== null && $report->isAttending())
         <a class="btn btn-sm btn-primary" href="{{ $conversationUrl }}" title="Ir al chat" aria-label="Ir al chat">
             <i class="fa-solid fa-comments" aria-hidden="true"></i>

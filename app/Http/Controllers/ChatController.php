@@ -17,6 +17,8 @@ use App\Models\Module;
 use App\Models\User;
 use App\Services\Firestore\FirestoreService;
 use App\Services\PushNotifier;
+use App\Services\ReporteAvisos;
+use App\Services\ReporteChat;
 use App\Support\ChatMentions;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
@@ -57,6 +59,8 @@ class ChatController extends Controller
     public function __construct(
         private readonly FirestoreService $firestore,
         private readonly PushNotifier $push,
+        private readonly ReporteChat $reportes,
+        private readonly ReporteAvisos $avisosReporte,
     ) {}
 
     private function ensureAccess(): void
@@ -101,10 +105,15 @@ class ChatController extends Controller
 
         $items = $conversations->map(fn (Conversation $conversation) => $this->conversationData($conversation, $user));
 
+        // Los chats de caso (tickets) tienen su propia pestaña y no se mezclan
+        // con las conversaciones normales.
+        $reportItems = $items->filter(fn (array $item) => $item['is_report'])->values();
+        $regular = $items->reject(fn (array $item) => $item['is_report']);
+
         // Las archivadas van a su propia pestaña; las eliminadas salen de la
         // lista principal salvo que tengan mensajes nuevos.
-        $archived = $items->filter(fn (array $item) => $item['archived'])->values();
-        $active = $items
+        $archived = $regular->filter(fn (array $item) => $item['archived'])->values();
+        $active = $regular
             ->reject(fn (array $item) => $item['archived'])
             ->filter(fn (array $item) => ! $item['hidden'] || $item['unread'] > 0)
             ->values();
@@ -114,6 +123,9 @@ class ChatController extends Controller
         if ($user->role === UserRole::Admin) {
             $moderation = Conversation::query()
                 ->with(['users', 'assignment.receiver', 'pinnedMessage.user'])
+                // Los chats de caso son privados: no entran en la moderación
+                // general ni en el canal antiguo de reportes.
+                ->whereNotIn('type', ['report', 'reports'])
                 ->whereDoesntHave('users', fn ($query) => $query->whereNotNull('archived_at'))
                 ->orderByDesc('updated_at')
                 ->get()
@@ -164,9 +176,11 @@ class ChatController extends Controller
         return api_success('Resumen del chat.', [
             'conversations' => $this->sortedConversations($active),
             'archived' => $this->sortedConversations($archived),
+            'reports' => $this->sortedConversations($reportItems),
             'moderation' => $moderation,
             'users' => $users,
-            'unread' => $active->sum(fn (array $item) => $item['muted'] ? 0 : $item['unread']),
+            'unread' => $active->sum(fn (array $item) => $item['muted'] ? 0 : $item['unread'])
+                + $reportItems->sum(fn (array $item) => $item['muted'] ? 0 : $item['unread']),
             'moderation_unread' => collect($moderation)->sum('unread'),
             'is_admin' => $user->role === UserRole::Admin,
         ]);
@@ -232,6 +246,9 @@ class ChatController extends Controller
         if ($user->role === UserRole::Admin) {
             $moderation = Conversation::query()
                 ->with('users')
+                // Los chats de caso son privados y el canal antiguo de
+                // reportes ya no se usa: ninguno cuenta como moderación.
+                ->whereNotIn('type', ['report', 'reports'])
                 // Lo archivado queda fuera del alcance de la moderación.
                 ->whereDoesntHave('users', fn ($query) => $query->whereNotNull('archived_at'))
                 ->get()
@@ -462,6 +479,9 @@ class ChatController extends Controller
         $reactions = $this->reactionSummary($all, $user);
         $reported = $this->reportedMessageIds($all, $user);
 
+        // En el amigo secreto no se etiqueta el rol: revelaría quién es.
+        $hideAdminBadge = $conversation->type === 'secret';
+
         $map = fn (ChatMessage $message) => $this->messageData(
             $message,
             $user,
@@ -469,13 +489,18 @@ class ChatController extends Controller
             $reactions,
             $reported,
             $this->canDeleteContent($message, $user, $conversation),
-            $clearedAt
+            $clearedAt,
+            $hideAdminBadge
         );
 
         $recentPayload = $recent->map($map)->values();
 
         return api_success('Mensajes.', [
             'delta' => ! $full,
+            // Estado de escritura en cada respuesta: si el caso se cierra con
+            // el chat abierto, se deshabilita sin recargar.
+            'read_only' => (bool) $conversation->is_read_only,
+            'read_only_label' => $this->readOnlyLabel($conversation),
             'conversation' => $full ? $this->conversationData($conversation->fresh('users'), $user) : null,
             'messages' => $messages->map($map)->values(),
             'recent' => $recentPayload,
@@ -494,7 +519,7 @@ class ChatController extends Controller
      * @param  array<int, int>  $reported
      * @return array<string, mixed>
      */
-    private function messageData(ChatMessage $message, User $user, $others, array $reactions, array $reported, bool $canDelete = false, $clearedAt = null): array
+    private function messageData(ChatMessage $message, User $user, $others, array $reactions, array $reported, bool $canDelete = false, $clearedAt = null, bool $hideAdminBadge = false): array
     {
         $deleted = $message->isDeleted();
         $read = $others->isNotEmpty() && $others->every(function ($other) use ($message) {
@@ -508,6 +533,11 @@ class ChatController extends Controller
             'id' => $message->id,
             'body' => $deleted ? '' : $message->body,
             'sender' => $message->is_moderation ? 'Moderación' : ($message->user?->name ?? 'Sistema'),
+            // Administrador del sistema: se marca junto al nombre. Un mensaje
+            // de moderación ya dice «Moderación» y no necesita la etiqueta.
+            'sender_is_admin' => ! $hideAdminBadge
+                && ! $message->is_moderation
+                && $message->user?->role === UserRole::Admin,
             'is_moderation' => $message->is_moderation,
             'mine' => $message->user_id === $user->id,
             'created_at' => $message->created_at?->format('H:i'),
@@ -545,7 +575,7 @@ class ChatController extends Controller
             'reported' => in_array((int) $message->id, $reported, true),
             // Cita del mensaje respondido: se pinta dentro de la burbuja para
             // que la respuesta se entienda sin salir de ella.
-            'reply' => $this->replyQuote($message, $clearedAt),
+            'reply' => $this->replyQuote($message, $clearedAt, $hideAdminBadge),
             'forwarded' => $message->isForwarded(),
         ];
     }
@@ -555,9 +585,9 @@ class ChatController extends Controller
      * burbuja. No expone nada que el usuario no esté viendo ya: la respuesta
      * solo puede apuntar a un mensaje de la misma conversación.
      *
-     * @return array{id:int|null,sender:string,body:string,deleted:bool}|null
+     * @return array{id:int|null,sender:string,sender_is_admin:bool,body:string,deleted:bool}|null
      */
-    private function replyQuote(ChatMessage $message, $clearedAt = null): ?array
+    private function replyQuote(ChatMessage $message, $clearedAt = null, bool $hideAdminBadge = false): ?array
     {
         if (! $message->isReply()) {
             return null;
@@ -573,6 +603,7 @@ class ChatController extends Controller
             return [
                 'id' => null,
                 'sender' => 'Mensaje',
+                'sender_is_admin' => false,
                 'body' => 'El mensaje original ya no está disponible.',
                 'deleted' => true,
             ];
@@ -581,6 +612,9 @@ class ChatController extends Controller
         return [
             'id' => (int) $original->id,
             'sender' => $original->is_moderation ? 'Moderación' : ($original->user?->name ?? 'Sistema'),
+            'sender_is_admin' => ! $hideAdminBadge
+                && ! $original->is_moderation
+                && $original->user?->role === UserRole::Admin,
             'body' => $this->messageQuote($original),
             'deleted' => $original->isDeleted(),
         ];
@@ -1458,45 +1492,15 @@ class ChatController extends Controller
 
         $this->firestore->recordReport($report);
 
-        $reports = $this->reportConversation();
+        // El caso abre su chat (en solo lectura y solo para el beneficiario) y
+        // se le avisa con correo y push. La administración recibe el push.
+        $conversation = $this->reportes->abrirTicket($report);
+        $this->avisosReporte->abierto($report, $conversation);
+
         $sender = $message->user?->name ?? 'Sistema';
-        $body = 'Mensaje reportado: «'.$message->body.'» de '.$sender
-            .', reportado por '.$user->name
-            .' el '.now()->format('d/m/Y').' a las '.now()->format('H:i')
-            .'. Motivo: '.$reason;
 
-        $reportMessage = $reports->messages()->create([
-            'user_id' => $user->id,
-            'body' => $body,
-            'is_moderation' => true,
-        ]);
-
-        $this->firestore->recordMessage($reportMessage->load('user', 'attachments', 'conversation'));
-        $this->firestore->recordConversation($reports->fresh('users'));
-
-        $admins = User::query()->where('role', UserRole::Admin)->where('is_active', true)->get();
-
-        foreach ($admins as $admin) {
-            send_mail(
-                $admin->email,
-                'Mensaje reportado en el chat',
-                'Nuevo reporte en el chat',
-                [
-                    'Se reportó un mensaje de '.$sender.'.',
-                    'Reportado por: '.$user->name.'.',
-                    'Motivo: '.$reason,
-                    'Fecha: '.now()->format('d/m/Y H:i'),
-                ],
-                null,
-                [
-                    'recipient_name' => $admin->name,
-                    'eyebrow' => 'Reporte',
-                    'preheader' => 'Reporte de mensaje',
-                    'source' => 'reporte',
-                ]
-            );
-        }
-
+        // Aviso inmediato a la administración; el correo del caso sale cuando
+        // un administrador lo tome y lo gestione.
         $this->push->sendToAdmins(
             'chat.reporte',
             'Nuevo reporte en el chat',
@@ -1608,22 +1612,6 @@ class ChatController extends Controller
             'location' => 'Compartió una ubicación.',
             default => 'Envió un archivo.',
         };
-    }
-
-    private function reportConversation(): Conversation
-    {
-        $conversation = Conversation::query()->firstOrCreate(
-            ['type' => 'reports'],
-            ['name' => 'Reportes', 'is_moderated' => true]
-        );
-
-        $admins = User::query()->where('role', UserRole::Admin)->pluck('id');
-
-        foreach ($admins as $adminId) {
-            $conversation->users()->syncWithoutDetaching([$adminId => ['role' => 'moderator']]);
-        }
-
-        return $conversation;
     }
 
     public function leer(Request $request, Conversation $conversation): JsonResponse
@@ -1892,6 +1880,17 @@ class ChatController extends Controller
             return null;
         }
 
+        if ($conversation->isReportChat()) {
+            $report = $conversation->report;
+
+            return api_error(
+                $report !== null && $report->isClosed()
+                    ? 'El caso está cerrado: el chat quedó en solo lectura.'
+                    : 'El caso está por atender: el chat se habilita cuando la administración lo tome.',
+                403
+            );
+        }
+
         return api_error('Este chat es de solo lectura: aquí solo se publican los avisos del evento.', 403);
     }
 
@@ -1900,6 +1899,12 @@ class ChatController extends Controller
         $conversation->loadMissing('users');
 
         if (! $conversation->users->contains('id', $user->id)) {
+            // El chat de un caso es privado: solo el beneficiario y el
+            // administrador que lo tomó. Ningún otro administrador entra.
+            if ($conversation->isReportChat()) {
+                return false;
+            }
+
             if ($user->role !== UserRole::Admin) {
                 return false;
             }
@@ -2309,66 +2314,31 @@ class ChatController extends Controller
         $lastMessageId = $conversation->messages()->latest('id')->value('id');
         $conversationName = $conversation->name ?: ($conversation->isGroup() ? 'un grupo' : 'una conversación');
         $reason = 'Reporte de la conversación: '.$conversationName;
-        $report = null;
 
-        if ($lastMessageId !== null) {
-            $report = ChatReport::query()->firstOrCreate(
-                ['message_id' => $lastMessageId, 'reporter_id' => $user->id],
-                ['reason' => $reason]
-            );
+        // También se registra cuando la conversación aún no tiene mensajes: el
+        // ticket debe existir para que después se le abra su chat.
+        $report = ChatReport::query()->firstOrCreate(
+            ['message_id' => $lastMessageId, 'reporter_id' => $user->id],
+            ['reason' => $reason]
+        );
 
-            if (! $report->wasRecentlyCreated) {
-                return api_success('Este reporte ya estaba registrado.');
-            }
-
-            $this->firestore->recordReport($report);
+        if (! $report->wasRecentlyCreated) {
+            return api_success('Este reporte ya estaba registrado.');
         }
 
-        $reports = $this->reportConversation();
-        $reportMessage = $reports->messages()->create([
-            'user_id' => $user->id,
-            'body' => 'Conversación reportada: '.$user->name.' reportó '.$conversationName
-                .'. Fecha: '.now()->format('d/m/Y H:i'),
-            'is_moderation' => true,
-        ]);
+        $this->firestore->recordReport($report);
 
-        $this->firestore->recordMessage($reportMessage->load('user', 'attachments', 'conversation'));
-        $this->firestore->recordConversation($reports->fresh('users'));
-
-        $admins = User::query()
-            ->where('role', UserRole::Admin)
-            ->where('is_active', true)
-            ->get();
-
-        foreach ($admins as $admin) {
-            if ((int) $admin->id === (int) $user->id) {
-                continue;
-            }
-
-            send_mail(
-                $admin->email,
-                'Conversación reportada en el chat',
-                'Nuevo reporte de conversación',
-                [
-                    $user->name.' reportó '.$conversationName.'.',
-                    'Fecha: '.now()->format('d/m/Y H:i'),
-                ],
-                null,
-                [
-                    'recipient_name' => $admin->name,
-                    'eyebrow' => 'Reporte',
-                    'preheader' => 'Reporte de conversación',
-                    'source' => 'reporte',
-                ]
-            );
-        }
+        // El caso abre su chat (solo lectura, solo el beneficiario) y se le
+        // avisa por correo y push.
+        $conversation = $this->reportes->abrirTicket($report);
+        $this->avisosReporte->abierto($report, $conversation);
 
         $this->push->sendToAdmins(
             'chat.report',
             'Conversación reportada',
             $user->name.' reportó '.$conversationName.'.',
             [
-                'report_id' => $report?->id,
+                'report_id' => $report->id,
                 'report_type' => 'conversation',
                 'conversation_id' => $conversation->id,
                 'reporter' => $user->name,
@@ -2966,46 +2936,10 @@ class ChatController extends Controller
 
         $this->firestore->recordReport($report);
 
-        $reports = $this->reportConversation();
-        $reportMessage = $reports->messages()->create([
-            'user_id' => $current->id,
-            'body' => 'Usuario reportado: '.$current->name.' reportó a '.$user->name
-                .'. Motivo: '.$reason
-                .'. Fecha: '.now()->format('d/m/Y H:i'),
-            'is_moderation' => true,
-        ]);
-
-        $this->firestore->recordMessage($reportMessage->load('user', 'attachments', 'conversation'));
-        $this->firestore->recordConversation($reports->fresh('users'));
-
-        $admins = User::query()
-            ->where('role', UserRole::Admin)
-            ->where('is_active', true)
-            ->get();
-
-        foreach ($admins as $admin) {
-            if ((int) $admin->id === (int) $current->id) {
-                continue;
-            }
-
-            send_mail(
-                $admin->email,
-                'Usuario reportado en el chat',
-                'Nuevo reporte de usuario',
-                [
-                    $current->name.' reportó a '.$user->name.'.',
-                    'Motivo: '.$reason,
-                    'Fecha: '.now()->format('d/m/Y H:i'),
-                ],
-                null,
-                [
-                    'recipient_name' => $admin->name,
-                    'eyebrow' => 'Reporte',
-                    'preheader' => 'Reporte de usuario',
-                    'source' => 'reporte',
-                ]
-            );
-        }
+        // El caso abre su chat (solo lectura, solo el beneficiario) y se le
+        // avisa por correo y push.
+        $conversation = $this->reportes->abrirTicket($report);
+        $this->avisosReporte->abierto($report, $conversation);
 
         $this->push->sendToAdmins(
             'chat.report',
@@ -3101,8 +3035,17 @@ class ChatController extends Controller
             && in_array((int) $other->id, $this->blockedByIds($user), true);
         $onlineUsers = $conversation->users->filter(fn (User $item) => $item->last_seen_at !== null && $item->last_seen_at->gte(now()->subMinutes(5)))->count();
 
+        $isReport = $conversation->isReportChat();
+        $report = $isReport ? $conversation->report : null;
+        $reportStatus = $report?->statusLabel();
+
         if ($conversation->isGroup()) {
             $subtitle = $onlineUsers.' en línea';
+        } elseif ($isReport) {
+            $status = $reportStatus ?? 'Por atender';
+            $subtitle = $conversation->is_read_only
+                ? $status.' · solo lectura'
+                : ($other !== null ? $status.' · '.$other->name : $status);
         } elseif ($conversation->isEventChannel()) {
             $subtitle = 'Avisos del evento · solo lectura';
         } elseif ($conversation->type === 'secret') {
@@ -3136,6 +3079,12 @@ class ChatController extends Controller
             'blocked_by' => $blockedByThem,
             'is_owner' => $conversation->created_by === $user->id,
             'other_user_id' => ! $forModeration && ! $conversation->isGroup() ? $other?->id : null,
+            // Con quién se habla es administrador del sistema: la barra del
+            // chat lo marca junto al nombre. En el amigo secreto se calla para
+            // no revelar quién es.
+            'other_is_admin' => ! $forModeration
+                && $conversation->type === 'direct'
+                && $other?->role === UserRole::Admin,
             'updated_at' => $conversation->updated_at?->diffForHumans(),
             'updated_iso' => $conversation->updated_at?->toIso8601String(),
             'favorite' => $pivot?->favorite_at !== null,
@@ -3144,11 +3093,44 @@ class ChatController extends Controller
             'hidden' => $pivot?->hidden_at !== null,
             'is_moderation' => $forModeration,
             'read_only' => $conversation->is_read_only,
+            // Texto del aviso cuando el chat no admite escritura.
+            'read_only_label' => $this->readOnlyLabel($conversation),
             'is_event_channel' => $conversation->isEventChannel(),
+            // Chat del caso (ticket): pestaña Reportes y solo lectura al cerrar.
+            'is_report' => $isReport,
+            'report_id' => $isReport ? (int) $conversation->report_id : null,
+            'report_status' => $isReport ? $report?->status : null,
+            'report_status_label' => $isReport ? $reportStatus : null,
             'can_archive' => ! $forModeration && $conversation->type === 'direct',
             'can_unarchive' => ! $forModeration && $conversation->canBeUnarchived(),
             'pinned_message' => $this->pinnedMessageData($conversation, $user),
         ];
+    }
+
+    /**
+     * Aviso que explica por qué un chat no admite escritura.
+     */
+    private function readOnlyLabel(Conversation $conversation): ?string
+    {
+        if (! $conversation->is_read_only) {
+            return null;
+        }
+
+        if ($conversation->isReportChat()) {
+            $report = $conversation->report;
+
+            // El chat del caso está en solo lectura en dos fases: recién
+            // abierto (por atender) y después de cerrarlo.
+            return $report !== null && $report->isClosed()
+                ? 'Caso cerrado: chat de solo lectura.'
+                : 'Caso por atender: el chat se habilita cuando la administración lo tome.';
+        }
+
+        if ($conversation->isEventChannel()) {
+            return 'Chat del evento: solo lectura.';
+        }
+
+        return 'Chat de solo lectura.';
     }
 
     /**

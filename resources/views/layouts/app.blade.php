@@ -161,6 +161,29 @@
                     @endforelse
                 </ul>
 
+                <div class="alert-pagination" id="alert-pagination" hidden>
+                    <label class="alert-pagination__size" for="alert-page-size">
+                        <span>Mostrar</span>
+                        <select class="form-select form-select-sm" id="alert-page-size">
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                        </select>
+                    </label>
+
+                    <div class="alert-pagination__nav">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="alert-page-prev"
+                                aria-label="Página anterior" title="Página anterior">
+                            <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+                        </button>
+                        <span class="alert-pagination__info" id="alert-page-info"></span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="alert-page-next"
+                                aria-label="Página siguiente" title="Página siguiente">
+                            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+
                 <div class="alert-list__actions">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="alert-mark-all"
                             @disabled($shell['notificationsCount'] === 0)>

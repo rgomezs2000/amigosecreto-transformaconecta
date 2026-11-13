@@ -190,6 +190,43 @@ class NotificacionesTest extends TestCase
             ->assertJsonPath('notifications.0.read', false);
     }
 
+    public function test_el_listado_ajax_se_pagina_como_una_tabla(): void
+    {
+        $user = $this->makeUser('Ana', UserRole::Participant, ['notificaciones']);
+        $notifier = app(PushNotifier::class);
+
+        for ($index = 1; $index <= 12; $index++) {
+            $notifier->send(
+                $user,
+                'prueba.pagina',
+                'Aviso '.$index,
+                'Cuerpo '.$index
+            );
+        }
+
+        $first = $this->actingAs($user)
+            ->getJson('/notificaciones/lista?page=1&per_page=10')
+            ->assertOk()
+            ->assertJsonCount(10, 'notifications')
+            ->assertJsonPath('pagination.current_page', 1)
+            ->assertJsonPath('pagination.last_page', 2)
+            ->assertJsonPath('pagination.total', 12)
+            ->assertJsonPath('pagination.from', 1)
+            ->assertJsonPath('pagination.to', 10);
+
+        $this->assertCount(10, $first->json('notifications'));
+
+        $second = $this->actingAs($user)
+            ->getJson('/notificaciones/lista?page=2&per_page=10')
+            ->assertOk()
+            ->assertJsonCount(2, 'notifications')
+            ->assertJsonPath('pagination.current_page', 2)
+            ->assertJsonPath('pagination.from', 11)
+            ->assertJsonPath('pagination.to', 12);
+
+        $this->assertCount(2, $second->json('notifications'));
+    }
+
     public function test_el_mensaje_del_chat_crea_notificacion_y_espejo_nosql(): void
     {
         $ana = $this->makeUser('Ana', UserRole::Participant, ['chat']);

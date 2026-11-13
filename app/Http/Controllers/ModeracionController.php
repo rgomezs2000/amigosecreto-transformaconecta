@@ -2,15 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Concerns\AuthorizesModeracion;
 use App\Models\ChatBlock;
 use App\Models\ChatReport;
 use App\Models\Conversation;
 use App\Models\GroupBan;
+use App\Models\Module;
+use App\Models\User;
+use App\Services\ReporteAvisos;
+use App\Services\ReporteChat;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -25,6 +31,11 @@ class ModeracionController extends Controller
 {
     use AuthorizesModeracion;
 
+    public function __construct(
+        private readonly ReporteChat $reporteChat,
+        private readonly ReporteAvisos $reporteAvisos,
+    ) {}
+
     public function index(): View
     {
         $this->ensureModeracionAccess();
@@ -36,6 +47,11 @@ class ModeracionController extends Controller
             'cerrados' => ChatReport::query()->where('status', ChatReport::STATUS_CLOSED)->count(),
             'usuarios' => ChatBlock::query()->count(),
             'grupos' => GroupBan::query()->count(),
+            // Administradores para los filtros «Gestionado por» y «Remitido a».
+            'admins' => User::query()
+                ->where('role', UserRole::Admin)
+                ->orderBy('name')
+                ->get(['id', 'name']),
         ]);
     }
 
@@ -68,18 +84,35 @@ class ModeracionController extends Controller
         $recordsTotal = ChatReport::query()->count();
 
         $query = ChatReport::query()
-            ->with(['message.conversation.users', 'message.user', 'reporter', 'assignedAdmin', 'closedBy']);
+            ->with([
+                'message.conversation.users',
+                'message.user',
+                'reporter',
+                'assignedAdmin',
+                'takenBy',
+                'referredTo',
+                'closedBy',
+                'conversation.users',
+                'referrals.fromAdmin',
+                'referrals.toAdmin',
+            ]);
 
         if ($search !== '') {
             $like = '%'.$search.'%';
 
-            $query->where(function ($query) use ($like) {
+            $query->where(function ($query) use ($like, $search) {
                 $query->where('reason', 'like', $like)
                     ->orWhere('status', 'like', $like)
                     ->orWhereHas('reporter', fn ($user) => $user->where('name', 'like', $like))
                     ->orWhereHas('assignedAdmin', fn ($user) => $user->where('name', 'like', $like))
+                    ->orWhereHas('takenBy', fn ($user) => $user->where('name', 'like', $like))
+                    ->orWhereHas('referredTo', fn ($user) => $user->where('name', 'like', $like))
                     ->orWhereHas('message', fn ($message) => $message->where('body', 'like', $like))
                     ->orWhereHas('message.user', fn ($user) => $user->where('name', 'like', $like));
+
+                if (ctype_digit($search)) {
+                    $query->orWhereKey((int) $search);
+                }
             });
         }
 
@@ -114,16 +147,39 @@ class ModeracionController extends Controller
             }
         }
 
+        // «Gestionado por»: administrador que tomó y gestionó el caso
+        // originalmente, aunque después lo haya remitido.
+        if ($filterType === 'manager') {
+            $manager = (int) $request->input('manager_id', 0);
+
+            if ($manager > 0) {
+                $query->where('taken_by', $manager);
+            }
+        }
+
+        // «Remitido a»: último administrador al que se remitió el caso.
+        if ($filterType === 'referred') {
+            $referred = (int) $request->input('referred_to_id', 0);
+
+            if ($referred > 0) {
+                $query->where('referred_to_id', $referred);
+            }
+        }
+
         $recordsFiltered = (clone $query)->count();
 
         $column = (int) $request->input('order.0.column', 0);
         $direction = $request->input('order.0.dir') === 'asc' ? 'asc' : 'desc';
 
         $orderColumn = match ($column) {
-            1 => 'status',
-            2 => 'reporter_id',
-            3 => 'message_id',
-            4 => 'reason',
+            0 => 'id',
+            1 => 'created_at',
+            2 => 'status',
+            3 => 'taken_by',
+            4 => 'referred_to_id',
+            5 => 'reporter_id',
+            6 => 'message_id',
+            7 => 'reason',
             default => 'created_at',
         };
 
@@ -165,6 +221,7 @@ class ModeracionController extends Controller
             ->update([
                 'status' => ChatReport::STATUS_ATTENDING,
                 'assigned_to' => $request->user()->id,
+                'taken_by' => $request->user()->id,
                 'taken_at' => now(),
                 'attention_observation' => $request->input('attention_observation'),
             ]);
@@ -173,10 +230,27 @@ class ModeracionController extends Controller
             return api_error('Otro administrador ya tomó este caso.', 409);
         }
 
-        $report->refresh()->load(['message.conversation.users', 'message.user', 'reporter', 'assignedAdmin', 'closedBy']);
+        $report->refresh()->load([
+            'message.conversation.users',
+            'message.user',
+            'reporter',
+            'assignedAdmin',
+            'closedBy',
+            'conversation.users',
+            'referrals.fromAdmin',
+            'referrals.toAdmin',
+        ]);
+
+        // Al tomar el caso el administrador entra al chat del ticket, se
+        // habilita la escritura para ambos y salen los avisos de la fase.
+        $conversation = $this->reporteChat->gestionar($report, $request->user());
+        $report->setRelation('conversation', $conversation);
+        $this->reporteAvisos->gestion($report, $conversation, $request->user());
+        $this->reporteAvisos->enAtencion($report, $conversation, $request->user());
 
         return api_success('Caso tomado. Ahora puedes gestionarlo y cerrarlo.', [
             'report' => $this->rowData($report),
+            'ticket_chat_id' => $conversation->id,
         ]);
     }
 
@@ -223,9 +297,156 @@ class ModeracionController extends Controller
             return api_error('El caso cambió de estado. Recarga la lista.', 409);
         }
 
-        $report->refresh()->load(['message.conversation.users', 'message.user', 'reporter', 'assignedAdmin', 'closedBy']);
+        $report->refresh()->load([
+            'message.conversation.users',
+            'message.user',
+            'reporter',
+            'assignedAdmin',
+            'closedBy',
+            'conversation.users',
+            'referrals.fromAdmin',
+            'referrals.toAdmin',
+        ]);
+
+        // Caso cerrado: el chat del ticket queda en solo lectura para ambos y
+        // el beneficiario recibe el aviso de cierre.
+        $conversation = $this->reporteChat->cerrar($report);
+
+        if ($conversation !== null) {
+            $conversation->load('users');
+            $report->setRelation('conversation', $conversation);
+            $this->reporteAvisos->cerrado($report, $conversation, $request->user());
+        }
 
         return api_success('Caso cerrado correctamente.', [
+            'report' => $this->rowData($report),
+        ]);
+    }
+
+    /**
+     * Administradores activos para el combobox de remisión.
+     */
+    public function administradores(Request $request): JsonResponse
+    {
+        $this->ensureModeracionAccess();
+
+        $module = Module::activeByCode('moderacion');
+
+        $items = User::query()
+            ->where('role', UserRole::Admin)
+            ->where('is_active', true)
+            ->whereKeyNot($request->user()->id)
+            ->orderBy('name')
+            // Se leen todas las columnas: hasModuleAccess() necesita el perfil.
+            ->get()
+            // Solo se remite a quien puede entrar a Moderación.
+            ->filter(fn (User $item) => $module !== null && $item->hasModuleAccess($module))
+            ->map(fn (User $item) => [
+                'id' => (int) $item->id,
+                'name' => $item->name,
+                'username' => $item->username,
+            ])
+            ->values();
+
+        return api_success('Administradores.', ['items' => $items]);
+    }
+
+    /**
+     * Remite el caso a otro administrador.
+     *
+     * Solo el gestor actual puede remitirlo. La observación explica el motivo
+     * y queda en el historial; el chat del ticket pasa al nuevo gestor y el
+     * anterior deja de tener acceso. El nuevo gestor puede, a su vez,
+     * remitirlo (incluso de vuelta al anterior).
+     */
+    public function remitir(Request $request, ChatReport $report): JsonResponse
+    {
+        $this->ensureModeracionAccess();
+
+        $user = $request->user();
+
+        if (! $report->isAttending()) {
+            return api_error('Solo se remiten casos en atención.', 422);
+        }
+
+        if ((int) $report->assigned_to !== (int) $user->id) {
+            return api_error('Solo el administrador que gestiona el caso puede remitirlo.', 403);
+        }
+
+        $validator = validator($request->all(), [
+            'admin_id' => ['required', 'integer', 'exists:users,id'],
+            'observation' => ['required', 'string', 'max:1000'],
+        ], [
+            'admin_id.required' => 'Elige el administrador al que remites el caso.',
+            'admin_id.exists' => 'El administrador elegido no existe.',
+            'observation.required' => 'Escribe la observación de la remisión.',
+            'observation.max' => 'La observación no puede pasar de 1000 caracteres.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $data = $validator->validated();
+
+        $target = User::query()
+            ->whereKey((int) $data['admin_id'])
+            ->where('role', UserRole::Admin)
+            ->where('is_active', true)
+            ->first();
+
+        if ($target === null) {
+            return api_error('Elige un administrador activo.', 422);
+        }
+
+        $moderacionModule = Module::activeByCode('moderacion');
+
+        if ($moderacionModule === null || ! $target->hasModuleAccess($moderacionModule)) {
+            return api_error('Ese administrador no tiene acceso a Moderación.', 422);
+        }
+
+        if ((int) $target->id === (int) $user->id) {
+            return api_error('El caso ya está en tu gestión.', 422);
+        }
+
+        if ((int) $target->id === (int) $report->reporter_id) {
+            return api_error('No puedes remitir el caso a su beneficiario.', 422);
+        }
+
+        DB::transaction(function () use ($report, $user, $target, $data) {
+            $report->forceFill([
+                'assigned_to' => $target->id,
+                'referred_to_id' => $target->id,
+            ])->save();
+
+            $report->referrals()->create([
+                'from_admin_id' => $user->id,
+                'to_admin_id' => $target->id,
+                'observation' => $data['observation'],
+            ]);
+        });
+
+        // El chat del caso pasa al nuevo gestor; el anterior sale (salvo que
+        // sea el propio beneficiario).
+        $conversation = $this->reporteChat->trasladar($report, $user, $target);
+
+        $report->refresh()->load([
+            'message.conversation.users',
+            'message.user',
+            'reporter',
+            'assignedAdmin',
+            'closedBy',
+            'referrals.fromAdmin',
+            'referrals.toAdmin',
+        ]);
+
+        if ($conversation !== null) {
+            $conversation->load('users');
+            $report->setRelation('conversation', $conversation);
+            $this->reporteAvisos->remitido($report, $conversation, $user, $target, $data['observation']);
+        }
+
+        return api_success('Caso remitido a '.$target->name.'.', [
             'report' => $this->rowData($report),
         ]);
     }
@@ -248,8 +469,38 @@ class ModeracionController extends Controller
         $isMine = $report->assigned_to !== null
             && (int) $report->assigned_to === (int) auth()->id();
 
+        // Gestor original y último remitido. Si el caso se tomó antes de esta
+        // columna, se usa el asignado actual como respaldo.
+        $managerName = $report->takenBy?->name
+            ?? $report->assignedAdmin?->name
+            ?? '—';
+        $referredToName = $report->referredTo?->name ?? '—';
+
+        // Historial de remisiones, de la más reciente a la más antigua.
+        $referrals = $report->referrals
+            ->sortByDesc('id')
+            ->map(fn ($referral) => [
+                'id' => (int) $referral->id,
+                'date' => $referral->created_at?->format('d/m/Y H:i') ?? '—',
+                'from' => $referral->fromAdmin?->name ?? '—',
+                'to' => $referral->toAdmin?->name ?? '—',
+                'observation' => (string) $referral->observation,
+            ])
+            ->values();
+
+        // Chat del caso (ticket): solo lo ve quien está dentro. El beneficiario
+        // y el administrador que lo tomó; otro administrador no entra hasta
+        // tomarlo (aunque sí puede ver la ficha y monitorear el caso).
+        $ticketChat = $report->conversation;
+        $canOpenTicketChat = $ticketChat !== null
+            && $ticketChat->users->contains('id', auth()->id());
+        $ticketChatUrl = $canOpenTicketChat
+            ? module_url('chat').'?conversacion='.$ticketChat->id
+            : null;
+
         return [
             'id' => $report->id,
+            'ticket' => $report->id,
             'date' => $report->created_at?->format('d/m/Y H:i') ?? '—',
             'date_order' => $report->created_at?->toIso8601String(),
             'status' => e($statusLabel),
@@ -258,6 +509,14 @@ class ModeracionController extends Controller
             'status_html' => '<span class="moderacion-status moderacion-status--'.e($status).'">'.e($statusLabel).'</span>',
             'assigned_name' => e($report->assignedAdmin?->name ?? '—'),
             'assigned_raw' => $report->assignedAdmin?->name ?? '—',
+            // Columna y filtro «Gestionado por»: administrador original.
+            'manager' => e($managerName),
+            'manager_raw' => $managerName,
+            'manager_id' => $report->taken_by !== null ? (int) $report->taken_by : null,
+            // Columna y filtro «Remitido a»: último administrador remitido.
+            'referred_to' => e($referredToName),
+            'referred_to_raw' => $referredToName,
+            'referred_to_id' => $report->referred_to_id !== null ? (int) $report->referred_to_id : null,
             'taken_at' => $report->taken_at?->format('d/m/Y H:i') ?? '—',
             'attention_observation' => (string) ($report->attention_observation ?? ''),
             'closed_at' => $report->closed_at?->format('d/m/Y H:i') ?? '—',
@@ -276,9 +535,16 @@ class ModeracionController extends Controller
             'conversation' => e($conversationLabel),
             'conversation_raw' => $conversationLabel,
             'conversation_url' => $conversationUrl,
+            'ticket_chat_url' => $ticketChatUrl,
+            'ticket_chat_id' => $ticketChat?->id,
+            'has_ticket_chat' => $ticketChat !== null,
+            // Remisión: solo el gestor actual puede remitir el caso.
+            'can_refer' => $report->isAttending() && $isMine,
+            'referrals' => $referrals,
             'actions' => view('moderacion.partials.actions', [
                 'report' => $report,
                 'conversationUrl' => $conversationUrl,
+                'ticketChatUrl' => $ticketChatUrl,
             ])->render(),
         ];
     }
@@ -293,6 +559,10 @@ class ModeracionController extends Controller
             return 'Canal de reportes';
         }
 
+        if ($conversation->type === 'report') {
+            return 'Reporte Nº: '.($conversation->report_id ?? $conversation->id);
+        }
+
         if ($conversation->isGroup()) {
             return 'Grupo: '.($conversation->name ?: 'Sin nombre');
         }
@@ -302,3 +572,4 @@ class ModeracionController extends Controller
         return $names !== '' ? 'Directa: '.$names : 'Conversación directa';
     }
 }
+

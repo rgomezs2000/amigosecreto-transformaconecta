@@ -141,6 +141,16 @@ Route::post('/moderacion/reportes/{report}/cerrar', [ModeracionController::class
     ->middleware('auth')
     ->name('moderacion.reportes.cerrar');
 
+// Remisión del caso a otro administrador: combobox de administradores y
+// traspaso del chat del ticket.
+Route::get('/moderacion/administradores', [ModeracionController::class, 'administradores'])
+    ->middleware('auth')
+    ->name('moderacion.administradores');
+
+Route::post('/moderacion/reportes/{report}/remitir', [ModeracionController::class, 'remitir'])
+    ->middleware('auth')
+    ->name('moderacion.reportes.remitir');
+
 // Bloqueos entre usuarios: listado con estado, detalle y sincronización.
 Route::get('/moderacion/bloqueos/usuarios', [ModeracionBloqueosController::class, 'usuarios'])
     ->middleware('auth')

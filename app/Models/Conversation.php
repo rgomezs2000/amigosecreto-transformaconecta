@@ -17,6 +17,7 @@ class Conversation extends Model
         'created_by',
         'event_id',
         'assignment_id',
+        'report_id',
         'is_moderated',
         'is_read_only',
         'pinned_message_id',
@@ -84,6 +85,14 @@ class Conversation extends Model
     }
 
     /**
+     * Reporte (ticket) al que pertenece el chat del caso.
+     */
+    public function report(): BelongsTo
+    {
+        return $this->belongsTo(ChatReport::class, 'report_id');
+    }
+
+    /**
      * ¿Se puede desarchivar? Los chats de amigo secreto de un evento ya
      * terminado quedan archivados para siempre.
      */
@@ -127,6 +136,15 @@ class Conversation extends Model
     public function isEventChannel(): bool
     {
         return $this->type === 'event';
+    }
+
+    /**
+     * Chat de un caso de reporte: solo el beneficiario y el administrador que
+     * lo tomó. Se abre al tomar el caso y queda en solo lectura al cerrarlo.
+     */
+    public function isReportChat(): bool
+    {
+        return $this->type === 'report';
     }
 
     public function isReadOnly(): bool
@@ -175,6 +193,11 @@ class Conversation extends Model
             }
 
             return 'Amigo secreto';
+        }
+
+        if ($this->isReportChat()) {
+            // El chat del caso se identifica con el número de ticket.
+            return $this->name ?: 'Reporte Nº: '.($this->report_id ?? $this->id);
         }
 
         if ($this->isGroup()) {
