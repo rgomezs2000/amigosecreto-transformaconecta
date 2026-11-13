@@ -33,7 +33,7 @@ class ShareAppShell
             $frozen = $event?->isSuspended() ?? false;
 
             $menuModules = $user->accessibleModules()
-                ->whereNotIn('slug', ['login', 'logout', 'notificaciones'])
+                ->whereNotIn('code', ['login', 'logout', 'notificaciones'])
                 ->load('category')
                 ->reject(fn (Module $module) => $frozen && $module->category?->slug === 'amigo-secreto')
                 ->sortBy(fn (Module $module) => [
@@ -44,16 +44,14 @@ class ShareAppShell
 
             // Inicio solo va en el menú, no en las tarjetas del panel.
             $modules = $menuModules
-                ->whereNotIn('slug', [''])
+                ->reject(fn (Module $module) => $module->code === 'inicio' || blank($module->slug))
                 ->values();
 
             $groups = $modules->groupBy(fn (Module $module) => $this->groupName($module));
             $menuGroups = $menuModules->groupBy(fn (Module $module) => $this->groupName($module));
             $event = Event::query()->orderByDesc('year')->first();
 
-            $notificationsModule = Module::query()
-                ->where('slug', 'notificaciones')
-                ->first();
+            $notificationsModule = Module::activeByCode('notificaciones');
 
             $showNotifications = $notificationsModule !== null
                 && $user->hasModuleAccess($notificationsModule);
@@ -85,7 +83,7 @@ class ShareAppShell
                 'notificationsCount' => $notificationsCount,
                 'notificationSettings' => $notificationSettings,
                 'notificationPreferences' => $notificationPreferences,
-                'canManageNotifications' => $menuModules->contains('slug', 'control-notificaciones'),
+                'canManageNotifications' => $menuModules->contains('code', 'control-notificaciones'),
                 'dollarRate' => $dollarRate,
                 // Invitación a un grupo pendiente de mostrar como modal al entrar.
                 'chatInvitation' => $request->session()->get('chat.invitation'),

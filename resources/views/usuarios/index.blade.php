@@ -108,7 +108,7 @@
          data-url-crear="{{ route('usuarios.crear') }}"
          data-url-usuario="{{ url('/usuarios') }}"
          data-url-eliminar-varios="{{ route('usuarios.eliminar-varios') }}"
-         data-url-index="{{ route('usuarios.index') }}"
+         data-url-index="{{ module_url('usuarios') }}"
          data-url-login-existe="{{ route('perfil.login-existe') }}"
          hidden></div>
 

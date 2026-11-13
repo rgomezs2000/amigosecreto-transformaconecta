@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Notifications\DatabaseNotificationCollection;
-use Illuminate\Support\Facades\Route;
 
 /**
  * Notificación push/visual de un usuario.
@@ -70,8 +69,10 @@ class Notification extends DatabaseNotification
             return null;
         }
 
-        return Route::has('chat.index')
-            ? route('chat.index').'?conversacion='.(int) $conversationId
+        $chat = Module::activeByCode('chat');
+
+        return $chat !== null
+            ? $chat->url().'?conversacion='.(int) $conversationId
             : null;
     }
 }

@@ -16,10 +16,7 @@ class PermisosController extends Controller
 {
     private function ensureAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'permisos')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('permisos');
 
         if ($module === null) {
             abort(404);
@@ -111,7 +108,7 @@ class PermisosController extends Controller
             $request->session()->flash('permisos_status', 'Permiso creado correctamente.');
 
             return api_success('Permiso creado correctamente.', [
-                'redirect' => route('permisos.index'),
+                'redirect' => module_url('permisos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al crear el permiso', ['error' => $exception->getMessage()]);
@@ -162,7 +159,7 @@ class PermisosController extends Controller
             $request->session()->flash('permisos_status', 'Permiso modificado correctamente.');
 
             return api_success('Permiso modificado correctamente.', [
-                'redirect' => route('permisos.index'),
+                'redirect' => module_url('permisos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al modificar el permiso', [
@@ -194,7 +191,7 @@ class PermisosController extends Controller
             $request->session()->flash('permisos_status', 'Permiso eliminado correctamente.');
 
             return api_success('Permiso eliminado correctamente.', [
-                'redirect' => route('permisos.index'),
+                'redirect' => module_url('permisos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al eliminar el permiso', [
@@ -272,7 +269,7 @@ class PermisosController extends Controller
         $request->session()->flash('permisos_status', $message);
 
         return api_success($message, [
-            'redirect' => route('permisos.index'),
+            'redirect' => module_url('permisos'),
             'deleted' => $deleted,
             'blocked' => $blocked,
         ]);

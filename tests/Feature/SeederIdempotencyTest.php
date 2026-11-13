@@ -38,7 +38,7 @@ class SeederIdempotencyTest extends TestCase
     {
         $this->seed();
 
-        $module = Module::query()->where('slug', 'perfiles')->firstOrFail();
+        $module = Module::query()->where('code', 'perfil')->firstOrFail();
         $permission = Permission::query()->where('slug', 'view')->firstOrFail();
 
         foreach (['administrador', 'usuario'] as $slug) {

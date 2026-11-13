@@ -18,12 +18,14 @@ class AccessSeeder extends Seeder
             return;
         }
 
-        $moduleIds = Module::pluck('id', 'slug');
+        // Los accesos se siembran por código de módulo, no por slug: renombrar
+        // la URL de un módulo no debe dejarlo sin sus permisos iniciales.
+        $moduleIds = Module::pluck('id', 'code');
         $permissionIds = Permission::pluck('id', 'slug');
 
         $map = [
-            '' => ['view'],
-            'perfiles' => ['view'],
+            'inicio' => ['view'],
+            'perfil' => ['view'],
             'roles' => ['view', 'create', 'edit', 'delete'],
             'matriz' => ['view', 'grant', 'revoke'],
             'permisos' => ['view', 'create', 'edit', 'delete', 'grant', 'revoke'],
@@ -52,10 +54,18 @@ class AccessSeeder extends Seeder
             'logout' => ['view'],
         ];
 
-        foreach ($map as $moduleSlug => $permissionSlugs) {
+        foreach ($map as $moduleCode => $permissionSlugs) {
+            if (! isset($moduleIds[$moduleCode])) {
+                continue;
+            }
+
             foreach ($permissionSlugs as $permissionSlug) {
+                if (! isset($permissionIds[$permissionSlug])) {
+                    continue;
+                }
+
                 DB::table('module_permission')->updateOrInsert([
-                    'module_id' => $moduleIds[$moduleSlug],
+                    'module_id' => $moduleIds[$moduleCode],
                     'permission_id' => $permissionIds[$permissionSlug],
                 ]);
             }
@@ -64,9 +74,9 @@ class AccessSeeder extends Seeder
         $admin = Profile::where('slug', 'administrador')->firstOrFail();
         $usuario = Profile::where('slug', 'usuario')->firstOrFail();
 
-        $adminModuleSlugs = [
-            '',
-            'perfiles',
+        $adminModuleCodes = [
+            'inicio',
+            'perfil',
             'roles',
             'matriz',
             'permisos',
@@ -86,9 +96,9 @@ class AccessSeeder extends Seeder
             'logout',
         ];
 
-        $participantModuleSlugs = [
-            '',
-            'perfiles',
+        $participantModuleCodes = [
+            'inicio',
+            'perfil',
             'chat',
             'asignar-amigo',
             'ver-tu-amigo',
@@ -100,8 +110,8 @@ class AccessSeeder extends Seeder
             'logout',
         ];
 
-        $adminModuleIds = Module::whereIn('slug', $adminModuleSlugs)->pluck('id');
-        $participantModuleIds = Module::whereIn('slug', $participantModuleSlugs)->pluck('id');
+        $adminModuleIds = Module::whereIn('code', $adminModuleCodes)->pluck('id');
+        $participantModuleIds = Module::whereIn('code', $participantModuleCodes)->pluck('id');
 
         $pairs = DB::table('module_permission')->get();
 

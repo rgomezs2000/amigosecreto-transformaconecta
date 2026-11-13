@@ -121,7 +121,7 @@
                         Si desactivas el sonido, los avisos quedan solo a la vista para evitar
                         estímulos auditivos inesperados.
                         @if ($shell['canManageNotifications'])
-                            <a href="{{ route('notificaciones.index') }}">Configuración global</a>
+                            <a href="{{ module_url('control-notificaciones') }}">Configuración global</a>
                         @endif
                     </p>
 

@@ -79,7 +79,7 @@ class ModeracionTest extends TestCase
         $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
 
         $this->actingAs($admin)
-            ->get('/administracion/moderacion')
+            ->get(module_url('moderacion'))
             ->assertOk()
             ->assertSee('Reportes del chat')
             ->assertSee('tomar el caso');
@@ -105,7 +105,7 @@ class ModeracionTest extends TestCase
         $user = $this->makeUser('Curioso', UserRole::Participant, ['chat']);
 
         $this->actingAs($user)
-            ->get('/administracion/moderacion')
+            ->get(module_url('moderacion'))
             ->assertForbidden();
 
         $this->actingAs($user)
@@ -176,7 +176,7 @@ class ModeracionTest extends TestCase
         $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
 
         $this->actingAs($admin)
-            ->get('/administracion/moderacion')
+            ->get(module_url('moderacion'))
             ->assertOk()
             ->assertSee('Reportes')
             ->assertSee('Bloqueos entre usuarios')
@@ -192,7 +192,7 @@ class ModeracionTest extends TestCase
         $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
 
         $this->actingAs($admin)
-            ->get('/administracion/moderacion')
+            ->get(module_url('moderacion'))
             ->assertOk()
             // Sin casillas: la selección es por clic y las flechas mueven.
             ->assertDontSee('data-transfer-check', false)
@@ -790,10 +790,12 @@ class ModeracionTest extends TestCase
 
     public function test_las_rutas_de_reporte_siguen_siendo_de_solo_lectura(): void
     {
+        // La página del módulo la sirve el enrutador de módulos (GET); aquí
+        // solo quedan las rutas de consulta con nombre propio.
         $reportRoutes = collect(Route::getRoutes()->getRoutes())
-            ->filter(fn ($route) => in_array($route->getName(), ['moderacion.index', 'moderacion.datos'], true));
+            ->filter(fn ($route) => $route->getName() === 'moderacion.datos');
 
-        $this->assertCount(2, $reportRoutes);
+        $this->assertCount(1, $reportRoutes);
 
         foreach ($reportRoutes as $route) {
             $this->assertSame(
@@ -802,5 +804,7 @@ class ModeracionTest extends TestCase
                 'La ruta '.$route->uri().' debería ser de solo lectura.'
             );
         }
+
+        $this->post('/administracion/moderacion')->assertStatus(405);
     }
 }

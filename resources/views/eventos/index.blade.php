@@ -42,7 +42,7 @@
 
     <div id="eventos-config"
          data-url-crear="{{ route('eventos.crear') }}"
-         data-url-index="{{ route('eventos.index') }}"
+         data-url-index="{{ module_url('eventos') }}"
          data-url-reiniciar="{{ route('eventos.reiniciar') }}"
          data-url-participantes="{{ url('/eventos') }}"
          hidden></div>

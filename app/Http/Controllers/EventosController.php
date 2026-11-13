@@ -31,10 +31,7 @@ class EventosController extends Controller
 
     private function ensureAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'eventos')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('eventos');
 
         if ($module === null) {
             abort(404);
@@ -160,7 +157,7 @@ class EventosController extends Controller
 
             return api_success('Evento creado correctamente.', [
                 'event_id' => $event->id,
-                'redirect' => route('eventos.index'),
+                'redirect' => module_url('eventos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al crear el evento', ['error' => $exception->getMessage()]);
@@ -210,7 +207,7 @@ class EventosController extends Controller
                     'El sorteo está abierto',
                     'El evento ha comenzado. Ya puedes elegir a tu amigo secreto.',
                     ['event_id' => $event->id],
-                    route('sorteo.index'),
+                    module_url('asignar-amigo'),
                     'evento'
                 );
             }
@@ -226,13 +223,13 @@ class EventosController extends Controller
                     'Entra a «Sorteo ciego» y pulsa «Descubrir a mi Amigo Secreto».',
                     'Fecha del intercambio: '.$event->exchange_at?->format('d/m/Y').'.',
                 ],
-                ['label' => 'Descubrir a mi amigo secreto', 'url' => route('sorteo.index')]
+                ['label' => 'Descubrir a mi amigo secreto', 'url' => module_url('asignar-amigo')]
             );
 
             $request->session()->flash('eventos_status', 'Evento iniciado. Se enviaron las notificaciones.');
 
             return api_success('Evento iniciado correctamente.', [
-                'redirect' => route('eventos.index'),
+                'redirect' => module_url('eventos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al iniciar el evento', ['event_id' => $event->id, 'error' => $exception->getMessage()]);
@@ -291,7 +288,7 @@ class EventosController extends Controller
             $request->session()->flash('eventos_status', 'Evento suspendido. Se enviaron las notificaciones.');
 
             return api_success('Evento suspendido correctamente.', [
-                'redirect' => route('eventos.index'),
+                'redirect' => module_url('eventos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al suspender el evento', ['event_id' => $event->id, 'error' => $exception->getMessage()]);
@@ -362,7 +359,7 @@ class EventosController extends Controller
             $request->session()->flash('eventos_status', 'Evento pospuesto. Se enviaron las notificaciones.');
 
             return api_success('Evento pospuesto correctamente.', [
-                'redirect' => route('eventos.index'),
+                'redirect' => module_url('eventos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al posponer el evento', ['event_id' => $event->id, 'error' => $exception->getMessage()]);
@@ -418,7 +415,7 @@ class EventosController extends Controller
             $request->session()->flash('eventos_status', 'Evento cancelado y eliminado. Se enviaron las notificaciones.');
 
             return api_success('Evento cancelado y eliminado.', [
-                'redirect' => route('eventos.index'),
+                'redirect' => module_url('eventos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al cancelar el evento', ['event_id' => $event->id, 'error' => $exception->getMessage()]);
@@ -480,7 +477,7 @@ class EventosController extends Controller
             $request->session()->flash('eventos_status', 'Sorteo reiniciado. Los participantes pueden volver a elegir.');
 
             return api_success('Sorteo reiniciado correctamente.', [
-                'redirect' => route('eventos.index'),
+                'redirect' => module_url('eventos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al reiniciar el sorteo', [

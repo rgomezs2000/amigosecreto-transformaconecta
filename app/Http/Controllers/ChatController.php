@@ -61,10 +61,7 @@ class ChatController extends Controller
 
     private function ensureAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'chat')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('chat');
 
         if ($module === null) {
             abort(404);
@@ -1132,7 +1129,7 @@ class ChatController extends Controller
                 'reporter' => $user->name,
                 'reason' => $reason,
             ],
-            route('moderacion.index'),
+            module_url('moderacion'),
             'reporte',
             $user
         );
@@ -1180,7 +1177,7 @@ class ChatController extends Controller
                     'sender' => $sender->name,
                     'is_group' => $isGroup,
                 ],
-                route('chat.index').'?conversacion='.$conversation->id,
+                module_url('chat').'?conversacion='.$conversation->id,
                 'chat'
             );
         } catch (Throwable $exception) {
@@ -1974,7 +1971,7 @@ class ChatController extends Controller
                 'reporter' => $user->name,
                 'reason' => $reason,
             ],
-            route('moderacion.index'),
+            module_url('moderacion'),
             'reporte',
             $user
         );
@@ -2619,7 +2616,7 @@ class ChatController extends Controller
                 'reported_user' => $user->name,
                 'reason' => $reason,
             ],
-            route('moderacion.index'),
+            module_url('moderacion'),
             'reporte',
             $current
         );

@@ -1231,6 +1231,53 @@ textarea:focus-visible,
     font-weight: 600;
 }
 
+/* Matriz del perfil: DataTable de solo lectura con búsqueda y filtros. */
+.perfil-matriz-tools {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.perfil-matriz-search {
+    display: grid;
+    gap: .375rem;
+}
+
+.perfil-matriz-filters {
+    margin-top: 0;
+}
+
+.perfil-matriz-table {
+    width: 100% !important;
+    margin: 0;
+}
+
+#perfil-matriz-table thead th,
+#perfil-matriz-table tfoot th,
+#perfil-matriz-table thead td,
+#perfil-matriz-table tfoot td {
+    padding: .75rem;
+    background: #F8FAFC;
+    color: var(--muted);
+    font-size: .875rem;
+    font-weight: 700;
+    text-align: left !important;
+    text-transform: none;
+}
+
+#perfil-matriz-table tbody td {
+    padding: .75rem;
+    text-align: left !important;
+}
+
+#perfil-matriz-table th.perfil-col-module {
+    width: 32% !important;
+}
+
+#perfil-matriz-table th.perfil-col-group {
+    width: 18% !important;
+}
+
 .field-message {
     margin: .375rem 0 0;
     font-size: .875rem;
@@ -5054,13 +5101,11 @@ div.dt-processing {
 
 .sorteo-page {
     display: grid;
-    gap: 1.25rem;
-    max-width: 44rem;
-    margin: 0 auto;
+    gap: 1.5rem;
 }
 
 .sorteo-card {
-    padding: 1.75rem;
+    padding: clamp(1.25rem, 3vw, 2rem);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -5069,26 +5114,11 @@ div.dt-processing {
 
 .sorteo-card__head {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
+    justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1.25rem;
-}
-
-.sorteo-card__icon {
-    display: grid;
-    flex: 0 0 auto;
-    place-items: center;
-    width: 3rem;
-    height: 3rem;
-    background: var(--accent-soft);
-    border-radius: var(--radius-sm);
-    color: var(--accent);
-    font-size: 1.25rem;
-}
-
-.sorteo-card__icon--calm {
-    background: var(--surface-2);
-    color: var(--muted);
+    margin-bottom: 1.5rem;
 }
 
 .sorteo-card__title {

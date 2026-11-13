@@ -74,10 +74,7 @@ class DinamicaController extends Controller
      */
     private function ensureModuleAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'restablecer-dinamica')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('restablecer-dinamica');
 
         if ($module === null) {
             abort(404);

@@ -71,7 +71,7 @@
          data-url-crear="{{ route('permisos.crear') }}"
          data-url-permiso="{{ url('/permisos') }}"
          data-url-eliminar-varios="{{ route('permisos.eliminar-varios') }}"
-         data-url-index="{{ route('permisos.index') }}"
+         data-url-index="{{ module_url('permisos') }}"
          hidden></div>
 
     <x-app-modal id="modal-permission-form" title="Nuevo permiso">

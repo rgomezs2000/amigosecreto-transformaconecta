@@ -19,10 +19,7 @@ class UsuariosController extends Controller
 {
     private function ensureAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'usuarios')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('usuarios');
 
         if ($module === null) {
             abort(404);
@@ -168,7 +165,7 @@ class UsuariosController extends Controller
             $request->session()->flash('usuarios_status', $message);
 
             return api_success($message, [
-                'redirect' => route('usuarios.index'),
+                'redirect' => module_url('usuarios'),
                 'mail_sent' => $sent,
             ]);
         } catch (Throwable $exception) {
@@ -250,7 +247,7 @@ class UsuariosController extends Controller
             $request->session()->flash('usuarios_status', 'Usuario modificado correctamente.');
 
             return api_success('Usuario modificado correctamente.', [
-                'redirect' => route('usuarios.index'),
+                'redirect' => module_url('usuarios'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al modificar el usuario', [
@@ -280,7 +277,7 @@ class UsuariosController extends Controller
             $request->session()->flash('usuarios_status', 'Usuario eliminado correctamente.');
 
             return api_success('Usuario eliminado correctamente.', [
-                'redirect' => route('usuarios.index'),
+                'redirect' => module_url('usuarios'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al eliminar el usuario', [
@@ -309,7 +306,7 @@ class UsuariosController extends Controller
             $request->session()->flash('usuarios_status', $message);
 
             return api_success($message, [
-                'redirect' => route('usuarios.index'),
+                'redirect' => module_url('usuarios'),
                 'mail_sent' => $sent,
             ]);
         } catch (Throwable $exception) {
@@ -344,7 +341,7 @@ class UsuariosController extends Controller
             $request->session()->flash('usuarios_status', 'Usuario bloqueado correctamente.');
 
             return api_success('Usuario bloqueado correctamente.', [
-                'redirect' => route('usuarios.index'),
+                'redirect' => module_url('usuarios'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al bloquear el usuario', [
@@ -370,7 +367,7 @@ class UsuariosController extends Controller
             $request->session()->flash('usuarios_status', 'Usuario desbloqueado correctamente.');
 
             return api_success('Usuario desbloqueado correctamente.', [
-                'redirect' => route('usuarios.index'),
+                'redirect' => module_url('usuarios'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al desbloquear el usuario', [
@@ -426,7 +423,7 @@ class UsuariosController extends Controller
             $request->session()->flash('usuarios_status', $message);
 
             return api_success($message, [
-                'redirect' => route('usuarios.index'),
+                'redirect' => module_url('usuarios'),
                 'deleted' => $deleted,
             ]);
         } catch (Throwable $exception) {

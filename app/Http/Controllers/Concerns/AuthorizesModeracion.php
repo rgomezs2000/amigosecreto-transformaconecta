@@ -19,10 +19,7 @@ trait AuthorizesModeracion
      */
     protected function ensureModeracionAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'moderacion')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('moderacion');
 
         if ($module === null) {
             abort(404);

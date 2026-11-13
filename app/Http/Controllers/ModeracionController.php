@@ -238,7 +238,7 @@ class ModeracionController extends Controller
         $message = $report->message;
         $conversation = $message?->conversation;
         $conversationUrl = $conversation !== null
-            ? route('chat.index').'?conversacion='.$conversation->id
+            ? module_url('chat').'?conversacion='.$conversation->id
             : null;
         $conversationLabel = $this->conversationLabel($conversation);
         $reporterName = $report->reporter?->name ?? '—';

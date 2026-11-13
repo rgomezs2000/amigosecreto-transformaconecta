@@ -8,10 +8,6 @@
     <section class="sorteo-page" aria-label="Sorteo ciego">
         <article class="sorteo-card">
             <header class="sorteo-card__head">
-                <span class="sorteo-card__icon" aria-hidden="true">
-                    <i class="fa-solid fa-handshake"></i>
-                </span>
-
                 <div>
                     <h2 class="sorteo-card__title">Sorteo ciego</h2>
                     <p class="sorteo-card__text">
@@ -67,7 +63,7 @@
                         <span>Ver de nuevo</span>
                     </button>
 
-                    <a class="btn btn-outline-secondary" href="{{ route('ver-tu-amigo.index') }}">
+                    <a class="btn btn-outline-secondary" href="{{ module_url('ver-tu-amigo') }}">
                         <i class="fa-solid fa-user-secret" aria-hidden="true"></i>
                         <span>Ver tu amigo y tus pistas</span>
                     </a>

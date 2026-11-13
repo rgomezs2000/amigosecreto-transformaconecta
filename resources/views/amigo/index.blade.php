@@ -8,10 +8,6 @@
     <section class="sorteo-page" aria-label="Ver tu amigo">
         <article class="sorteo-card">
             <header class="sorteo-card__head">
-                <span class="sorteo-card__icon sorteo-card__icon--calm" aria-hidden="true">
-                    <i class="fa-solid fa-user-secret"></i>
-                </span>
-
                 <div>
                     <h2 class="sorteo-card__title">Tu amigo secreto</h2>
                     <p class="sorteo-card__text">Puedes consultarlo cuantas veces quieras: no se vuelve a sortear.</p>
@@ -25,7 +21,7 @@
                 </p>
 
                 <div class="sorteo-cta">
-                    <a class="btn btn-primary" href="{{ route('sorteo.index') }}">
+                    <a class="btn btn-primary" href="{{ module_url('asignar-amigo') }}">
                         <i class="fa-solid fa-handshake" aria-hidden="true"></i>
                         <span>Ir al Sorteo ciego</span>
                     </a>

@@ -39,7 +39,7 @@ class SuperAdminAccessSeeder extends Seeder
             return;
         }
 
-        $modules = Module::query()->whereIn('slug', self::MODULES)->get();
+        $modules = Module::query()->whereIn('code', self::MODULES)->get();
 
         foreach ($modules as $module) {
             UserPermissionModule::query()->firstOrCreate(

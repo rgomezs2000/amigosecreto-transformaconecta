@@ -20,10 +20,7 @@ class CategoriasController extends Controller
      */
     private function ensureAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'categorias')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('categorias');
 
         if ($module === null) {
             abort(404);
@@ -125,7 +122,7 @@ class CategoriasController extends Controller
             $request->session()->flash('categorias_status', 'Categoría creada correctamente.');
 
             return api_success('Categoría creada correctamente.', [
-                'redirect' => route('categorias.index'),
+                'redirect' => module_url('categorias'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al crear la categoría', ['error' => $exception->getMessage()]);
@@ -190,7 +187,7 @@ class CategoriasController extends Controller
             $request->session()->flash('categorias_status', 'Categoría modificada correctamente.');
 
             return api_success('Categoría modificada correctamente.', [
-                'redirect' => route('categorias.index'),
+                'redirect' => module_url('categorias'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al modificar la categoría', [
@@ -222,7 +219,7 @@ class CategoriasController extends Controller
             $request->session()->flash('categorias_status', 'Categoría eliminada correctamente.');
 
             return api_success('Categoría eliminada correctamente.', [
-                'redirect' => route('categorias.index'),
+                'redirect' => module_url('categorias'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al eliminar la categoría', [
@@ -299,7 +296,7 @@ class CategoriasController extends Controller
         $request->session()->flash('categorias_status', $message);
 
         return api_success($message, [
-            'redirect' => route('categorias.index'),
+            'redirect' => module_url('categorias'),
             'deleted' => $deleted,
             'blocked' => $blocked,
         ]);

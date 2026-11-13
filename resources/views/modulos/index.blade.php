@@ -94,7 +94,7 @@
          data-url-crear="{{ route('modulos.crear') }}"
          data-url-modulo="{{ url('/modulos') }}"
          data-url-eliminar-varios="{{ route('modulos.eliminar-varios') }}"
-         data-url-index="{{ route('modulos.index') }}"
+         data-url-index="{{ module_url('modulos') }}"
          hidden></div>
 
     <x-app-modal id="modal-module-form" title="Nuevo módulo">

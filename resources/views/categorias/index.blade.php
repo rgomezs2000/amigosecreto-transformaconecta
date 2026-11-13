@@ -73,7 +73,7 @@
          data-url-crear="{{ route('categorias.crear') }}"
          data-url-categoria="{{ url('/categorias') }}"
          data-url-eliminar-varios="{{ route('categorias.eliminar-varios') }}"
-         data-url-index="{{ route('categorias.index') }}"
+         data-url-index="{{ module_url('categorias') }}"
          hidden></div>
 
     <x-app-modal id="modal-category-form" title="Nueva categoría">

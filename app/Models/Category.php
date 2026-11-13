@@ -27,6 +27,32 @@ class Category extends Model
         ];
     }
 
+    /**
+     * El slug de la categoría forma parte de la URL de sus módulos: si
+     * cambia, todas esas rutas cambian con él. Se recuerdan las anteriores
+     * para responder con un 301 en vez de un 404.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (Category $category) {
+            if (! $category->isDirty('slug')) {
+                return;
+            }
+
+            foreach ($category->modules()->get() as $module) {
+                // La URL nueva se calcula con el slug en curso; la anterior,
+                // con el que todavía está guardado en la base de datos.
+                $module->setRelation('category', $category);
+
+                $previous = $module->originalPath();
+
+                if ($previous !== '') {
+                    $module->rememberPath($previous);
+                }
+            }
+        });
+    }
+
     public function modules(): HasMany
     {
         return $this->hasMany(Module::class);

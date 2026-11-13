@@ -17,10 +17,7 @@ class ModulosController extends Controller
 {
     private function ensureAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'modulos')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('modulos');
 
         if ($module === null) {
             abort(404);
@@ -140,7 +137,7 @@ class ModulosController extends Controller
             $request->session()->flash('modulos_status', 'Módulo creado correctamente.');
 
             return api_success('Módulo creado correctamente.', [
-                'redirect' => route('modulos.index'),
+                'redirect' => module_url('modulos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al crear el módulo', ['error' => $exception->getMessage()]);
@@ -209,7 +206,7 @@ class ModulosController extends Controller
             $request->session()->flash('modulos_status', 'Módulo modificado correctamente.');
 
             return api_success('Módulo modificado correctamente.', [
-                'redirect' => route('modulos.index'),
+                'redirect' => module_url('modulos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al modificar el módulo', [
@@ -241,7 +238,7 @@ class ModulosController extends Controller
             $request->session()->flash('modulos_status', 'Módulo eliminado correctamente.');
 
             return api_success('Módulo eliminado correctamente.', [
-                'redirect' => route('modulos.index'),
+                'redirect' => module_url('modulos'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al eliminar el módulo', [
@@ -318,7 +315,7 @@ class ModulosController extends Controller
         $request->session()->flash('modulos_status', $message);
 
         return api_success($message, [
-            'redirect' => route('modulos.index'),
+            'redirect' => module_url('modulos'),
             'deleted' => $deleted,
             'blocked' => $blocked,
         ]);

@@ -3,51 +3,183 @@
 namespace App\Http\Controllers;
 
 use App\Models\Module;
+use App\Models\Permission;
 use App\Models\User;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Throwable;
 
 class PerfilController extends Controller
 {
     /**
-     * Muestra el perfil propio: datos, rol, módulos y permisos.
+     * Módulo compartido que habilita la página de perfil.
      */
-    public function index(Request $request): View
+    private function perfilModule(): Module
     {
-        $user = $request->user();
-
-        $module = Module::query()
-            ->where('slug', 'perfiles')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('perfil');
 
         if ($module === null) {
             abort(404);
         }
 
-        if (! $user->hasModuleAccess($module)) {
+        return $module;
+    }
+
+    private function ensureAccess(?User $user = null): Module
+    {
+        $module = $this->perfilModule();
+        $user ??= auth()->user();
+
+        if (! $user?->hasModuleAccess($module)) {
             abort(403);
         }
 
-        $modules = $user->accessibleModules()->map(function (Module $item) use ($user) {
-            return [
-                'module' => $item,
-                'permissions' => $user->permissionsForModule($item),
-            ];
-        });
+        return $module;
+    }
+
+    /**
+     * Muestra el perfil propio: datos y la matriz del perfil (sus accesos).
+     */
+    public function index(Request $request): View
+    {
+        $module = $this->ensureAccess($request->user());
+        $user = $request->user();
+
+        $filas = $this->matrizFilas($user);
 
         return view('perfil.index', [
             'user' => $user,
             'module' => $module,
-            'modules' => $modules,
+            'permisos' => $this->permisosDisponibles($filas),
             'perfil' => $user->profile,
         ]);
+    }
+
+    /**
+     * Matriz del perfil en formato DataTable (búsqueda y filtros en servidor).
+     */
+    public function matrizDatos(Request $request): JsonResponse
+    {
+        $this->ensureAccess($request->user());
+
+        $draw = (int) $request->input('draw', 1);
+        $start = max(0, (int) $request->input('start', 0));
+        $length = min(max(0, (int) $request->input('length', 10)), 200);
+        $search = trim((string) $request->input('search.value', ''));
+        $filterType = (string) $request->input('filter_type', 'all');
+        $filterPermission = (int) $request->input('filter_permission', 0);
+
+        $filas = $this->matrizFilas($request->user());
+        $total = count($filas);
+
+        if ($search !== '') {
+            $needle = Str::lower($search);
+
+            $filas = array_values(array_filter($filas, function (array $fila) use ($needle) {
+                $haystack = Str::lower(implode(' ', [
+                    $fila['name'],
+                    $fila['group'],
+                    $fila['permissions']->pluck('name')->implode(' '),
+                ]));
+
+                return str_contains($haystack, $needle);
+            }));
+        }
+
+        if ($filterType === 'with_permissions') {
+            $filas = array_values(array_filter(
+                $filas,
+                fn (array $fila) => $fila['permissions']->isNotEmpty()
+            ));
+        }
+
+        if ($filterType === 'permission' && $filterPermission > 0) {
+            $filas = array_values(array_filter(
+                $filas,
+                fn (array $fila) => $fila['permissions']->contains(
+                    fn (Permission $permiso) => (int) $permiso->id === $filterPermission
+                )
+            ));
+        }
+
+        $filtrados = count($filas);
+
+        $orden = (int) $request->input('order.0.column', 0) === 1 ? 'group' : 'name';
+        $descendente = $request->input('order.0.dir') === 'desc';
+
+        usort($filas, function (array $a, array $b) use ($orden, $descendente) {
+            $comparacion = strnatcasecmp($a[$orden], $b[$orden]);
+
+            if ($comparacion === 0) {
+                $comparacion = strnatcasecmp($a['name'], $b['name']);
+            }
+
+            return $descendente ? -$comparacion : $comparacion;
+        });
+
+        if ($length > 0) {
+            $filas = array_slice($filas, $start, $length);
+        }
+
+        $data = array_map(function (array $fila) {
+            $permisos = $fila['permissions']->map(
+                fn (Permission $permiso) => '<span class="badge perfil-badge">' . e($permiso->name) . '</span>'
+            )->implode('');
+
+            return [
+                'module' => '<span class="perfil-module"><i class="fa-solid ' . e($fila['icon'])
+                    . '" aria-hidden="true"></i>' . e($fila['name']) . '</span>',
+                'group' => e($fila['group']),
+                'permissions' => $permisos !== '' ? $permisos : '<span class="text-muted">Sin permisos</span>',
+            ];
+        }, $filas);
+
+        return response()->json([
+            'draw' => $draw,
+            'recordsTotal' => $total,
+            'recordsFiltered' => $filtrados,
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Filas de la matriz del perfil: módulos accesibles y permisos efectivos.
+     *
+     * @return array<int, array{id:int,name:string,group:string,icon:string,permissions:Collection<int,Permission>}>
+     */
+    private function matrizFilas(User $user): array
+    {
+        return $user->accessibleModules()->map(function (Module $item) use ($user) {
+            return [
+                'id' => (int) $item->id,
+                'name' => (string) $item->name,
+                'group' => (string) $item->group,
+                'icon' => (string) ($item->icon ?: 'fa-circle'),
+                'permissions' => $user->permissionsForModule($item)->sortBy('name')->values(),
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Permisos presentes en la matriz, para el filtro «Permiso».
+     *
+     * @param  array<int, array{permissions:Collection<int,Permission>}>  $filas
+     * @return Collection<int, Permission>
+     */
+    private function permisosDisponibles(array $filas): Collection
+    {
+        return collect($filas)
+            ->flatMap(fn (array $fila) => $fila['permissions'])
+            ->unique('id')
+            ->sortBy('name')
+            ->values();
     }
 
     /**
@@ -91,7 +223,7 @@ class PerfilController extends Controller
             $request->session()->flash('perfil_status', 'Perfil actualizado correctamente.');
 
             return api_success('Perfil actualizado correctamente.', [
-                'redirect' => route('perfil.index'),
+                'redirect' => module_url('perfil'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al actualizar el perfil', [
@@ -158,7 +290,7 @@ class PerfilController extends Controller
             $request->session()->flash('perfil_status', 'Contraseña modificada exitosamente.');
 
             return api_success('Contraseña modificada exitosamente.', [
-                'redirect' => route('perfil.index'),
+                'redirect' => module_url('perfil'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al cambiar la contraseña', [

@@ -97,7 +97,7 @@
     <div id="matriz-config"
          data-url-datos="{{ route('matriz.datos') }}"
          data-url-aplicar="{{ route('matriz.aplicar') }}"
-         data-url-index="{{ route('matriz.index') }}"
+         data-url-index="{{ module_url('matriz') }}"
          data-can-grant="{{ $canGrant ? '1' : '0' }}"
          data-can-revoke="{{ $canRevoke ? '1' : '0' }}"
          hidden></div>

@@ -298,4 +298,5 @@ Si quieres una barrera sin tocar el workflow: **Settings → Environments → `p
 - El repositorio es público, así que el servidor clona por HTTPS sin credenciales.
 - Los scripts corren con `-ExecutionPolicy Bypass`; no hay que cambiar la política de la máquina.
 - **`route:cache` está desactivado** en el pipeline: en Apache/Windows serializa la ruta `/` con solo `HEAD` y devuelve 405. Sin esa caché la app funciona igual; el impacto en rendimiento es mínimo.
+- **Las rutas de los módulos se resuelven en cada petición** contra el maestro de Módulos (ver `docs/rutas-modulos.md`): crear, renombrar o eliminar un módulo surte efecto sin regenerar cachés ni tocar `routes/web.php`.
 - La base de pruebas vive solo en el runner de GitHub; nunca en producción.

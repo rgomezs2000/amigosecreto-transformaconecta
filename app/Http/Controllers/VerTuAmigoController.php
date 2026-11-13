@@ -77,10 +77,7 @@ class VerTuAmigoController extends Controller
 
     private function ensureModuleAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'ver-tu-amigo')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('ver-tu-amigo');
 
         if ($module === null) {
             abort(404);

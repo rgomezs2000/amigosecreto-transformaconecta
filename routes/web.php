@@ -15,7 +15,7 @@ use App\Http\Controllers\MatrizPerfilesController;
 use App\Http\Controllers\ModeracionBloqueosController;
 use App\Http\Controllers\ModeracionController;
 use App\Http\Controllers\ModeracionGruposController;
-use App\Http\Controllers\ModuleController;
+use App\Http\Controllers\ModulePageController;
 use App\Http\Controllers\ModulosController;
 use App\Http\Controllers\NotificacionesController;
 use App\Http\Controllers\PerfilController;
@@ -50,10 +50,8 @@ Route::post('/logout', [LogoutController::class, 'logout'])
     ->middleware('auth')
     ->name('logout');
 
-// Perfil propio: el módulo compartido "perfiles".
-Route::get('/perfiles', [PerfilController::class, 'index'])
-    ->middleware('auth')
-    ->name('perfil.index');
+// Perfil propio: la página la sirve el enrutador de módulos del final de este
+// archivo, con la ruta que tenga el módulo «perfil» en el maestro de Módulos.
 
 Route::post('/perfil', [PerfilController::class, 'cambiarPerfil'])
     ->middleware('auth')
@@ -67,10 +65,13 @@ Route::get('/perfil/consultar-login', [UsuarioController::class, 'consultarLogin
     ->middleware('auth')
     ->name('perfil.login-existe');
 
-// Control de Notificaciones (solo administración).
-Route::get('/administracion/notificaciones', [NotificacionesController::class, 'index'])
+// Matriz del perfil: módulos y permisos del usuario en formato DataTable.
+Route::get('/perfil/matriz/datos', [PerfilController::class, 'matrizDatos'])
     ->middleware('auth')
-    ->name('notificaciones.index');
+    ->name('perfil.matriz.datos');
+
+// Control de Notificaciones: la página la sirve el enrutador de módulos; aquí
+// quedan sus acciones.
 
 Route::post('/administracion/notificaciones', [NotificacionesController::class, 'guardar'])
     ->middleware('auth')
@@ -106,10 +107,8 @@ Route::post('/notificaciones/{notification}/leer', [NotificacionesController::cl
     ->name('notificaciones.leer');
 
 // Restablecer la dinámica: proceso batch que deja el sistema en cero.
-// Solo lo abre el superadministrador; el middleware lo comprueba.
-Route::get('/administracion/restablecer-dinamica', [DinamicaController::class, 'index'])
-    ->middleware(['auth', 'superadmin'])
-    ->name('dinamica.index');
+// La página la sirve el enrutador de módulos, solo para el superadministrador;
+// aquí quedan las acciones del proceso.
 
 Route::post('/administracion/restablecer-dinamica', [DinamicaController::class, 'iniciar'])
     ->middleware(['auth', 'superadmin'])
@@ -121,9 +120,7 @@ Route::get('/administracion/restablecer-dinamica/progreso', [DinamicaController:
 
 // Moderación: pestaña de reportes (solo lectura, con acceso directo al chat),
 // pestaña de bloqueos entre usuarios y pestaña de vetados de grupo.
-Route::get('/administracion/moderacion', [ModeracionController::class, 'index'])
-    ->middleware('auth')
-    ->name('moderacion.index');
+// La página la sirve el enrutador de módulos; aquí quedan sus acciones.
 
 Route::get('/moderacion/datos', [ModeracionController::class, 'datos'])
     ->middleware('auth')
@@ -167,10 +164,8 @@ Route::post('/moderacion/grupos/{conversation}/vetados', [ModeracionGruposContro
     ->middleware('auth')
     ->name('moderacion.grupos.vetados.sincronizar');
 
-// Chat (buzón universal, flotante).
-Route::get('/mensajes/chat', [ChatController::class, 'index'])
-    ->middleware('auth')
-    ->name('chat.index');
+// Chat (buzón universal, flotante). La página la sirve el enrutador de
+// módulos; aquí quedan sus acciones.
 
 Route::get('/chat/resumen', [ChatController::class, 'resumen'])
     ->middleware('auth')
@@ -368,9 +363,7 @@ Route::get('/chat/{conversation}/perfil', [ChatController::class, 'perfil'])
     ->name('chat.perfil');
 
 // Sorteo ciego del participante: descubrir, volver a ver y avanzar.
-Route::get('/amigo-secreto/asignar-amigo', [SorteoCiegoController::class, 'index'])
-    ->middleware('auth')
-    ->name('sorteo.index');
+// La página la sirve el enrutador de módulos; aquí quedan sus acciones.
 
 Route::post('/amigo-secreto/asignar-amigo/descubrir', [SorteoCiegoController::class, 'descubrir'])
     ->middleware('auth')
@@ -381,18 +374,14 @@ Route::get('/amigo-secreto/asignar-amigo/amigo', [SorteoCiegoController::class, 
     ->name('sorteo.ver');
 
 // Ver tu amigo: consulta libre del amigo secreto y sus pistas.
-Route::get('/amigo-secreto/ver-tu-amigo', [VerTuAmigoController::class, 'index'])
-    ->middleware('auth')
-    ->name('ver-tu-amigo.index');
+// La página la sirve el enrutador de módulos; aquí queda la consulta de datos.
 
 Route::get('/amigo-secreto/ver-tu-amigo/datos', [VerTuAmigoController::class, 'datos'])
     ->middleware('auth')
     ->name('ver-tu-amigo.datos');
 
-// Eventos (tarjetas, planificación y ciclo de vida).
-Route::get('/eventos/eventos', [EventosController::class, 'index'])
-    ->middleware('auth')
-    ->name('eventos.index');
+// Eventos (tarjetas, planificación y ciclo de vida). La página la sirve el
+// enrutador de módulos; aquí quedan sus acciones.
 
 Route::get('/eventos/estado', [EventosController::class, 'estado'])
     ->middleware('auth')
@@ -431,10 +420,8 @@ Route::post('/eventos/{event}/sorteo/reiniciar', [EventosController::class, 'rei
     ->middleware('auth')
     ->name('eventos.sorteo.reiniciar');
 
-// Usuarios (gestión de cuentas).
-Route::get('/usuarios/usuarios', [UsuariosController::class, 'index'])
-    ->middleware('auth')
-    ->name('usuarios.index');
+// Usuarios (gestión de cuentas). La página la sirve el enrutador de módulos;
+// aquí quedan sus acciones.
 
 Route::get('/usuarios/datos', [UsuariosController::class, 'datos'])
     ->middleware('auth')
@@ -462,7 +449,8 @@ Route::post('/usuarios/{user}/desbloquear', [UsuariosController::class, 'desbloq
 
 Route::get('/usuarios/{user}', [UsuariosController::class, 'editar'])
     ->middleware('auth')
-    ->name('usuarios.editar');
+    ->name('usuarios.editar')
+    ->whereNumber('user');
 
 Route::get('/usuarios/{user}/ver', [UsuariosController::class, 'ver'])
     ->middleware('auth')
@@ -476,10 +464,8 @@ Route::delete('/usuarios/{user}', [UsuariosController::class, 'eliminar'])
     ->middleware('auth')
     ->name('usuarios.eliminar');
 
-// Roles (maestro de perfiles/roles).
-Route::get('/maestros/roles', [RolesController::class, 'index'])
-    ->middleware('auth')
-    ->name('roles.index');
+// Roles (maestro de perfiles/roles). La página la sirve el enrutador de
+// módulos; aquí quedan sus acciones.
 
 Route::get('/roles/datos', [RolesController::class, 'datos'])
     ->middleware('auth')
@@ -495,7 +481,8 @@ Route::post('/roles/eliminar-varios', [RolesController::class, 'eliminarVarios']
 
 Route::get('/roles/{role}', [RolesController::class, 'editar'])
     ->middleware('auth')
-    ->name('roles.editar');
+    ->name('roles.editar')
+    ->whereNumber('role');
 
 Route::get('/roles/{role}/ver', [RolesController::class, 'ver'])
     ->middleware('auth')
@@ -509,10 +496,8 @@ Route::delete('/roles/{role}', [RolesController::class, 'eliminar'])
     ->middleware('auth')
     ->name('roles.eliminar');
 
-// Permisos (catálogo de permisos).
-Route::get('/maestros/permisos', [PermisosController::class, 'index'])
-    ->middleware('auth')
-    ->name('permisos.index');
+// Permisos (catálogo de permisos). La página la sirve el enrutador de
+// módulos; aquí quedan sus acciones.
 
 Route::get('/permisos/datos', [PermisosController::class, 'datos'])
     ->middleware('auth')
@@ -528,7 +513,8 @@ Route::post('/permisos/eliminar-varios', [PermisosController::class, 'eliminarVa
 
 Route::get('/permisos/{permission}', [PermisosController::class, 'editar'])
     ->middleware('auth')
-    ->name('permisos.editar');
+    ->name('permisos.editar')
+    ->whereNumber('permission');
 
 Route::get('/permisos/{permission}/ver', [PermisosController::class, 'ver'])
     ->middleware('auth')
@@ -542,10 +528,8 @@ Route::delete('/permisos/{permission}', [PermisosController::class, 'eliminar'])
     ->middleware('auth')
     ->name('permisos.eliminar');
 
-// Categorías (clasificación de los módulos).
-Route::get('/maestros/categorias', [CategoriasController::class, 'index'])
-    ->middleware('auth')
-    ->name('categorias.index');
+// Categorías (clasificación de los módulos). La página la sirve el enrutador
+// de módulos; aquí quedan sus acciones.
 
 Route::get('/categorias/datos', [CategoriasController::class, 'datos'])
     ->middleware('auth')
@@ -561,7 +545,8 @@ Route::post('/categorias/eliminar-varios', [CategoriasController::class, 'elimin
 
 Route::get('/categorias/{category}', [CategoriasController::class, 'editar'])
     ->middleware('auth')
-    ->name('categorias.editar');
+    ->name('categorias.editar')
+    ->whereNumber('category');
 
 Route::get('/categorias/{category}/ver', [CategoriasController::class, 'ver'])
     ->middleware('auth')
@@ -575,10 +560,8 @@ Route::delete('/categorias/{category}', [CategoriasController::class, 'eliminar'
     ->middleware('auth')
     ->name('categorias.eliminar');
 
-// Módulos (catálogo de módulos y sus rutas).
-Route::get('/maestros/modulos', [ModulosController::class, 'index'])
-    ->middleware('auth')
-    ->name('modulos.index');
+// Módulos (catálogo de módulos y sus rutas). La página la sirve el enrutador
+// de módulos; aquí quedan sus acciones.
 
 Route::get('/modulos/datos', [ModulosController::class, 'datos'])
     ->middleware('auth')
@@ -594,7 +577,8 @@ Route::post('/modulos/eliminar-varios', [ModulosController::class, 'eliminarVari
 
 Route::get('/modulos/{module:id}', [ModulosController::class, 'editar'])
     ->middleware('auth')
-    ->name('modulos.editar');
+    ->name('modulos.editar')
+    ->whereNumber('module');
 
 Route::get('/modulos/{module:id}/ver', [ModulosController::class, 'ver'])
     ->middleware('auth')
@@ -608,10 +592,8 @@ Route::delete('/modulos/{module:id}', [ModulosController::class, 'eliminar'])
     ->middleware('auth')
     ->name('modulos.eliminar');
 
-// Matriz de perfiles (roles vs módulos y permisos).
-Route::get('/maestros/matriz', [MatrizPerfilesController::class, 'index'])
-    ->middleware('auth')
-    ->name('matriz.index');
+// Matriz de perfiles (roles vs módulos y permisos). La página la sirve el
+// enrutador de módulos; aquí quedan sus acciones.
 
 Route::get('/matriz/datos', [MatrizPerfilesController::class, 'datos'])
     ->middleware('auth')
@@ -637,10 +619,16 @@ Route::post('/matriz/aplicar', [MatrizPerfilesController::class, 'aplicar'])
     ->middleware('auth')
     ->name('matriz.aplicar');
 
-// Página de un módulo: /[categoria]/[modulo].
-Route::get('/{category:slug}/{module:slug}', [ModuleController::class, 'show'])
-    ->middleware(['auth', 'module.access'])
-    ->name('modules.show');
+// Página de cualquier módulo: /[categoria]/[modulo] (o /[modulo] cuando la
+// categoría no lleva slug, como Perfil).
+//
+// El middleware resuelve la ruta contra el maestro de Módulos en cada
+// petición: si cambia el slug del módulo o de su categoría, la URL cambia con
+// ellos (y la anterior responde 301); si el módulo se elimina, la ruta deja de
+// existir. Los módulos sin pantalla propia muestran el marcador de posición.
+Route::get('/{path}', ModulePageController::class)
+    ->where('path', '.*')
+    ->middleware('module.access');
 
 // Cualquier ruta no registrada responde 404 (y usa el shell si hay sesión).
 Route::fallback(function () {

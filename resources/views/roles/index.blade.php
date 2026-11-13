@@ -71,7 +71,7 @@
          data-url-crear="{{ route('roles.crear') }}"
          data-url-rol="{{ url('/roles') }}"
          data-url-eliminar-varios="{{ route('roles.eliminar-varios') }}"
-         data-url-index="{{ route('roles.index') }}"
+         data-url-index="{{ module_url('roles') }}"
          hidden></div>
 
     <x-app-modal id="modal-role-form" title="Nuevo rol">

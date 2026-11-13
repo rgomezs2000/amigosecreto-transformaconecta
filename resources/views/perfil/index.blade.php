@@ -1,8 +1,8 @@
 @extends('layouts.app')
 
-@section('title', 'Perfiles · Amigo Secreto Inclusivo')
-@section('shell-title', 'Perfiles')
-@section('shell-eyebrow', 'General')
+@section('title', $module->name . ' · Amigo Secreto Inclusivo')
+@section('shell-title', $module->name)
+@section('shell-eyebrow', $module->category?->name ?? 'General')
 
 @section('page')
     @if (session('perfil_status'))
@@ -55,50 +55,71 @@
             <div class="perfil-card__header">
                 <div>
                     <p class="module-eyebrow">Accesos</p>
-                    <h2 class="perfil-card__title" id="perfil-access-title">Rol, módulos y permisos</h2>
+                    <h2 class="perfil-card__title" id="perfil-access-title">Matriz del perfil</h2>
                     <p class="perfil-card__subtitle">
                         Solo el administrador puede modificar estos accesos.
                     </p>
                 </div>
             </div>
 
+            <div class="perfil-matriz-tools">
+                <div class="perfil-matriz-search">
+                    <label for="perfil-matriz-search" class="form-label">Buscar en la matriz</label>
+                    <input type="search" class="form-control" id="perfil-matriz-search"
+                           placeholder="Escribe una letra para buscar en la tabla..." autocomplete="off">
+                </div>
+
+                <div class="matriz-filter-card perfil-matriz-filters">
+                    <div class="matriz-filter">
+                        <label for="perfil-matriz-filter-type" class="form-label">Filtrar por</label>
+                        <select id="perfil-matriz-filter-type" class="form-select">
+                            <option value="all">Todos los módulos</option>
+                            <option value="with_permissions">Con permisos</option>
+                            <option value="permission">Permiso</option>
+                        </select>
+                    </div>
+
+                    <div class="matriz-filter d-none" id="perfil-matriz-filter-permission-wrap">
+                        <label for="perfil-matriz-filter-permission" class="form-label">Permiso</label>
+                        <select id="perfil-matriz-filter-permission" class="form-select">
+                            @foreach ($permisos as $permiso)
+                                <option value="{{ $permiso->id }}">{{ $permiso->name }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div class="matriz-filter matriz-filter__action">
+                        <button type="button" class="btn btn-outline-secondary" id="perfil-matriz-clear">
+                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                            <span>Limpiar</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div class="table-responsive">
-                <table class="table perfil-table align-middle">
+                <table id="perfil-matriz-table" class="table align-middle w-100 perfil-matriz-table">
                     <thead>
                         <tr>
-                            <th scope="col">Módulo</th>
-                            <th scope="col">Grupo</th>
-                            <th scope="col">Permisos</th>
+                            <th scope="col" class="perfil-col-module">Módulo</th>
+                            <th scope="col" class="perfil-col-group">Grupo</th>
+                            <th scope="col" class="perfil-col-permissions">Permisos</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        @forelse ($modules as $item)
-                            <tr>
-                                <td>
-                                    <span class="perfil-module">
-                                        <i class="fa-solid {{ $item['module']->icon }}" aria-hidden="true"></i>
-                                        {{ $item['module']->name }}
-                                    </span>
-                                </td>
-                                <td>{{ $item['module']->group }}</td>
-                                <td>
-                                    @forelse ($item['permissions'] as $permission)
-                                        <span class="badge perfil-badge">{{ $permission->name }}</span>
-                                    @empty
-                                        <span class="text-muted">Sin permisos</span>
-                                    @endforelse
-                                </td>
-                            </tr>
-                        @empty
-                            <tr>
-                                <td colspan="3" class="text-muted">No tienes módulos asignados.</td>
-                            </tr>
-                        @endforelse
-                    </tbody>
+                    <tbody></tbody>
+                    <tfoot>
+                        <tr>
+                            <th scope="col" class="perfil-col-module">Módulo</th>
+                            <th scope="col" class="perfil-col-group">Grupo</th>
+                            <th scope="col" class="perfil-col-permissions">Permisos</th>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </section>
     </div>
+
+    <div id="perfil-matriz-config" data-url-datos="{{ route('perfil.matriz.datos') }}" hidden></div>
 
     {{-- Modificar perfil --}}
     <div class="modal fade" id="modal-perfil" tabindex="-1" aria-labelledby="modal-perfil-title" aria-hidden="true">
@@ -241,3 +262,16 @@
         </div>
     </div>
 @endsection
+
+@push('head')
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+@endpush
+
+@push('vendor')
+    <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+@endpush
+
+@push('scripts')
+    <script src="{{ asset('js/perfil-matriz.js') }}?v={{ filemtime(public_path('js/perfil-matriz.js')) }}"></script>
+@endpush

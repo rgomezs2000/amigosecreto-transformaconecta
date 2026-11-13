@@ -21,10 +21,7 @@ class MatrizPerfilesController extends Controller
      */
     private function matrixModule(): Module
     {
-        $module = Module::query()
-            ->where('slug', 'matriz')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('matriz');
 
         if ($module === null) {
             abort(404);
@@ -320,7 +317,7 @@ class MatrizPerfilesController extends Controller
             $request->session()->flash('matriz_status', $message);
 
             return api_success($message, [
-                'redirect' => route('matriz.index'),
+                'redirect' => module_url('matriz'),
                 'granted' => $result['granted'],
                 'revoked' => $result['revoked'],
             ]);

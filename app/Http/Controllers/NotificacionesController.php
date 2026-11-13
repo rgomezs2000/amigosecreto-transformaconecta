@@ -28,10 +28,7 @@ class NotificacionesController extends Controller
      */
     private function ensureAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'control-notificaciones')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('control-notificaciones');
 
         if ($module === null) {
             abort(404);
@@ -47,10 +44,7 @@ class NotificacionesController extends Controller
      */
     private function ensureBellAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'notificaciones')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('notificaciones');
 
         if ($module === null) {
             abort(404);
@@ -69,11 +63,8 @@ class NotificacionesController extends Controller
     {
         $user = auth()->user();
 
-        foreach (['notificaciones', 'chat'] as $slug) {
-            $module = Module::query()
-                ->where('slug', $slug)
-                ->where('is_active', true)
-                ->first();
+        foreach (['notificaciones', 'chat'] as $code) {
+            $module = Module::activeByCode($code);
 
             if ($module !== null && $user?->hasModuleAccess($module)) {
                 return;
@@ -146,7 +137,7 @@ class NotificacionesController extends Controller
             $request->session()->flash('notificaciones_status', 'Configuración de notificaciones guardada.');
 
             return api_success('Configuración guardada correctamente.', [
-                'redirect' => route('notificaciones.index'),
+                'redirect' => module_url('control-notificaciones'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al guardar las notificaciones', ['error' => $exception->getMessage()]);

@@ -19,10 +19,7 @@ class RolesController extends Controller
      */
     private function ensureAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'roles')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('roles');
 
         if ($module === null) {
             abort(404);
@@ -117,7 +114,7 @@ class RolesController extends Controller
             $request->session()->flash('roles_status', 'Rol creado correctamente.');
 
             return api_success('Rol creado correctamente.', [
-                'redirect' => route('roles.index'),
+                'redirect' => module_url('roles'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al crear el rol', ['error' => $exception->getMessage()]);
@@ -167,7 +164,7 @@ class RolesController extends Controller
             $request->session()->flash('roles_status', 'Rol modificado correctamente.');
 
             return api_success('Rol modificado correctamente.', [
-                'redirect' => route('roles.index'),
+                'redirect' => module_url('roles'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al modificar el rol', [
@@ -199,7 +196,7 @@ class RolesController extends Controller
             $request->session()->flash('roles_status', 'Rol eliminado correctamente.');
 
             return api_success('Rol eliminado correctamente.', [
-                'redirect' => route('roles.index'),
+                'redirect' => module_url('roles'),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al eliminar el rol', [
@@ -277,7 +274,7 @@ class RolesController extends Controller
         $request->session()->flash('roles_status', $message);
 
         return api_success($message, [
-            'redirect' => route('roles.index'),
+            'redirect' => module_url('roles'),
             'deleted' => $deleted,
             'blocked' => $blocked,
         ]);

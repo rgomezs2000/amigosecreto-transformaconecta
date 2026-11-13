@@ -89,10 +89,7 @@ class SorteoCiegoController extends Controller
 
     private function ensureModuleAccess(): void
     {
-        $module = Module::query()
-            ->where('slug', 'asignar-amigo')
-            ->where('is_active', true)
-            ->first();
+        $module = Module::activeByCode('asignar-amigo');
 
         if ($module === null) {
             abort(404);

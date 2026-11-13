@@ -35,8 +35,9 @@ class PerfilTest extends TestCase
     private function crearModuloPerfiles(): Module
     {
         return Module::create([
-            'name' => 'Perfiles',
-            'slug' => 'perfiles',
+            'code' => 'perfil',
+            'name' => 'Perfil',
+            'slug' => 'perfil',
             'group' => 'General',
             'icon' => 'fa-id-card',
             'order' => 5,
@@ -79,16 +80,75 @@ class PerfilTest extends TestCase
         $user = $this->userWithPerfilModule();
 
         $this->actingAs($user)
-            ->get('/perfiles')
+            ->get('/perfil')
             ->assertOk()
             ->assertSee('Ana Pérez')
             ->assertSee('ana@example.com')
             ->assertSee('ana')
             ->assertSee('Participante')
-            ->assertSee('Perfiles')
+            ->assertSee('Perfil')
             ->assertSee('Ver')
+            ->assertSee('Matriz del perfil')
+            ->assertSee('Buscar en la matriz')
+            ->assertSee('Filtrar por')
             ->assertSee('Modificar perfil')
             ->assertSee('Cambiar contraseña');
+    }
+
+    public function test_la_matriz_del_perfil_responde_en_formato_datatable(): void
+    {
+        $user = $this->userWithPerfilModule();
+
+        $permiso = Permission::query()->where('slug', 'view')->firstOrFail();
+
+        $response = $this->actingAs($user)
+            ->getJson('/perfil/matriz/datos?draw=2&start=0&length=10')
+            ->assertOk()
+            ->assertJsonPath('draw', 2)
+            ->assertJsonPath('recordsTotal', 1)
+            ->assertJsonPath('recordsFiltered', 1)
+            ->assertJsonPath('data.0.group', 'General');
+
+        $filas = $response->json('data');
+
+        $this->assertCount(1, $filas);
+        $this->assertStringContainsString('Perfil', $filas[0]['module']);
+        $this->assertStringContainsString('Ver', $filas[0]['permissions']);
+
+        // Búsqueda por texto.
+        $this->actingAs($user)
+            ->getJson('/perfil/matriz/datos?search%5Bvalue%5D=perfil')
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', 1);
+
+        $this->actingAs($user)
+            ->getJson('/perfil/matriz/datos?search%5Bvalue%5D=inexistente')
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', 0)
+            ->assertJsonCount(0, 'data');
+
+        // Filtro por permiso concreto.
+        $this->actingAs($user)
+            ->getJson('/perfil/matriz/datos?filter_type=permission&filter_permission=' . $permiso->id)
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', 1);
+
+        // Filtros que excluyen la única fila.
+        $this->actingAs($user)
+            ->getJson('/perfil/matriz/datos?filter_type=permission&filter_permission=999999')
+            ->assertOk()
+            ->assertJsonPath('recordsFiltered', 0);
+    }
+
+    public function test_la_matriz_del_perfil_exige_el_modulo(): void
+    {
+        $this->crearModuloPerfiles();
+
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->getJson('/perfil/matriz/datos')
+            ->assertForbidden();
     }
 
     public function test_el_perfil_exige_el_modulo(): void
@@ -98,7 +158,7 @@ class PerfilTest extends TestCase
         $user = User::factory()->create();
 
         $this->actingAs($user)
-            ->get('/perfiles')
+            ->get('/perfil')
             ->assertForbidden();
     }
 

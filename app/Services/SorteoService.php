@@ -271,7 +271,7 @@ class SorteoService
                     'El sorteo ha concluido',
                     'Todos eligieron a su amigo secreto. Ya puedes preparar tu lista de deseos.',
                     ['event_id' => $event->id],
-                    route('ver-tu-amigo.index'),
+                    module_url('ver-tu-amigo'),
                     'evento'
                 );
             }
@@ -399,7 +399,7 @@ class SorteoService
                 '«'.$frase.'»',
                 'No sabrás quién es hasta la gran revelación. Mientras tanto, puedes ir pensando en tu lista de deseos.',
             ],
-            ['label' => 'Abrir el sistema', 'url' => route('ver-tu-amigo.index')],
+            ['label' => 'Abrir el sistema', 'url' => module_url('ver-tu-amigo')],
             [
                 'recipient_name' => $user->name,
                 'eyebrow' => 'Amigo secreto',

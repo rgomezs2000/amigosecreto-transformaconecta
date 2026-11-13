@@ -71,8 +71,11 @@ class NotificacionesTest extends TestCase
     {
         $participant = $this->makeUser('Ana', UserRole::Participant, ['notificaciones']);
 
+        // El módulo existe, pero no se le ha concedido a este usuario.
+        $this->ensureModule('control-notificaciones');
+
         $this->actingAs($participant)
-            ->get('/administracion/notificaciones')
+            ->get(module_url('control-notificaciones'))
             ->assertForbidden();
     }
 
@@ -346,7 +349,7 @@ class NotificacionesTest extends TestCase
         $this->makeUser('Luis', UserRole::Participant, ['notificaciones']);
 
         $this->actingAs($admin)
-            ->get('/administracion/notificaciones')
+            ->get(module_url('control-notificaciones'))
             ->assertOk()
             ->assertSee('Tráfico')
             ->assertSee('Firestore (NoSQL)')
@@ -379,8 +382,8 @@ class NotificacionesTest extends TestCase
         $this->actingAs($admin)
             ->get('/dashboard')
             ->assertOk()
-            ->assertSee(route('notificaciones.index'), false)
-            ->assertSee(route('moderacion.index'), false);
+            ->assertSee(module_url('control-notificaciones'), false)
+            ->assertSee(module_url('moderacion'), false);
     }
 
     public function test_quien_solo_tiene_chat_puede_silenciar_el_chat(): void
