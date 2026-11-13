@@ -63,7 +63,10 @@ class RolesController extends Controller
             default => 'id',
         };
 
-        $query = $filtered->orderBy($column, $direction);
+        // Desempate por id: sin él, con nombres repetidos MySQL no garantiza un
+        // orden estable entre consultas y, al paginar, una fila puede repetirse
+        // o saltarse.
+        $query = $filtered->orderBy($column, $direction)->orderBy('id');
 
         if ($length > 0) {
             $query->skip($start)->take($length);

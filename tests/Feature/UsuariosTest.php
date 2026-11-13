@@ -64,6 +64,15 @@ class UsuariosTest extends TestCase
 
         return User::factory()->create([
             'profile_id' => $profile->id,
+            // Identidad fija a propósito. Con los valores aleatorios de la
+            // factory, este admin podía coincidir con la búsqueda de otros tests
+            // ("ana") y colarse como primer resultado según el orden por nombre,
+            // lo que hacía fallar la prueba de forma intermitente.
+            // El username evita a propósito el valor de ADMIN_USERNAME ("admin"),
+            // que identifica al superadministrador.
+            'name' => 'Administrador',
+            'username' => 'administrador',
+            'email' => 'administrador@example.com',
         ]);
     }
 
