@@ -4,7 +4,9 @@ namespace App\Console\Commands;
 
 use App\Models\User;
 use App\Services\DinamicaProgress;
+use App\Services\SesionesReset;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -26,17 +28,28 @@ use Throwable;
  * asignaciones, pistas, regalos, conversaciones, mensajes, adjuntos,
  * moderación, reportes, bloqueos, invitaciones, notificaciones, auditoría,
  * correos registrados y las cuentas de los demás usuarios.
+ *
+ * Antes de borrar a los usuarios se cierran sus sesiones con un aviso, y
+ * después de confirmar el borrado se les envía un correo avisando del
+ * restablecimiento y pidiéndoles que soliciten un nuevo usuario.
  */
 class RestablecerDinamica extends Command
 {
+    /** Aviso que verá cada usuario desconectado en la pantalla de acceso. */
+    public const AVISO_SESION = 'La administración restableció el sistema del amigo secreto: tu sesión se cerró y tu cuenta fue eliminada. Solicita un nuevo usuario a la administración.';
+
     protected $signature = 'dinamica:reiniciar
         {--run= : Identificador de la ejecución (progreso y bitácora)}
         {--force : Ejecuta sin pedir confirmación en consola}';
 
     protected $description = 'Deja el sistema en cero: elimina toda la dinámica del amigo secreto y conserva los CRUD, los módulos, los roles y el superadministrador.';
 
-    public function handle(DinamicaProgress $progress): int
+    private ?SesionesReset $sesiones = null;
+
+    public function handle(DinamicaProgress $progress, SesionesReset $sesiones): int
     {
+        $this->sesiones = $sesiones;
+
         $run = trim((string) ($this->option('run') ?: Str::uuid()));
 
         if (! $progress->isValidRun($run)) {
@@ -74,11 +87,16 @@ class RestablecerDinamica extends Command
             }
         }
 
+        // A quiénes hay que avisarles por correo: se toma la lista antes de
+        // borrar, porque después los usuarios ya no existen.
+        $avisos = $this->usuariosAEliminar($superAdmin->id);
+
         $steps = $this->steps($superAdmin->id);
-        $total = count($steps) + 1; // +1: archivos de los adjuntos.
+        $total = count($steps) + 2; // + archivos de adjuntos + correos de aviso.
 
         $progress->note($run, 'Inicio del restablecimiento de la dinámica.', 'info');
         $progress->note($run, 'Se conserva la cuenta '.$superAdmin->username.' (#'.$superAdmin->id.').', 'info');
+        $progress->note($run, 'Se avisará por correo a '.$avisos->count().' cuenta(s) que serán eliminadas.', 'info');
 
         $this->info('Restableciendo la dinámica del amigo secreto...');
 
@@ -116,7 +134,12 @@ class RestablecerDinamica extends Command
         // transacción para no dejar archivos de mensajes que ya no existen.
         $files = $this->purgeAttachmentFiles();
 
-        $progress->step($run, $total, $total, 'Archivos de los adjuntos', $files);
+        $progress->step($run, $total - 1, $total, 'Archivos de los adjuntos', $files);
+
+        // Avisos por correo: solo si el borrado ya está confirmado.
+        $enviados = $this->enviarAvisos($run, $progress, $avisos);
+
+        $progress->step($run, $total, $total, 'Avisos por correo a los usuarios eliminados', $enviados);
 
         $progress->finish(
             $run,
@@ -170,14 +193,107 @@ class RestablecerDinamica extends Command
             'Permisos individuales' => fn (): int => DB::table('user_permission_module')
                 ->where('user_id', '!=', $superAdminId)
                 ->delete(),
+            // Primero se cierran las sesiones (dejando el aviso) y después se
+            // borran las cuentas: así nadie queda con la sesión abierta.
+            'Sesiones de los usuarios' => fn (): int => $this->cerrarSesiones($superAdminId),
             'Usuarios' => fn (): int => DB::table('users')->where('id', '!=', $superAdminId)->delete(),
-            'Sesiones' => fn (): int => DB::table('sessions')
-                ->where(function ($query) use ($superAdminId): void {
-                    $query->where('user_id', '!=', $superAdminId)->orWhereNull('user_id');
-                })
-                ->delete(),
             'Tokens de recuperación' => fn (): int => DB::table('password_reset_tokens')->delete(),
         ];
+    }
+
+    /**
+     * Cierra las sesiones de todos los usuarios que serán eliminados.
+     */
+    private function cerrarSesiones(int $superAdminId): int
+    {
+        if ($this->sesiones === null) {
+            return 0;
+        }
+
+        // Los invitados no tienen a quién avisar: se borran de una vez.
+        $cerradas = $this->sesiones->limpiarInvitadas();
+
+        $ids = DB::table('sessions')
+            ->whereNotNull('user_id')
+            ->where('user_id', '!=', $superAdminId)
+            ->distinct()
+            ->pluck('user_id');
+
+        foreach ($ids as $id) {
+            $cerradas += $this->sesiones->desconectar((int) $id, self::AVISO_SESION);
+        }
+
+        return $cerradas;
+    }
+
+    /**
+     * Cuentas que se van a eliminar y tienen un correo válido.
+     *
+     * @return Collection<int, object>
+     */
+    private function usuariosAEliminar(int $superAdminId): Collection
+    {
+        return DB::table('users')
+            ->where('id', '!=', $superAdminId)
+            ->select('id', 'name', 'email')
+            ->get()
+            ->filter(fn ($usuario) => filter_var(trim((string) $usuario->email), FILTER_VALIDATE_EMAIL) !== false)
+            ->values();
+    }
+
+    /**
+     * Envía el aviso del restablecimiento a las cuentas eliminadas.
+     *
+     * Un fallo de correo no tumba el proceso: el borrado ya está confirmado.
+     *
+     * @param  Collection<int, object>  $avisos
+     */
+    private function enviarAvisos(string $run, DinamicaProgress $progress, Collection $avisos): int
+    {
+        $enviados = 0;
+        $fallidos = 0;
+
+        foreach ($avisos as $usuario) {
+            try {
+                $ok = send_mail(
+                    (string) $usuario->email,
+                    'El sistema será restablecido',
+                    'Tu cuenta fue eliminada',
+                    [
+                        'Hola, '.$usuario->name.'.',
+                        'La administración restableció el sistema del amigo secreto: se eliminaron el evento, las listas, los chats y las cuentas de los participantes.',
+                        'Tu cuenta fue eliminada como parte del restablecimiento y tu sesión se cerró.',
+                        'Para volver a participar, ponte en contacto con la administración y solicita un nuevo usuario.',
+                    ],
+                    null,
+                    [
+                        'recipient_name' => (string) $usuario->name,
+                        'eyebrow' => 'Restablecimiento',
+                        'preheader' => 'El sistema será restablecido.',
+                        'source' => 'dinamica',
+                    ]
+                );
+
+                if ($ok) {
+                    $enviados++;
+                } else {
+                    $fallidos++;
+                }
+            } catch (Throwable $exception) {
+                $fallidos++;
+                report($exception);
+            }
+        }
+
+        if ($fallidos > 0) {
+            $progress->note(
+                $run,
+                'Avisos por correo: '.$enviados.' enviado(s), '.$fallidos.' con error.',
+                'warning'
+            );
+        }
+
+        return $enviados;
     }
 
     /**

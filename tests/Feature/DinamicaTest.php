@@ -2,16 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Mail\NotificationMail;
 use App\Models\Category;
 use App\Models\Module;
 use App\Models\Permission;
 use App\Models\Profile;
 use App\Models\ProfilePermissionModule;
 use App\Models\User;
+use App\Models\UserPermissionModule;
 use App\Services\DinamicaProgress;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -26,6 +29,8 @@ class DinamicaTest extends TestCase
         // El panel lanza el comando en un proceso aparte; en las pruebas se
         // ejecuta en la misma petición para poder verificar el resultado.
         config(['dinamica.async' => false, 'dinamica.path' => storage_path('app/dinamica-test')]);
+
+        Mail::fake();
 
         Http::fake([
             've.dolarapi.com/*' => Http::response([
@@ -292,11 +297,15 @@ class DinamicaTest extends TestCase
             'exchange_gifts', 'consumable_gifts', 'chat_conversations', 'chat_messages',
             'chat_message_attachments', 'chat_reports', 'chat_blocks', 'chat_moderation_reads',
             'chat_group_audits', 'chat_group_bans', 'chat_group_suspensions',
-            'chat_group_invitations', 'notifications', 'email_logs', 'audit_logs',
+            'chat_group_invitations', 'notifications', 'audit_logs',
             'notification_preferences',
         ] as $table) {
             $this->assertSame(0, DB::table($table)->count(), 'La tabla '.$table.' debería quedar vacía.');
         }
+
+        // En `email_logs` solo quedan los avisos del restablecimiento.
+        $this->assertSame(2, DB::table('email_logs')->count());
+        $this->assertSame(2, DB::table('email_logs')->where('subject', 'El sistema será restablecido')->count());
 
         // Solo queda el superadministrador, con su acceso intacto.
         $this->assertSame(1, User::query()->count());
@@ -357,11 +366,99 @@ class DinamicaTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $superAdmin->id, 'is_active' => true]);
     }
 
+    public function test_cierra_las_sesiones_y_avisa_por_correo_a_los_usuarios_eliminados(): void
+    {
+        $this->seed();
+
+        $superAdmin = $this->superAdmin();
+        $perfil = Profile::query()->where('slug', 'usuario')->value('id');
+
+        $ana = User::factory()->create([
+            'name' => 'Ana',
+            'username' => 'ana-aviso',
+            'email' => 'ana.aviso@example.com',
+            'profile_id' => $perfil,
+        ]);
+
+        $luis = User::factory()->create([
+            'name' => 'Luis',
+            'username' => 'luis-aviso',
+            'email' => 'luis.aviso@example.com',
+            'profile_id' => $perfil,
+        ]);
+
+        $clave = auth('web')->getName();
+        $payload = fn (int $userId): string => base64_encode(serialize([
+            $clave => $userId,
+            '_token' => 'token-'.$userId,
+            '_previous' => ['url' => 'http://localhost/dashboard'],
+        ]));
+
+        $abrirSesion = function (string $id, int $userId) use ($payload): void {
+            DB::table('sessions')->insert([
+                'id' => $id,
+                'user_id' => $userId,
+                'ip_address' => '127.0.0.1',
+                'user_agent' => 'PHPUnit',
+                'payload' => $payload($userId),
+                'last_activity' => now()->getTimestamp(),
+            ]);
+        };
+
+        $abrirSesion('sesion-ana', $ana->id);
+        $abrirSesion('sesion-luis', $luis->id);
+        $abrirSesion('sesion-admin', $superAdmin->id);
+
+        $this->artisan('dinamica:reiniciar', ['--force' => true])->assertSuccessful();
+
+        // Las cuentas se fueron, pero la sesión sigue con el aviso.
+        foreach (['sesion-ana', 'sesion-luis'] as $id) {
+            $fila = DB::table('sessions')->where('id', $id)->first();
+
+            $this->assertNotNull($fila, 'La sesión debe quedar para poder mostrar el aviso.');
+            $this->assertNull($fila->user_id);
+
+            $datos = unserialize(base64_decode($fila->payload));
+
+            $this->assertArrayNotHasKey($clave, $datos, 'La sesión debe quedar sin autenticación.');
+            $this->assertSame(
+                'La administración restableció el sistema del amigo secreto: tu sesión se cerró y tu cuenta fue eliminada. Solicita un nuevo usuario a la administración.',
+                $datos['restablecimiento_aviso'] ?? null
+            );
+            $this->assertSame(['restablecimiento_aviso'], $datos['_flash']['new'] ?? null);
+        }
+
+        // El superadministrador conserva su sesión.
+        $admin = DB::table('sessions')->where('id', 'sesion-admin')->first();
+
+        $this->assertNotNull($admin);
+        $this->assertSame($superAdmin->id, (int) $admin->user_id);
+        $this->assertArrayHasKey($clave, unserialize(base64_decode($admin->payload)));
+
+        // Aviso por correo a cada cuenta eliminada.
+        Mail::assertSent(NotificationMail::class, fn (NotificationMail $mail) => $mail->hasTo('ana.aviso@example.com'));
+        Mail::assertSent(NotificationMail::class, fn (NotificationMail $mail) => $mail->hasTo('luis.aviso@example.com'));
+        Mail::assertSent(NotificationMail::class, 2);
+
+        $this->assertDatabaseHas('email_logs', [
+            'to_email' => 'ana.aviso@example.com',
+            'subject' => 'El sistema será restablecido',
+        ]);
+
+        // El aviso se ve en la pantalla de acceso (aquí la sesión de la prueba
+        // es la de Laravel, no la fila que se acaba de preparar).
+        $this->withSession([
+            'restablecimiento_aviso' => 'La administración restableció el sistema del amigo secreto: tu sesión se cerró y tu cuenta fue eliminada. Solicita un nuevo usuario a la administración.',
+        ])
+            ->get('/login')
+            ->assertOk()
+            ->assertSee('La administración restableció el sistema del amigo secreto');
+    }
+
     /**
      * @return array<string, int>
      */
-    private function masterCounts(): array
-    {
+    private function masterCounts(): array    {
         return [
             'categories' => Category::query()->count(),
             'modules' => Module::query()->count(),

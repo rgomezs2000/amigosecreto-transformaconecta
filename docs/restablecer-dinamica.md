@@ -33,7 +33,29 @@ intercambio y consumibles; conversaciones, mensajes, adjuntos (registros y
 archivos de `storage/app/public/chat`), reacciones; moderación, reportes,
 bloqueos, invitaciones, suspensiones y vetados de grupo; notificaciones,
 preferencias por usuario, correos registrados, auditoría; y las cuentas de
-todos los usuarios menos el superadministrador (con sus sesiones y tokens).
+todos los usuarios menos el superadministrador.
+
+## Cierre de sesiones y aviso a las cuentas eliminadas
+
+Antes de borrar las cuentas, el proceso **cierra todas las sesiones abiertas**
+de esos usuarios:
+
+- se quita de la sesión la marca de autenticación (`login_web_…`), así la
+  persona queda fuera del sistema en su siguiente petición;
+- la fila de la sesión no se borra: se vacía de autenticación y se le guarda
+  un aviso, para que al volver vea en la pantalla de acceso
+  «La administración restableció el sistema del amigo secreto: tu sesión se
+  cerró y tu cuenta fue eliminada. Solicita un nuevo usuario a la
+  administración.»
+- las sesiones de invitados (sin usuario) sí se borran;
+- la sesión del superadministrador no se toca: es quien ejecuta el proceso.
+
+Después de confirmar el borrado (fuera de la transacción), se envía un **correo
+a cada cuenta eliminada** con el aviso: el sistema fue restablecido, la cuenta
+fue eliminada y hay que pedir un nuevo usuario a la administración. Cada envío
+queda en `email_logs`. Si un correo falla, el proceso no se da por fallido: se
+registra el error en la bitácora.
+
 
 ## Qué se conserva
 

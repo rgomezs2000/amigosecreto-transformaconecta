@@ -6,6 +6,14 @@
 <main id="contenido" class="login-page">
     <div class="login-shell">
 
+        {{-- Aviso que deja el restablecimiento de la dinámica al cerrar la sesión. --}}
+        @if (session('restablecimiento_aviso'))
+            <div class="alert alert-warning login-alert" role="status">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <span>{{ session('restablecimiento_aviso') }}</span>
+            </div>
+        @endif
+
         {{-- 1. Título y acceso al sistema --}}
         <header class="login-header">
             <p class="login-eyebrow">Amigo Secreto Inclusivo</p>

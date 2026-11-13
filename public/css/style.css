@@ -5254,3 +5254,13 @@ div.dt-processing {
     font-size: .875rem;
     text-align: center;
 }
+
+/* Aviso del restablecimiento en la pantalla de acceso. */
+.login-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: .5rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
+    color: var(--ink);
+}
