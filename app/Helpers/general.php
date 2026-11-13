@@ -1,5 +1,9 @@
 <?php
 
+use App\Models\Module;
+use App\Services\ExchangeRateService;
+use Illuminate\Support\Carbon;
+
 if (! function_exists('normalize_login')) {
     /**
      * Normaliza el usuario o correo que llega del formulario.
@@ -33,10 +37,10 @@ if (! function_exists('format_date')) {
         }
 
         try {
-            return $date instanceof \DateTimeInterface
+            return $date instanceof DateTimeInterface
                 ? $date->format($format)
-                : \Illuminate\Support\Carbon::parse($date)->format($format);
-        } catch (\Throwable) {
+                : Carbon::parse($date)->format($format);
+        } catch (Throwable) {
             return $fallback;
         }
     }
@@ -76,12 +80,29 @@ if (! function_exists('module_url')) {
      */
     function module_url(string $code, ?string $fallback = null): string
     {
-        $module = \App\Models\Module::activeByCode($code)
-            ?? \App\Models\Module::query()
+        $module = Module::activeByCode($code)
+            ?? Module::query()
                 ->where('slug', $code)
                 ->where('is_active', true)
                 ->first();
 
         return $module?->url() ?? $fallback ?? route('dashboard');
+    }
+}
+
+if (! function_exists('dollar_rate')) {
+    /**
+     * Tasa oficial USD -> VES (BCV) que usa toda la aplicación.
+     *
+     * Primero consulta la API con caché corta; si no responde, devuelve la
+     * última tasa guardada en `exchange_rates`. Null solo si nunca hubo tasa.
+     */
+    function dollar_rate(bool $fresh = false): ?float
+    {
+        $dollar = bcv_dollar($fresh);
+        $rate = $dollar['promedio']
+            ?? app(ExchangeRateService::class)->latest()?->rate;
+
+        return $rate !== null ? (float) $rate : null;
     }
 }

@@ -50,6 +50,8 @@ class AccessSeeder extends Seeder
             'participantes' => ['view'],
             'usuarios-asociados' => ['view'],
             'usuarios-obsequiados' => ['view'],
+            // Monitoreo de pistas: solo la administración.
+            'pistas' => ['view'],
             'login' => ['view'],
             'logout' => ['view'],
         ];
@@ -92,6 +94,7 @@ class AccessSeeder extends Seeder
             'usuarios-asociados',
             'lista-de-deseos',
             'usuarios-obsequiados',
+            'pistas',
             'login',
             'logout',
         ];

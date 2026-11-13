@@ -36,19 +36,24 @@ class ModuleSeeder extends Seeder
             // Participantes: todos cuelgan del grupo Amigo secreto.
             // Este es el orden del panel del usuario: sorteo, ver tu amigo,
             // lista de deseos, intercambio de pistas y gran revelación.
+            //
+            // Antes de «Lista de deseos» van los módulos de monitoreo de la
+            // administración: Participantes y Usuarios asociados (75 y 76).
             ['code' => 'asignar-amigo', 'name' => 'Sorteo ciego', 'slug' => 'asignar-amigo', 'group' => 'Amigo secreto', 'icon' => 'fa-handshake', 'order' => 60],
             ['code' => 'ver-tu-amigo', 'name' => 'Ver tu amigo', 'slug' => 'ver-tu-amigo', 'group' => 'Amigo secreto', 'icon' => 'fa-user-secret', 'order' => 70],
+            ['code' => 'participantes', 'name' => 'Participantes', 'slug' => 'participantes', 'group' => 'Amigo secreto', 'icon' => 'fa-users', 'order' => 75],
+            ['code' => 'usuarios-asociados', 'name' => 'Usuarios asociados', 'slug' => 'usuarios-asociados', 'group' => 'Amigo secreto', 'icon' => 'fa-link', 'order' => 76],
             ['code' => 'lista-de-deseos', 'name' => 'Lista de deseos', 'slug' => 'lista-de-deseos', 'group' => 'Amigo secreto', 'icon' => 'fa-list', 'order' => 80],
             ['code' => 'intercambio-de-pista', 'name' => 'Intercambio de pista', 'slug' => 'intercambio-de-pista', 'group' => 'Amigo secreto', 'icon' => 'fa-comments', 'order' => 90],
             ['code' => 'gran-revelacion', 'name' => 'Gran revelación', 'slug' => 'gran-revelacion', 'group' => 'Amigo secreto', 'icon' => 'fa-star', 'order' => 100],
             ['code' => 'obsequios', 'name' => 'Obsequios', 'slug' => 'obsequios', 'group' => 'Amigo secreto', 'icon' => 'fa-gift', 'order' => 110],
-            ['code' => 'pistas', 'name' => 'Pistas', 'slug' => 'pistas', 'group' => 'Amigo secreto', 'icon' => 'fa-lightbulb', 'order' => 120],
             ['code' => 'notificaciones', 'name' => 'Notificaciones', 'slug' => 'notificaciones', 'group' => 'Notificaciones', 'icon' => 'fa-bell', 'order' => 100],
 
             // Administradores: reportes y gestión del amigo secreto.
-            ['code' => 'participantes', 'name' => 'Participantes', 'slug' => 'participantes', 'group' => 'Amigo secreto', 'icon' => 'fa-users', 'order' => 130],
-            ['code' => 'usuarios-asociados', 'name' => 'Usuarios asociados', 'slug' => 'usuarios-asociados', 'group' => 'Amigo secreto', 'icon' => 'fa-link', 'order' => 140],
             ['code' => 'usuarios-obsequiados', 'name' => 'Usuarios obsequiados', 'slug' => 'usuarios-obsequiados', 'group' => 'Amigo secreto', 'icon' => 'fa-gift', 'order' => 150],
+            // Monitoreo de las pistas que se emiten a cada amigo secreto.
+            // Solo la administración; al final de la categoría y sin contenido.
+            ['code' => 'pistas', 'name' => 'Pistas', 'slug' => 'pistas', 'group' => 'Amigo secreto', 'icon' => 'fa-lightbulb', 'order' => 160],
 
             ['code' => 'login', 'name' => 'Login', 'slug' => 'login', 'group' => 'Sesión', 'icon' => 'fa-right-to-bracket', 'order' => 998],
             ['code' => 'logout', 'name' => 'Salir', 'slug' => 'logout', 'group' => 'Sesión', 'icon' => 'fa-right-from-bracket', 'order' => 999],

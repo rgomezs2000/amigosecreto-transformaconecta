@@ -10,10 +10,12 @@ use App\Http\Controllers\MatrizPerfilesController;
 use App\Http\Controllers\ModeracionController;
 use App\Http\Controllers\ModulosController;
 use App\Http\Controllers\NotificacionesController;
+use App\Http\Controllers\ParticipantesController;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\PermisosController;
 use App\Http\Controllers\RolesController;
 use App\Http\Controllers\SorteoCiegoController;
+use App\Http\Controllers\UsuariosAsociadosController;
 use App\Http\Controllers\UsuariosController;
 use App\Http\Controllers\VerTuAmigoController;
 use App\Models\Module;
@@ -50,6 +52,8 @@ final class ModulePages
         ],
         'asignar-amigo' => ['controller' => SorteoCiegoController::class, 'action' => 'index'],
         'ver-tu-amigo' => ['controller' => VerTuAmigoController::class, 'action' => 'index'],
+        'participantes' => ['controller' => ParticipantesController::class, 'action' => 'index'],
+        'usuarios-asociados' => ['controller' => UsuariosAsociadosController::class, 'action' => 'index'],
     ];
 
     /**

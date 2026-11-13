@@ -5294,3 +5294,517 @@ div.dt-processing {
     border-radius: var(--radius-sm);
     color: var(--ink);
 }
+
+/* Participantes: monitoreo del evento en solo lectura. */
+.participantes-page {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.participantes-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 1rem;
+}
+
+.participantes-field {
+    display: grid;
+    gap: .375rem;
+}
+
+/* El evento va primero, a la izquierda y sin ocupar todo el ancho. */
+.participantes-field--event {
+    width: min(100%, 28rem);
+}
+
+/* La búsqueda sí ocupa todo el ancho. */
+.participantes-field--search {
+    width: 100%;
+}
+
+/* Limpiar queda abajo, a la izquierda y con su ancho natural. */
+.participantes-field--action {
+    width: auto;
+    justify-self: start;
+}
+
+.participantes-field .form-select,
+.participantes-field .form-control {
+    min-height: 48px;
+    border-color: var(--border);
+    border-radius: 10px;
+}
+
+.participantes-field--action .btn {
+    white-space: nowrap;
+}
+
+.participantes-estado {
+    display: grid;
+    gap: .5rem;
+    padding: 1rem 1.25rem;
+    background: #F8FAFC;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--radius-sm);
+}
+
+.participantes-estado__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+.participantes-estado__pill {
+    padding: .2rem .6rem;
+    background: var(--accent-soft);
+    border-radius: 999px;
+    color: var(--accent-strong);
+    font-size: .8125rem;
+    font-weight: 700;
+    line-height: 1.35;
+    white-space: nowrap;
+}
+
+.participantes-estado__meta {
+    margin: 0;
+    color: var(--muted);
+    font-size: .875rem;
+    font-weight: 600;
+}
+
+.participantes-estado__text {
+    margin: 0;
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
+.participantes-aviso {
+    display: grid;
+    gap: .35rem;
+    padding: 1rem 1.25rem;
+    background: #F8FAFC;
+    border: 1px solid var(--border);
+    border-left: 4px solid #B9C4D4;
+    border-radius: var(--radius-sm);
+}
+
+.participantes-aviso__title {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 0;
+    color: var(--ink);
+    font-size: .9375rem;
+    font-weight: 700;
+}
+
+.participantes-aviso__title i {
+    color: var(--accent);
+}
+
+.participantes-aviso__text {
+    margin: 0;
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
+.participantes-aviso__hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: .875rem;
+}
+
+.participantes-modal {
+    display: grid;
+    gap: 1rem;
+}
+
+.participantes-modal__eyebrow {
+    margin: 0;
+    color: var(--muted);
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.participantes-modal__name {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.participantes-modal__phase {
+    display: flex;
+    align-items: flex-start;
+    gap: .5rem;
+    margin: 0;
+    padding-top: .75rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .875rem;
+    font-weight: 600;
+}
+
+.perfil-data__item--wide {
+    grid-column: 1 / -1;
+}
+
+.participantes-text {
+    font-weight: 500;
+    white-space: pre-line;
+}
+
+.participantes-valor {
+    color: var(--accent-strong);
+    font-size: 1.125rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.participantes-subtitle {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.participantes-empty {
+    margin: 0;
+    color: var(--muted);
+}
+
+.participantes-empty i {
+    margin-right: .4rem;
+    color: var(--muted);
+}
+
+.participantes-empty--page {
+    padding: 1rem 0;
+}
+
+.participantes-totales {
+    margin: .75rem 0 0;
+    color: var(--muted);
+    font-size: .9375rem;
+    font-weight: 600;
+}
+
+.participantes-tabs {
+    margin-bottom: 0;
+    border-bottom: 1px solid var(--border);
+    gap: .25rem;
+}
+
+.participantes-tabs .nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    min-height: 44px;
+    padding: .5rem .9rem;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 10px 10px 0 0;
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.participantes-tabs .nav-link.active {
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--ink);
+}
+
+.participantes-tabs .nav-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.participantes-tab__count {
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.participantes-tabs__content {
+    padding-top: 1rem;
+}
+
+.participantes-tabla {
+    width: 100% !important;
+    margin: 0;
+}
+
+.participantes-tabla thead th,
+.participantes-tabla tfoot th {
+    padding: .75rem;
+    background: #F8FAFC;
+    color: var(--muted);
+    font-size: .875rem;
+    font-weight: 700;
+    text-transform: none;
+}
+
+.participantes-tabla tbody td {
+    padding: .75rem;
+    vertical-align: middle;
+}
+
+.participantes-tabla thead th.col-texto,
+.participantes-tabla tfoot th.col-texto,
+.participantes-tabla tbody td.col-texto {
+    text-align: left !important;
+}
+
+.participantes-tabla thead th.col-fecha,
+.participantes-tabla tfoot th.col-fecha,
+.participantes-tabla tbody td.col-fecha,
+.participantes-tabla thead th.col-estado,
+.participantes-tabla tfoot th.col-estado,
+.participantes-tabla tbody td.col-estado,
+.participantes-tabla thead th.col-numero,
+.participantes-tabla tfoot th.col-numero,
+.participantes-tabla tbody td.col-numero {
+    text-align: center !important;
+    white-space: nowrap;
+}
+
+.participantes-tabla thead th.col-valor,
+.participantes-tabla tfoot th.col-valor,
+.participantes-tabla tbody td.col-valor {
+    text-align: right !important;
+    white-space: nowrap;
+}
+
+.participantes-tabla thead th.sorting_disabled {
+    background-image: none !important;
+}
+
+.participantes-modal .table-responsive {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: .25rem;
+}
+
+.participantes-modal .dataTables_wrapper,
+.participantes-modal .dataTables_wrapper table {
+    width: 100% !important;
+}
+
+/* Las fichas de monitoreo necesitan más ancho que un formulario: las
+   tablas de pistas y de consumibles se leen mejor en un modal amplio. */
+#modal-participante-ficha .modal-dialog,
+#modal-participante-deseos .modal-dialog,
+#modal-participante-pistas .modal-dialog,
+#modal-participante-obsequios .modal-dialog {
+    max-width: min(960px, calc(100vw - 2rem));
+}
+
+#obsequios-secciones {
+    display: grid;
+    gap: 1rem;
+}
+
+#obsequios-obsequio {
+    display: grid;
+    gap: .5rem;
+}
+
+/* Obsequios de «Ver tu amigo»: regalo único y consumibles. */
+.amigo-gift__fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1rem;
+}
+
+.amigo-gift__fields .field {
+    margin-bottom: 0;
+}
+
+.amigo-gift__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    margin-top: 1.25rem;
+}
+
+.amigo-gift__note {
+    margin: 0 1.25rem 0 0;
+}
+
+.amigo-gift__meta {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 1rem 0 0;
+    color: #275E53;
+    font-weight: 600;
+}
+
+.amigo-gift__meta i {
+    color: var(--accent);
+}
+
+.amigo-gift .sorteo-card__title,
+.amigo-consumibles .sorteo-card__title {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.amigo-gift .sorteo-card__title i,
+.amigo-consumibles .sorteo-card__title i {
+    color: var(--accent);
+}
+
+.amigo-tasa {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 0 0 1.25rem;
+    padding: .6rem .9rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
+.amigo-tasa strong {
+    color: var(--ink);
+}
+
+.amigo-tasa--modal {
+    margin: 1rem 0 0;
+}
+
+#amigo-obsequio-bs[readonly]:not(:disabled),
+#consumible-bs[readonly] {
+    background: var(--surface-2);
+}
+
+#amigo-obsequio-bs:disabled {
+    background: #E9ECEF;
+    opacity: 1;
+}
+
+.amigo-hint {
+    font-weight: 500;
+}
+
+.amigo-form-status {
+    margin: 1rem 0 0;
+    padding: .75rem 1rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+}
+
+.amigo-form-status:empty {
+    display: none;
+}
+
+.amigo-form-status[data-kind="ok"] {
+    background: #E8F3EF;
+    border: 1px solid #BFDCD3;
+    color: #275E53;
+}
+
+.amigo-form-status[data-kind="error"] {
+    background: #F7EDEB;
+    border: 1px solid #E7C9C5;
+    color: var(--error);
+}
+
+.amigo-gifts-pending {
+    margin-top: 1.25rem;
+}
+
+.amigo-consumibles .table-responsive {
+    margin-top: 1rem;
+    padding: .25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.amigo-tabla {
+    width: 100% !important;
+    margin: 0;
+}
+
+.amigo-tabla thead th,
+.amigo-tabla tfoot th {
+    padding: .75rem;
+    background: #F8FAFC;
+    color: var(--muted);
+    font-size: .875rem;
+    font-weight: 700;
+    text-transform: none;
+}
+
+.amigo-tabla tbody td {
+    padding: .75rem;
+    vertical-align: middle;
+}
+
+.amigo-tabla thead th.amigo-col-texto,
+.amigo-tabla tfoot th.amigo-col-texto,
+.amigo-tabla tbody td.amigo-col-texto {
+    text-align: left !important;
+}
+
+.amigo-tabla thead th.amigo-col-fecha,
+.amigo-tabla tfoot th.amigo-col-fecha,
+.amigo-tabla tbody td.amigo-col-fecha,
+.amigo-tabla thead th.amigo-col-acciones,
+.amigo-tabla tfoot th.amigo-col-acciones,
+.amigo-tabla tbody td.amigo-col-acciones {
+    text-align: center !important;
+    white-space: nowrap;
+}
+
+.amigo-tabla thead th.amigo-col-valor,
+.amigo-tabla tfoot th.amigo-col-valor,
+.amigo-tabla tbody td.amigo-col-valor {
+    text-align: right !important;
+    white-space: nowrap;
+}
+
+.amigo-tabla thead th.sorting_disabled {
+    background-image: none !important;
+}
+
+.amigo-tabla thead th.sorting_disabled::before,
+.amigo-tabla thead th.sorting_disabled::after {
+    content: none !important;
+    display: none !important;
+}
+
+.amigo-consumibles .dataTables_wrapper,
+.amigo-consumibles .dataTables_wrapper table {
+    width: 100% !important;
+}
+
+.amigo-valor {
+    color: var(--accent-strong);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.amigo-texto {
+    font-weight: 500;
+    white-space: pre-line;
+}
+
+.amigo-empty {
+    margin: 0;
+    color: var(--muted);
+}
+
+@media (max-width: 575.98px) {
+    .amigo-gift__actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+

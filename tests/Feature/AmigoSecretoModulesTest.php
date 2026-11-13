@@ -90,6 +90,38 @@ class AmigoSecretoModulesTest extends TestCase
         $this->assertNotContains('Ver tu amigo', $this->tilesOf($response->getContent(), 'amigo-secreto'));
     }
 
+    public function test_el_modulo_pistas_es_solo_de_la_administracion_y_va_al_final(): void
+    {
+        $this->seed();
+
+        $admin = $this->administrator();
+
+        $dashboard = $this->actingAs($admin)->get('/dashboard')->assertOk();
+
+        $tiles = $this->tilesOf($dashboard->getContent(), 'amigo-secreto');
+
+        $this->assertSame('Pistas', end($tiles));
+
+        // El módulo abre vacío: el marcador de posición.
+        $this->actingAs($admin)
+            ->get('/amigo-secreto/pistas')
+            ->assertOk()
+            ->assertSee('Pistas')
+            ->assertSee('Este módulo está en construcción.');
+
+        // El participante no lo ve ni puede entrar.
+        $participant = $this->participant();
+
+        $this->actingAs($participant)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertDontSee('Pistas');
+
+        $this->actingAs($participant)
+            ->get('/amigo-secreto/pistas')
+            ->assertForbidden();
+    }
+
     public function test_ver_tu_amigo_abre_su_pagina_para_el_participante(): void
     {
         $this->seed();

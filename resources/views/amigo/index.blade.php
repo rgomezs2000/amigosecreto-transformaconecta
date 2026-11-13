@@ -55,17 +55,70 @@
                         @endforelse
                     </ul>
                 </section>
+
+                @if (! $giftsVisible)
+                    <p class="sorteo-note amigo-gifts-pending">
+                        <i class="fa-solid fa-hourglass-half" aria-hidden="true"></i>
+                        <span>
+                            @if ($event?->isSuspended())
+                                El evento está suspendido: los obsequios se habilitan cuando se reactive.
+                            @elseif ($event?->status === \App\Enums\EventStatus::DrawEnabled)
+                                Los obsequios se habilitan cuando el sorteo concluya y el evento avance a la etapa de obsequios.
+                            @else
+                                Los obsequios se habilitan cuando el evento avance a la etapa de obsequios.
+                            @endif
+                        </span>
+                    </p>
+                @endif
             @endif
 
             <p class="sorteo-error" id="amigo-error" role="alert" hidden></p>
         </article>
+
+        @if ($giftsVisible)
+            @include('amigo.partials.obsequio')
+            @include('amigo.partials.consumibles')
+        @endif
     </section>
 
     <div id="amigo-config"
          data-url-datos="{{ route('ver-tu-amigo.datos') }}"
          hidden></div>
+
+    @if ($giftsVisible)
+        <div id="amigo-obsequio-config"
+             data-url-tasa="{{ route('ver-tu-amigo.tasa') }}"
+             data-url-obsequio="{{ route('ver-tu-amigo.obsequio.guardar') }}"
+             data-url-obsequio-modificar="{{ route('ver-tu-amigo.obsequio.modificar') }}"
+             data-url-consumibles="{{ route('ver-tu-amigo.consumibles.datos') }}"
+             data-url-consumible-crear="{{ route('ver-tu-amigo.consumibles.crear') }}"
+             data-url-consumible="{{ route('ver-tu-amigo.consumibles.ver', ['consumable' => '__ID__']) }}"
+             data-puede-editar="{{ $puedeEditar ? '1' : '0' }}"
+             data-tiene-obsequio="{{ $gift !== null ? '1' : '0' }}"
+             data-tasa="{{ $tasa ?? '' }}"
+             data-csrf="{{ csrf_token() }}"
+             hidden></div>
+
+        @include('amigo.partials.modal-consumible')
+        @include('amigo.partials.modal-consumible-ver')
+    @endif
 @endsection
+
+@if ($giftsVisible)
+    @push('head')
+        <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+    @endpush
+
+    @push('vendor')
+        <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+        <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+    @endpush
+@endif
 
 @push('scripts')
     <script src="{{ asset('js/sorteo.js') }}?v={{ filemtime(public_path('js/sorteo.js')) }}"></script>
+
+    @if ($giftsVisible)
+        <script src="{{ asset('js/ver-tu-amigo.js') }}?v={{ filemtime(public_path('js/ver-tu-amigo.js')) }}"></script>
+    @endif
 @endpush

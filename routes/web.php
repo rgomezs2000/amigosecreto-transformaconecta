@@ -18,11 +18,14 @@ use App\Http\Controllers\ModeracionGruposController;
 use App\Http\Controllers\ModulePageController;
 use App\Http\Controllers\ModulosController;
 use App\Http\Controllers\NotificacionesController;
+use App\Http\Controllers\ObsequiosAmigoController;
+use App\Http\Controllers\ParticipantesController;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\PermisosController;
 use App\Http\Controllers\RolesController;
 use App\Http\Controllers\SorteoCiegoController;
 use App\Http\Controllers\UsuarioController;
+use App\Http\Controllers\UsuariosAsociadosController;
 use App\Http\Controllers\UsuariosController;
 use App\Http\Controllers\VerTuAmigoController;
 use Illuminate\Support\Facades\Route;
@@ -380,6 +383,44 @@ Route::get('/amigo-secreto/ver-tu-amigo/datos', [VerTuAmigoController::class, 'd
     ->middleware('auth')
     ->name('ver-tu-amigo.datos');
 
+// Obsequios de «Ver tu amigo»: regalo único y consumibles del participante.
+// Se habilitan cuando el sorteo concluyó y el evento avanzó a esa etapa.
+
+Route::get('/amigo-secreto/ver-tu-amigo/tasa', [ObsequiosAmigoController::class, 'tasa'])
+    ->middleware('auth')
+    ->name('ver-tu-amigo.tasa');
+
+Route::post('/amigo-secreto/ver-tu-amigo/obsequio', [ObsequiosAmigoController::class, 'guardar'])
+    ->middleware('auth')
+    ->name('ver-tu-amigo.obsequio.guardar');
+
+Route::put('/amigo-secreto/ver-tu-amigo/obsequio', [ObsequiosAmigoController::class, 'modificar'])
+    ->middleware('auth')
+    ->name('ver-tu-amigo.obsequio.modificar');
+
+Route::get('/amigo-secreto/ver-tu-amigo/consumibles/datos', [ObsequiosAmigoController::class, 'consumibles'])
+    ->middleware('auth')
+    ->name('ver-tu-amigo.consumibles.datos');
+
+Route::post('/amigo-secreto/ver-tu-amigo/consumibles', [ObsequiosAmigoController::class, 'crearConsumible'])
+    ->middleware('auth')
+    ->name('ver-tu-amigo.consumibles.crear');
+
+Route::get('/amigo-secreto/ver-tu-amigo/consumibles/{consumable}', [ObsequiosAmigoController::class, 'verConsumible'])
+    ->middleware('auth')
+    ->whereNumber('consumable')
+    ->name('ver-tu-amigo.consumibles.ver');
+
+Route::put('/amigo-secreto/ver-tu-amigo/consumibles/{consumable}', [ObsequiosAmigoController::class, 'modificarConsumible'])
+    ->middleware('auth')
+    ->whereNumber('consumable')
+    ->name('ver-tu-amigo.consumibles.modificar');
+
+Route::delete('/amigo-secreto/ver-tu-amigo/consumibles/{consumable}', [ObsequiosAmigoController::class, 'eliminarConsumible'])
+    ->middleware('auth')
+    ->whereNumber('consumable')
+    ->name('ver-tu-amigo.consumibles.eliminar');
+
 // Eventos (tarjetas, planificación y ciclo de vida). La página la sirve el
 // enrutador de módulos; aquí quedan sus acciones.
 
@@ -463,6 +504,45 @@ Route::put('/usuarios/{user}', [UsuariosController::class, 'modificar'])
 Route::delete('/usuarios/{user}', [UsuariosController::class, 'eliminar'])
     ->middleware('auth')
     ->name('usuarios.eliminar');
+
+// Participantes (monitoreo del evento en curso). La página la sirve el
+// enrutador de módulos; aquí quedan la tabla y las fichas de sus modales.
+
+Route::get('/participantes/datos', [ParticipantesController::class, 'datos'])
+    ->middleware('auth')
+    ->name('participantes.datos');
+
+Route::get('/participantes/{participant}/ficha', [ParticipantesController::class, 'ficha'])
+    ->middleware('auth')
+    ->whereNumber('participant')
+    ->name('participantes.ficha');
+
+Route::get('/participantes/{participant}/lista-deseos', [ParticipantesController::class, 'listaDeseos'])
+    ->middleware('auth')
+    ->whereNumber('participant')
+    ->name('participantes.lista-deseos');
+
+Route::get('/participantes/{participant}/pistas', [ParticipantesController::class, 'pistas'])
+    ->middleware('auth')
+    ->whereNumber('participant')
+    ->name('participantes.pistas');
+
+Route::get('/participantes/{participant}/obsequios/consumibles', [ParticipantesController::class, 'consumibles'])
+    ->middleware('auth')
+    ->whereNumber('participant')
+    ->name('participantes.consumibles');
+
+Route::get('/participantes/{participant}/obsequios', [ParticipantesController::class, 'obsequios'])
+    ->middleware('auth')
+    ->whereNumber('participant')
+    ->name('participantes.obsequios');
+
+// Usuarios asociados (monitoreo de las parejas del evento). La página la sirve
+// el enrutador de módulos; aquí queda la consulta del DataTable.
+
+Route::get('/usuarios-asociados/datos', [UsuariosAsociadosController::class, 'datos'])
+    ->middleware('auth')
+    ->name('usuarios-asociados.datos');
 
 // Roles (maestro de perfiles/roles). La página la sirve el enrutador de
 // módulos; aquí quedan sus acciones.

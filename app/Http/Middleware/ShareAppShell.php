@@ -2,12 +2,11 @@
 
 namespace App\Http\Middleware;
 
-use App\Enums\EventStatus;
 use App\Models\Event;
 use App\Models\Module;
 use App\Models\NotificationPreference;
 use App\Models\NotificationSetting;
-use App\Services\ExchangeRateService;
+use App\Support\FaseEvento;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -67,9 +66,7 @@ class ShareAppShell
             $notificationSettings = NotificationSetting::current();
             $notificationPreferences = NotificationPreference::forUser($user)->resolved($notificationSettings);
 
-            $dollar = bcv_dollar();
-            $dollarRate = $dollar['promedio']
-                ?? app(ExchangeRateService::class)->latest()?->rate;
+            $dollarRate = dollar_rate();
 
             View::share('shell', [
                 'user' => $user,
@@ -77,7 +74,7 @@ class ShareAppShell
                 'groups' => $groups,
                 'menuGroups' => $menuGroups,
                 'event' => $event,
-                'currentStep' => $this->currentStep($event),
+                'currentStep' => FaseEvento::paso($event),
                 'showNotifications' => $showNotifications,
                 'notifications' => $notifications,
                 'notificationsCount' => $notificationsCount,
@@ -98,34 +95,5 @@ class ShareAppShell
     private function groupName(Module $module): string
     {
         return $module->category?->name ?? $module->group;
-    }
-
-    private function currentStep(?Event $event): int
-    {
-        if ($event === null) {
-            return 1;
-        }
-
-        if (in_array($event->status, [EventStatus::Draft, EventStatus::Registration], true)) {
-            return 1;
-        }
-
-        if ($event->status === EventStatus::DrawEnabled) {
-            return 2;
-        }
-
-        if ($event->status === EventStatus::Drawn) {
-            if ($event->exchange_at !== null && $event->exchange_at->isPast()) {
-                return 5;
-            }
-
-            if ($event->dynamic_starts_at !== null && $event->dynamic_starts_at->isPast()) {
-                return 4;
-            }
-
-            return 3;
-        }
-
-        return 5;
     }
 }
