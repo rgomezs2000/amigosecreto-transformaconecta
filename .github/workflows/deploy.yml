@@ -71,7 +71,7 @@ jobs:
     name: Desplegar a producción (Windows)
     needs: pruebas
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 75
     environment: production
 
     steps:
@@ -89,6 +89,11 @@ jobs:
       # La lógica de conexión, validación, compresión y envío vive en
       # .github/scripts/Invoke-RemoteDeploy.ps1 para no duplicarla aquí.
       # El script que corre en el servidor es .github/scripts/deploy-remote.ps1.
+      # 3600s de margen: la primera instalación completa de Composer en el
+      # servidor baja ~100 paquetes (google/apiclient-services y grpc/grpc son
+      # enormes) y no cupo en los 1800s anteriores. Si aun así se agota, el
+      # runner lee la traza que el script deja en el servidor y dice en qué paso
+      # se quedó.
       - name: Autenticación, despliegue y desconexión
         shell: pwsh
         env:
@@ -99,4 +104,4 @@ jobs:
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           PHP_BIN: ${{ vars.PHP_BIN }}
           COMPOSER_BIN: ${{ vars.COMPOSER_BIN }}
-        run: ./.github/scripts/Invoke-RemoteDeploy.ps1 -RemoteScriptPath '.github/scripts/deploy-remote.ps1' -TimeoutSeconds 1800
+        run: ./.github/scripts/Invoke-RemoteDeploy.ps1 -RemoteScriptPath '.github/scripts/deploy-remote.ps1' -TimeoutSeconds 3600

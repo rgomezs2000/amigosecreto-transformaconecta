@@ -60,11 +60,19 @@ if (-not (Test-Path -LiteralPath $RemoteScriptPath)) {
   throw "No se encontró el script remoto: $RemoteScriptPath"
 }
 
+# Ruta de la traza que el script deja EN EL SERVIDOR. Si el comando se agota por
+# tiempo, Posh-SSH no devuelve nada; leyendo este archivo sabemos dónde se quedó.
+# Lleva marca de tiempo para no leer nunca la traza de una ejecución anterior.
+$remoteLog = if ([string]::IsNullOrWhiteSpace($env:REMOTE_LOG)) {
+  'C:\Windows\Temp\dsh-deploy-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log'
+} else { $env:REMOTE_LOG }
+
 $remoteScript = (Get-Content -LiteralPath $RemoteScriptPath -Raw).
   Replace('__DEPLOY_PATH__', (ConvertTo-PsLiteral $deployPath)).
   Replace('__PHP_BIN__', (ConvertTo-PsLiteral $env:PHP_BIN)).
   Replace('__COMPOSER_BIN__', (ConvertTo-PsLiteral $env:COMPOSER_BIN)).
-  Replace('__PHP_EXTENSION__', (ConvertTo-PsLiteral $env:PHP_EXTENSION))
+  Replace('__PHP_EXTENSION__', (ConvertTo-PsLiteral $env:PHP_EXTENSION)).
+  Replace('__REMOTE_LOG__', (ConvertTo-PsLiteral $remoteLog))
 
 # ---- 3. Validar la sintaxis ANTES de conectar ------------------------------
 # Un error de PowerShell en el servidor se vería como un "ExitStatus 1" mudo.
@@ -122,8 +130,30 @@ $session = New-SSHSession `
   -AcceptKey
 
 try {
-  Write-Host 'Ejecutando script remoto...'
-  $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $command -TimeOut $TimeoutSeconds
+  Write-Host "Ejecutando script remoto (límite ${TimeoutSeconds}s)..."
+  $inicio = Get-Date
+
+  try {
+    $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $command -TimeOut $TimeoutSeconds
+  }
+  catch {
+    Write-Host ''
+    Write-Host ("El comando remoto falló o agotó el tiempo tras {0:N0}s." -f ((Get-Date) - $inicio).TotalSeconds)
+    Write-Host $_.Exception.Message
+    Write-Host ''
+    Write-Host "--- últimas líneas de la traza en el servidor ($remoteLog) ---"
+
+    $tailCommand = 'powershell -NoProfile -Command "Get-Content -LiteralPath ' + $remoteLog + ' -Tail 100" 2>&1'
+    try {
+      $tail = Invoke-SSHCommand -SessionId $session.SessionId -Command $tailCommand -TimeOut 120
+      if ($tail.Output) { $tail.Output | ForEach-Object { Write-Host $_ } }
+      if ($tail.Error) { $tail.Error | ForEach-Object { Write-Host $_ } }
+    }
+    catch {
+      Write-Host "No se pudo leer la traza: $($_.Exception.Message)"
+    }
+    throw
+  }
 
   if ($result.Output) {
     $result.Output | ForEach-Object { Write-Host $_ }
@@ -138,7 +168,7 @@ try {
     throw "El script remoto falló con ExitStatus $($result.ExitStatus). Revisa las líneas 'ERROR:' del log anterior."
   }
 
-  Write-Host 'Script remoto completado correctamente.'
+  Write-Host ("Script remoto completado correctamente en {0:N0}s." -f ((Get-Date) - $inicio).TotalSeconds)
 }
 finally {
   if ($session) {

@@ -93,6 +93,28 @@ Si el servidor tiene varios PHP, define `PHP_BIN` para fijar el que usan Compose
 y `php artisan`; el workflow avisa cuando la versión detectada no cumple el
 `^8.2` que exige [composer.json](composer.json).
 
+### Cuando el despliegue se agota por tiempo
+
+Posh-SSH solo devuelve la salida **cuando el comando termina**, así que un
+`CommandTimeout` dejaba el log completamente ciego. Por eso el script remoto:
+
+- escribe una **traza en el servidor** (`C:\Windows\Temp\dsh-deploy.log`, o la
+  ruta de la variable de entorno `REMOTE_LOG`) con `Start-Transcript`;
+- marca cada paso con el tiempo transcurrido (`==> [2/6] Composer [+3,2s]`) y
+  cada comando con su duración y código de salida
+  (`composer install: 42,7s, código de salida 0`).
+
+Si el comando remoto falla o se agota, el runner abre una segunda conexión y
+muestra las últimas 100 líneas de esa traza, así que siempre se ve en qué paso se
+quedó. El límite actual es de 3600 s (el job de GitHub, 75 min).
+
+La primera instalación completa de Composer en el servidor es lenta: baja unos
+100 paquetes, entre ellos `google/apiclient-services` y `grpc/grpc`, que son
+grandes. Si se repite a menudo, conviene ejecutar `composer install` una vez a
+mano en el servidor o configurar un token de GitHub para Composer
+(`composer config --global github-oauth.github.com <token>`), que evita los
+límites de descarga anónima y acelera mucho las instalaciones.
+
 ### Dos límites del servidor que condicionan estos scripts
 
 - **Línea de comandos de `cmd.exe`: 8191 caracteres.** El shell por defecto de

@@ -12,15 +12,30 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
+$guionInicio = Get-Date
+
 function Step([string]$mensaje) {
   Write-Host ''
-  Write-Host "==> $mensaje"
+  Write-Host ("==> {0}   [+{1:N1}s]" -f $mensaje, ((Get-Date) - $guionInicio).TotalSeconds)
 }
 
 function Invoke-Native([string]$exe, [string[]]$argumentos, [string]$que) {
   Write-Host "> $exe $($argumentos -join ' ')"
-  & $exe @argumentos
-  if ($LASTEXITCODE -ne 0) { throw "$que falló con código de salida $LASTEXITCODE." }
+  $inicio = Get-Date
+  # Ver la nota en deploy-remote.ps1: 2>&1 necesita ErrorActionPreference
+  # distinto de 'Stop' en Windows PowerShell 5.1.
+  $eapPrevio = $ErrorActionPreference
+  $codigo = 1
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $exe @argumentos 2>&1 | ForEach-Object { Write-Host $_ }
+    $codigo = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $eapPrevio
+  }
+  Write-Host ("  {0}: {1:N1}s, código de salida {2}" -f $que, ((Get-Date) - $inicio).TotalSeconds, $codigo)
+  if ($codigo -ne 0) { throw "$que falló con código de salida $codigo." }
 }
 
 function Find-Tool([string]$nombre) {
@@ -30,6 +45,19 @@ function Find-Tool([string]$nombre) {
 }
 
 try {
+  $remoteLog = '__REMOTE_LOG__'
+  $traza = $false
+  if ($remoteLog -and $remoteLog -notlike '__*') {
+    try {
+      Start-Transcript -Path $remoteLog -Force | Out-Null
+      $traza = $true
+      Write-Host "Traza del servidor: $remoteLog"
+    }
+    catch {
+      Write-Host "Aviso: no se pudo iniciar la traza en $remoteLog ($($_.Exception.Message))."
+    }
+  }
+
   $deployPath = '__DEPLOY_PATH__'
   $phpOverride = '__PHP_BIN__'
 
@@ -64,7 +92,8 @@ try {
   Invoke-Native $php @('artisan', 'config:cache') 'config:cache'
 
   Write-Host ''
-  Write-Host 'Migraciones y seeders al día.'
+  Write-Host ("Migraciones y seeders al día en {0:N1}s." -f ((Get-Date) - $guionInicio).TotalSeconds)
+  if ($traza) { try { Stop-Transcript | Out-Null } catch { } }
   exit 0
 }
 catch {
@@ -73,6 +102,7 @@ catch {
   if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
     Write-Host $_.InvocationInfo.PositionMessage
   }
-  Write-Host 'Migraciones abortadas.'
+  Write-Host ("Migraciones abortadas tras {0:N1}s." -f ((Get-Date) - $guionInicio).TotalSeconds)
+  if ($traza) { try { Stop-Transcript | Out-Null } catch { } }
   exit 1
 }

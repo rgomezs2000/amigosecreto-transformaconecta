@@ -2,8 +2,8 @@
   Script que se ejecuta EN EL SERVIDOR de producción (Windows + XAMPP).
   Lo invoca .github/workflows/deploy.yml a través de una sesión SSH.
 
-  Los marcadores __DEPLOY_PATH__, __PHP_BIN__ y __COMPOSER_BIN__ los sustituye
-  el workflow antes de enviarlo. Se puede probar en local así:
+  Los marcadores __DEPLOY_PATH__, __PHP_BIN__, __COMPOSER_BIN__ y __REMOTE_LOG__
+  los sustituye el workflow antes de enviarlo. Se puede probar en local así:
 
       pwsh -NoProfile -File .github/scripts/deploy-remote.ps1
 
@@ -15,16 +15,39 @@ $ProgressPreference = 'SilentlyContinue'
 # Sin esto, al escribir en la tubería de SSH los acentos salen como "fall?".
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
+$guionInicio = Get-Date
+
+# Marca el inicio de cada paso con el tiempo transcurrido. Si SSH corta por
+# tiempo, la traza del servidor muestra en qué paso se quedó y cuánto tardaron
+# los anteriores.
 function Step([string]$mensaje) {
   Write-Host ''
-  Write-Host "==> $mensaje"
+  Write-Host ("==> {0}   [+{1:N1}s]" -f $mensaje, ((Get-Date) - $guionInicio).TotalSeconds)
 }
 
 # Ejecuta un programa, deja ver su salida y falla si el código de salida no es 0.
+# La salida pasa por Write-Host a propósito: así queda en la traza del servidor,
+# que es lo único recuperable cuando la conexión se agota por tiempo (Posh-SSH
+# solo devuelve la salida cuando el comando termina).
 function Invoke-Native([string]$exe, [string[]]$argumentos, [string]$que) {
   Write-Host "> $exe $($argumentos -join ' ')"
-  & $exe @argumentos
-  if ($LASTEXITCODE -ne 0) { throw "$que falló con código de salida $LASTEXITCODE." }
+  $inicio = Get-Date
+  # El 2>&1 es deliberado (así el stderr también queda en la traza, que es donde
+  # Composer escribe sus errores), pero hay que bajar ErrorActionPreference
+  # dentro del bloque: en Windows PowerShell 5.1 redirigir el stderr de un
+  # ejecutable nativo genera ErrorRecords y con 'Stop' abortan el script entero.
+  $eapPrevio = $ErrorActionPreference
+  $codigo = 1
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $exe @argumentos 2>&1 | ForEach-Object { Write-Host $_ }
+    $codigo = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $eapPrevio
+  }
+  Write-Host ("  {0}: {1:N1}s, código de salida {2}" -f $que, ((Get-Date) - $inicio).TotalSeconds, $codigo)
+  if ($codigo -ne 0) { throw "$que falló con código de salida $codigo." }
 }
 
 # Busca un ejecutable en el PATH y devuelve su ruta completa (o $null).
@@ -65,6 +88,21 @@ function Assert-PhpExtensions([string]$php, [string]$deployPath) {
 }
 
 try {
+  # Traza en el servidor: si el comando se agota por tiempo, el runner lee este
+  # archivo para poder decir en qué paso se quedó.
+  $remoteLog = '__REMOTE_LOG__'
+  $traza = $false
+  if ($remoteLog -and $remoteLog -notlike '__*') {
+    try {
+      Start-Transcript -Path $remoteLog -Force | Out-Null
+      $traza = $true
+      Write-Host "Traza del servidor: $remoteLog"
+    }
+    catch {
+      Write-Host "Aviso: no se pudo iniciar la traza en $remoteLog ($($_.Exception.Message))."
+    }
+  }
+
   $deployPath = '__DEPLOY_PATH__'
   $phpOverride = '__PHP_BIN__'
   $composerOverride = '__COMPOSER_BIN__'
@@ -195,16 +233,45 @@ try {
   }
 
   Step '[6/6] Apache'
-  if (Get-Service -Name 'Apache2.4' -ErrorAction SilentlyContinue) {
-    Restart-Service -Name 'Apache2.4'
-    Write-Host 'Apache reiniciado.'
+  $servicioApache = Get-Service -Name 'Apache2.4' -ErrorAction SilentlyContinue
+  if (-not $servicioApache) {
+    Write-Host 'Apache no está instalado como servicio; se omite el reinicio.'
   }
   else {
-    Write-Host 'Apache no está instalado como servicio; se omite el reinicio.'
+    # Restart-Service NO tiene tiempo límite: si un proceso hijo no termina, se
+    # queda esperando para siempre y el despliegue muere por CommandTimeout sin
+    # decir nada. Con WaitForStatus el tiempo está acotado y el fallo se explica.
+    $limite = [TimeSpan]::FromSeconds(90)
+    $servicioApache.Refresh()
+
+    if ($servicioApache.Status -ne 'Stopped') {
+      Write-Host ("Deteniendo Apache (máximo {0:N0}s, estado actual {1})..." -f $limite.TotalSeconds, $servicioApache.Status)
+      $servicioApache.Stop()
+      try { $servicioApache.WaitForStatus('Stopped', $limite) }
+      catch {
+        $servicioApache.Refresh()
+        $estadoApache = $servicioApache.Status
+        throw ("Apache no se detuvo en {0:N0}s; quedó en estado {1}. Suele haber un php.exe colgado: revisa el Administrador de tareas o reinicia el servicio a mano." -f $limite.TotalSeconds, $estadoApache)
+      }
+    }
+
+    $servicioApache.Refresh()
+    if ($servicioApache.Status -ne 'Running') {
+      Write-Host 'Arrancando Apache...'
+      $servicioApache.Start()
+      try { $servicioApache.WaitForStatus('Running', $limite) }
+      catch {
+        $servicioApache.Refresh()
+        throw ("Apache no arrancó en {0:N0}s; se quedó en estado {1}." -f $limite.TotalSeconds, $servicioApache.Status)
+      }
+    }
+
+    Write-Host ("Apache en marcha ({0:N1}s)." -f ((Get-Date) - $guionInicio).TotalSeconds)
   }
 
   Write-Host ''
-  Write-Host 'Despliegue completado.'
+  Write-Host ("Despliegue completado en {0:N1}s." -f ((Get-Date) - $guionInicio).TotalSeconds)
+  if ($traza) { try { Stop-Transcript | Out-Null } catch { } }
   exit 0
 }
 catch {
@@ -213,6 +280,7 @@ catch {
   if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
     Write-Host $_.InvocationInfo.PositionMessage
   }
-  Write-Host 'Despliegue abortado.'
+  Write-Host ("Despliegue abortado tras {0:N1}s." -f ((Get-Date) - $guionInicio).TotalSeconds)
+  if ($traza) { try { Stop-Transcript | Out-Null } catch { } }
   exit 1
 }

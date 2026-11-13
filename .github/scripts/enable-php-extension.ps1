@@ -107,8 +107,23 @@ try {
   }
   Write-Host "Verificado: 'php -m' ya lista '$extension'."
 
-  if (Get-Service -Name 'Apache2.4' -ErrorAction SilentlyContinue) {
-    Restart-Service -Name 'Apache2.4'
+  # Restart-Service no tiene tiempo límite; acotarlo evita que el workflow se
+  # quede colgado esperando a que Apache se detenga.
+  $servicioApache = Get-Service -Name 'Apache2.4' -ErrorAction SilentlyContinue
+  if ($servicioApache) {
+    $limite = [TimeSpan]::FromSeconds(90)
+    $servicioApache.Refresh()
+    if ($servicioApache.Status -ne 'Stopped') {
+      $servicioApache.Stop()
+      try { $servicioApache.WaitForStatus('Stopped', $limite) }
+      catch { Write-Host 'Apache no se detuvo a tiempo; reinícialo a mano para que la web cargue la extensión.' }
+    }
+    $servicioApache.Refresh()
+    if ($servicioApache.Status -ne 'Running') {
+      $servicioApache.Start()
+      try { $servicioApache.WaitForStatus('Running', $limite) }
+      catch { Write-Host 'Apache no arrancó a tiempo; arráncalo a mano desde el panel de XAMPP.' }
+    }
     Write-Host 'Apache reiniciado: la extensión queda disponible también para la web.'
   }
   else {
