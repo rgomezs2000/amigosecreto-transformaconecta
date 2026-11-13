@@ -14,6 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Detrás de AWS/CloudFront, la IP real llega en X-Forwarded-For.
+        $middleware->trustProxies(at: '*');
+
         $middleware->web(append: [
             ShareAppShell::class,
         ]);

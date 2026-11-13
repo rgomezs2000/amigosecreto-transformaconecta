@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\SessionSecurity;
 use Google\Client;
 use Google\Service\Oauth2;
 use Illuminate\Http\JsonResponse;
@@ -75,6 +76,9 @@ class GoogleAuthController extends Controller
 
             Auth::login($user);
             $request->session()->regenerate();
+
+            // Una sola sesión activa por cuenta, sin importar la IP.
+            SessionSecurity::kickOtherSessions($user, $request);
 
             return $this->result($request, 'ok', ['name' => $user->name], route('dashboard'));
         } catch (Throwable $exception) {

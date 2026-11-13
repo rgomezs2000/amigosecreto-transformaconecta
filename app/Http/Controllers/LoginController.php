@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\SessionSecurity;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -87,6 +88,9 @@ class LoginController extends Controller
 
             Auth::login($user);
             $request->session()->regenerate();
+
+            // Una sola sesión activa por cuenta, sin importar la IP.
+            SessionSecurity::kickOtherSessions($user, $request);
 
             return api_success('Acceso correcto.', [
                 'redirect' => route('dashboard'),

@@ -31,6 +31,29 @@
     {{-- DataTables y otras librerías de tabla se cargan solo en las vistas que
          las usan, con @push('vendor') desde esa vista. --}}
     @stack('vendor')
+
+    {{-- DataTables Responsive: en móvil/tablet oculta columnas y las muestra
+         dentro de la fila expandida, sin ensanchar la página. Solo se carga
+         cuando la página ya cargó DataTables. --}}
+    <script>
+        (function () {
+            if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.dataTable) {
+                return;
+            }
+
+            document.write('<link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.5.0/css/responsive.bootstrap5.min.css">');
+            document.write('<script src="https://cdn.datatables.net/responsive/2.5.0/js/dataTables.responsive.min.js"><\/script>');
+            document.write('<script src="https://cdn.datatables.net/responsive/2.5.0/js/responsive.bootstrap5.min.js"><\/script>');
+        })();
+    </script>
+    <script>
+        if (window.jQuery && window.jQuery.fn && window.jQuery.fn.dataTable) {
+            window.jQuery.extend(true, window.jQuery.fn.dataTable.defaults, {
+                responsive: true
+            });
+        }
+    </script>
+
     @stack('scripts')
 
     {{-- Refresco en reposo de las tablas: nunca interrumpe formularios,
