@@ -1,11 +1,13 @@
 <?php
 
 use App\Http\Middleware\EnsureModuleAccess;
+use App\Http\Middleware\EnsureSingleSession;
 use App\Http\Middleware\EnsureSuperAdmin;
 use App\Http\Middleware\ShareAppShell;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Session\Middleware\StartSession;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -19,7 +21,15 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->web(append: [
             ShareAppShell::class,
+            EnsureSingleSession::class,
         ]);
+
+        // Debe ejecutarse después de StartSession pero antes de auth, para
+        // poder avisar a una sesión que ya fue eliminada.
+        $middleware->appendToPriorityList(
+            after: StartSession::class,
+            append: EnsureSingleSession::class,
+        );
 
         $middleware->alias([
             'module.access' => EnsureModuleAccess::class,

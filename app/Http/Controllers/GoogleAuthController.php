@@ -95,8 +95,9 @@ class GoogleAuthController extends Controller
             Auth::login($user);
             $request->session()->regenerate();
 
-            // Una sola sesión activa por cuenta, sin importar la IP.
-            SessionSecurity::kickOtherSessions($user, $request);
+            // Una sola sesión activa por cuenta. La sesión anterior se
+            // invalida en su siguiente petición y recibe el aviso.
+            SessionSecurity::activate($user, $request);
 
             return $this->result($request, 'ok', ['name' => $user->name], route('dashboard'));
         } catch (Throwable $exception) {

@@ -264,6 +264,18 @@ class AyudaTest extends TestCase
             ->assertSee('Este módulo está en construcción.');
     }
 
+    public function test_las_pantallas_de_ayuda_no_muestran_volver_al_panel(): void
+    {
+        $user = $this->participante();
+
+        foreach (['/ayuda/acerca-de', '/ayuda/guia', '/ayuda/faq'] as $url) {
+            $this->actingAs($user)
+                ->get($url)
+                ->assertOk()
+                ->assertDontSee('Volver al panel');
+        }
+    }
+
     public function test_el_panel_muestra_el_grupo_ayuda_en_el_menu(): void
     {
         $user = $this->participante();

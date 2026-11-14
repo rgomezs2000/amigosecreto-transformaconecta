@@ -17,6 +17,8 @@
         initLoginForm();
         initExitButton();
         showGoogleResult();
+        showSessionKickedResult();
+        initSessionWatch();
         initDashboardClock();
         initEventCountdown();
         initOffcanvasDismiss();
@@ -497,6 +499,80 @@
         if (window.history && window.history.replaceState) {
             window.history.replaceState({}, document.title, window.location.pathname);
         }
+    }
+
+    /**
+     * Aviso al llegar al login con ?sesion=otra.
+     */
+    function showSessionKickedResult() {
+        var params = new URLSearchParams(window.location.search);
+
+        if (params.get('sesion') !== 'otra') {
+            return;
+        }
+
+        dialog(
+            'Tu sesión se cerró porque la misma cuenta inició sesión en otro dispositivo o ubicación.',
+            'Sesión cerrada'
+        );
+
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }
+
+    /**
+     * Sondea la sesión activa. Si otra sesión reemplazó a esta, avisa y manda
+     * al login. No recarga la página mientras la sesión sigue vigente.
+     */
+    function initSessionWatch() {
+        var statusUrl = document.body.getAttribute('data-session-status-url');
+        var loginUrl = document.body.getAttribute('data-login-url') || '/login';
+
+        if (!statusUrl) {
+            return;
+        }
+
+        var shown = false;
+
+        function notify(message) {
+            if (shown) {
+                return;
+            }
+
+            shown = true;
+
+            dialog(
+                message || 'Tu sesión se cerró porque la misma cuenta inició sesión en otro dispositivo o ubicación.',
+                'Sesión cerrada',
+                function () {
+                    window.location.assign(loginUrl);
+                }
+            );
+        }
+
+        function check() {
+            if (document.hidden) {
+                return;
+            }
+
+            $.getJSON(statusUrl)
+                .done(function (response) {
+                    if (response && response.kicked) {
+                        notify(response.message);
+                    }
+                })
+                .fail(function (xhr) {
+                    var response = xhr && xhr.responseJSON ? xhr.responseJSON : {};
+
+                    if (response.session_kicked) {
+                        notify(response.message);
+                    }
+                });
+        }
+
+        window.setTimeout(check, 2500);
+        window.setInterval(check, 10000);
     }
 
     /**

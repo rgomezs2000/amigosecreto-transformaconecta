@@ -17,7 +17,9 @@
 
     @stack('head')
 </head>
-<body class="app-body">
+<body class="app-body"
+      data-session-status-url="{{ auth()->check() ? route('sesion.estado') : '' }}"
+      data-login-url="{{ route('login') }}">
     <a class="skip-link" href="#contenido">Saltar al contenido principal</a>
 
     @yield('content')

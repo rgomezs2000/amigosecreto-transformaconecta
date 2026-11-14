@@ -5,11 +5,6 @@
 @section('shell-eyebrow', $module->category?->name ?? 'Ayuda')
 
 @section('page')
-    <a class="module-back" href="{{ route('dashboard') }}">
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-        <span>Volver al panel</span>
-    </a>
-
     <div class="help-page">
         <header class="help-hero">
             <span class="help-hero__icon" aria-hidden="true">

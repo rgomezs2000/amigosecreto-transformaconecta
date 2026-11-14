@@ -15,49 +15,88 @@ class SessionSecurityTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_se_eliminan_todas_las_sesiones_anteriores_de_la_misma_cuenta(): void
+    public function test_activar_guarda_el_id_de_la_sesion_actual(): void
     {
         $user = User::factory()->create();
-        $now = now()->timestamp;
+        $sessionId = str_repeat('a', 40);
+
+        $request = Request::create('/', 'GET');
+        $request->setLaravelSession(new Store('prueba', new ArraySessionHandler(120), $sessionId));
+
+        SessionSecurity::activate($user, $request);
+
+        $this->assertSame($sessionId, $user->fresh()->active_session_id);
+    }
+
+    public function test_activar_elimina_las_sesiones_anteriores_y_deja_el_aviso(): void
+    {
+        $user = User::factory()->create();
         $currentId = str_repeat('c', 40);
 
         DB::table('sessions')->insert([
-            [
-                'id' => 'sesion-otra-ip',
-                'user_id' => $user->id,
-                'ip_address' => '1.1.1.1',
-                'user_agent' => 'Prueba',
-                'payload' => '',
-                'last_activity' => $now,
-            ],
-            [
-                'id' => 'sesion-misma-ip',
-                'user_id' => $user->id,
-                'ip_address' => '2.2.2.2',
-                'user_agent' => 'Prueba',
-                'payload' => '',
-                'last_activity' => $now,
-            ],
-            [
-                'id' => $currentId,
-                'user_id' => $user->id,
-                'ip_address' => '2.2.2.2',
-                'user_agent' => 'Prueba',
-                'payload' => '',
-                'last_activity' => $now,
-            ],
+            'id' => 'sesion-anterior',
+            'user_id' => $user->id,
+            'ip_address' => '2.2.2.2',
+            'user_agent' => 'Prueba',
+            'payload' => '',
+            'last_activity' => now()->timestamp,
         ]);
 
-        config(['session.driver' => 'database']);
-
-        $request = Request::create('/', 'GET', [], [], [], ['REMOTE_ADDR' => '2.2.2.2']);
+        $request = Request::create('/', 'GET');
         $request->setLaravelSession(new Store('prueba', new ArraySessionHandler(120), $currentId));
 
-        $deleted = SessionSecurity::kickOtherSessions($user, $request);
+        $this->assertSame(1, SessionSecurity::activate($user, $request));
 
-        $this->assertSame(2, $deleted);
-        $this->assertDatabaseMissing('sessions', ['id' => 'sesion-otra-ip']);
-        $this->assertDatabaseMissing('sessions', ['id' => 'sesion-misma-ip']);
-        $this->assertDatabaseHas('sessions', ['id' => $currentId]);
+        $this->assertDatabaseHas('sessions', [
+            'id' => 'sesion-anterior',
+            'user_id' => null,
+            'payload' => '',
+        ]);
+        $this->assertDatabaseHas('session_kicks', ['session_id' => 'sesion-anterior']);
+        $this->assertSame($currentId, $user->fresh()->active_session_id);
+    }
+
+    public function test_la_sesion_anterior_se_cierra_y_va_al_login(): void
+    {
+        $user = User::factory()->create([
+            'active_session_id' => 'otra-sesion',
+        ]);
+
+        $this->actingAs($user)
+            ->get('/dashboard')
+            ->assertRedirect(route('login', ['sesion' => 'otra']));
+
+        $this->assertGuest();
+    }
+
+    public function test_el_sondeo_avisa_y_cierra_la_sesion_anterior(): void
+    {
+        $user = User::factory()->create([
+            'active_session_id' => 'otra-sesion',
+        ]);
+
+        $this->actingAs($user)
+            ->getJson('/sesion/estado')
+            ->assertOk()
+            ->assertJsonPath('kicked', true)
+            ->assertJsonPath('message', SessionSecurity::KICKED_MESSAGE);
+
+        $this->assertGuest();
+    }
+
+    public function test_la_sesion_actual_sigue_activa(): void
+    {
+        $user = User::factory()->create([
+            'active_session_id' => str_repeat('a', 40),
+        ]);
+
+        $request = Request::create('/', 'GET');
+        $request->setLaravelSession(new Store('prueba', new ArraySessionHandler(120), str_repeat('a', 40)));
+
+        $this->assertTrue(SessionSecurity::isCurrent($user, $request));
+
+        $request->setLaravelSession(new Store('prueba', new ArraySessionHandler(120), str_repeat('b', 40)));
+
+        $this->assertFalse(SessionSecurity::isCurrent($user, $request));
     }
 }

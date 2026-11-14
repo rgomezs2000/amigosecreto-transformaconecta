@@ -6449,8 +6449,6 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
     display: grid;
     gap: 1.5rem;
     width: 100%;
-    max-width: 1180px;
-    margin: 0 auto;
 }
 
 /* Encabezado de la página */
@@ -6537,7 +6535,7 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
 /* Índice y contenido */
 .help-layout {
     display: grid;
-    grid-template-columns: 17.5rem minmax(0, 1fr);
+    grid-template-columns: clamp(15rem, 18vw, 20rem) minmax(0, 1fr);
     gap: 1.5rem;
     align-items: start;
 }

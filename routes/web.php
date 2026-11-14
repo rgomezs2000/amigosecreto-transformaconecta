@@ -11,6 +11,7 @@ use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\LogoutController;
+use App\Http\Controllers\SessionController;
 use App\Http\Controllers\MatrizPerfilesController;
 use App\Http\Controllers\ModeracionBloqueosController;
 use App\Http\Controllers\ModeracionController;
@@ -38,6 +39,11 @@ Route::get('/login', [LoginController::class, 'index'])->name('login');
 
 // Validación de usuario/correo y clave (responde JSON para el AJAX).
 Route::post('/login', [LoginController::class, 'login'])->name('login.attempt');
+
+// Estado de la sesión única: el navegador lo consulta periódicamente.
+Route::get('/sesion/estado', [SessionController::class, 'estado'])
+    ->middleware('auth')
+    ->name('sesion.estado');
 
 // Acceso con Google por OAuth (flujo de redirección).
 Route::get('/auth/google/redirect', [GoogleAuthController::class, 'googleLogin'])->name('google.redirect');
