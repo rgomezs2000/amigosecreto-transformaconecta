@@ -91,6 +91,15 @@
         var adminsUrl = $config.attr('data-url-admins') || '';
         var detailReportId = null;
         var detailTicketChatId = null;
+        var detalleUrl = $config.attr('data-url-detalle') || '';
+        var sugerenciaUrl = $config.attr('data-url-sugerencia') || '';
+        var detailType = '';
+        var detailCanReply = false;
+        var currentMedia = [];
+        var currentReportRow = null;
+        var attachmentTables = {};
+        var lightboxItems = [];
+        var lightboxIndex = 0;
 
         function escapeText(value) {
             return $('<div>').text(value == null ? '' : value).html();
@@ -123,6 +132,7 @@
                 date_from: $('#moderacion-filter-from').val() || '',
                 date_to: $('#moderacion-filter-to').val() || '',
                 status: $('#moderacion-filter-status').val() || '',
+                case_type: $('#moderacion-filter-case-type').val() || '',
                 manager_id: $('#moderacion-filter-manager').val() || '',
                 referred_to_id: $('#moderacion-filter-referred').val() || ''
             };
@@ -312,6 +322,7 @@
             $('#moderacion-filter-from-wrap, #moderacion-filter-to-wrap')
                 .toggleClass('d-none', type !== 'date');
             $('#moderacion-filter-status-wrap').toggleClass('d-none', type !== 'status');
+            $('#moderacion-filter-case-type-wrap').toggleClass('d-none', type !== 'case_type');
             $('#moderacion-filter-manager-wrap').toggleClass('d-none', !manager);
             $('#moderacion-filter-referred-wrap').toggleClass('d-none', !referred);
 
@@ -349,10 +360,11 @@
                 { data: 'author' },
                 { data: 'reason' },
                 { data: 'conversation' },
+                { data: 'type_html' },
                 { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
             ],
             columnDefs: [
-                { orderable: false, targets: [8, 9] }
+                { orderable: false, targets: [8, 10] }
             ],
             order: [[1, 'desc']],
             pageLength: 10,
@@ -360,15 +372,15 @@
             searching: true,
             dom: 'lrtip',
             language: {
-                emptyTable: 'No hay reportes registrados.',
+                emptyTable: 'No hay casos registrados.',
                 info: 'Mostrando _START_ a _END_ de _TOTAL_',
-                infoEmpty: 'Sin reportes',
+                infoEmpty: 'Sin casos',
                 infoFiltered: '(filtrado de _MAX_)',
                 lengthMenu: 'Mostrar _MENU_',
-                loadingRecords: 'Cargando reportes...',
+                loadingRecords: 'Cargando casos...',
                 processing: 'Procesando...',
                 search: 'Buscar:',
-                zeroRecords: 'No se encontraron reportes',
+                zeroRecords: 'No se encontraron casos',
                 paginate: {
                     first: 'Primera',
                     last: 'Última',
@@ -388,6 +400,7 @@
             $('#moderacion-filter-from').val('');
             $('#moderacion-filter-to').val('');
             $('#moderacion-filter-status').val('pendiente');
+            $('#moderacion-filter-case-type').val('');
             resetFilterSelect2('#moderacion-filter-manager');
             resetFilterSelect2('#moderacion-filter-referred');
             toggleReportFilter();
@@ -403,9 +416,10 @@
             reportesTable.ajax.reload(null, true);
         });
 
-        $('#moderacion-filter-from, #moderacion-filter-to, #moderacion-filter-status').on('change', function () {
-            reportesTable.ajax.reload(null, true);
-        });
+        $('#moderacion-filter-from, #moderacion-filter-to, #moderacion-filter-status, #moderacion-filter-case-type')
+            .on('change', function () {
+                reportesTable.ajax.reload(null, true);
+            });
 
         toggleReportFilter();
 
@@ -416,13 +430,108 @@
                 return;
             }
 
-            detailReportId = row.id;
+            openReportDetail(row);
+        });
+
+        /* ------------------------------------------------------------------
+           Ficha del caso: pestañas, adjuntos y sugerencia
+           ------------------------------------------------------------------ */
+
+        var lightboxElement = document.getElementById('modal-moderacion-lightbox');
+        var lightboxModal = lightboxElement ? window.bootstrap.Modal.getOrCreateInstance(lightboxElement) : null;
+
+        function attachmentLanguage() {
+            return {
+                emptyTable: 'Sin archivos en esta sección.',
+                info: 'Mostrando _START_ a _END_ de _TOTAL_',
+                infoEmpty: 'Sin archivos',
+                infoFiltered: '(filtrado de _MAX_)',
+                lengthMenu: 'Mostrar _MENU_',
+                loadingRecords: 'Cargando...',
+                processing: 'Procesando...',
+                search: 'Buscar:',
+                zeroRecords: 'No se encontraron archivos',
+                paginate: {
+                    first: 'Primera',
+                    last: 'Última',
+                    next: 'Siguiente',
+                    previous: 'Anterior'
+                }
+            };
+        }
+
+        function makeAttachmentTable(selector, columns) {
+            var $table = $(selector);
+
+            if (!$table.length || !$.fn.DataTable) {
+                return null;
+            }
+
+            return $table.DataTable({
+                data: [],
+                columns: columns,
+                autoWidth: false,
+                scrollX: true,
+                pageLength: 5,
+                lengthMenu: [[5, 10, 25], [5, 10, 25]],
+                order: [],
+                searching: true,
+                dom: 'lrtip',
+                language: attachmentLanguage()
+            });
+        }
+
+        attachmentTables.media = makeAttachmentTable('#moderacion-attachments-media-table', [
+            { data: 'preview', orderable: false, className: 'moderacion-attachment-preview' },
+            { data: 'name' },
+            { data: 'date' },
+            { data: 'size_label' },
+            { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
+        ]);
+
+        attachmentTables.audios = makeAttachmentTable('#moderacion-attachments-audios-table', [
+            { data: 'name' },
+            { data: 'date' },
+            { data: 'size_label' },
+            { data: 'audio', orderable: false, searchable: false },
+            { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
+        ]);
+
+        attachmentTables.documents = makeAttachmentTable('#moderacion-attachments-documents-table', [
+            { data: 'name' },
+            { data: 'date' },
+            { data: 'size_label' },
+            { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
+        ]);
+
+        attachmentTables.links = makeAttachmentTable('#moderacion-attachments-links-table', [
+            { data: 'url_html' },
+            { data: 'date' },
+            { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
+        ]);
+
+        function adjustAttachmentTables() {
+            Object.keys(attachmentTables).forEach(function (key) {
+                if (attachmentTables[key]) {
+                    attachmentTables[key].columns.adjust();
+                }
+            });
+        }
+
+        $('#modal-moderacion-detail').on('shown.bs.modal', adjustAttachmentTables);
+
+        $('.moderacion-attachment-tabs').on('shown.bs.tab', 'button[data-bs-toggle="tab"]', function () {
+            window.setTimeout(adjustAttachmentTables, 0);
+        });
+
+        function renderReportFields(row) {
+            detailType = row.type || 'moderacion';
+            detailCanReply = Boolean(row.can_reply_suggestion);
             detailTicketChatId = row.ticket_chat_id || null;
 
-            $('#modal-moderacion-detail-title').text(
-                'Detalle del reporte Nº: ' + (row.ticket || row.id)
-            );
+            $('#modal-moderacion-detail-title').text('Detalle del caso Nº: ' + (row.ticket || row.id));
             $('#moderacion-detail-ticket').text(row.ticket || row.id || '—');
+            $('#moderacion-detail-type').text(row.type_label || 'Moderación y contenido');
             $('#moderacion-detail-date').text(row.date || '—');
             $('#moderacion-detail-status').html(row.status_html || row.status || '—');
             $('#moderacion-detail-assigned').text(row.assigned_raw || '—');
@@ -439,23 +548,30 @@
             $('#moderacion-detail-closed-by').text(row.closed_by_name || '—');
             $('#moderacion-detail-close-observation').text(row.close_observation || '—');
 
+            var hasContext = Boolean(row.module_url || row.context_label);
+
+            $('#moderacion-detail-context-wrap').prop('hidden', !hasContext);
+
+            if (hasContext) {
+                $('#moderacion-detail-context').text(row.context_label || row.module_code || '—');
+            }
+
+            $('#moderacion-detail-message-wrap').prop('hidden', !row.message_full);
+
             $('#moderacion-detail-take').prop('hidden', !row.can_take);
             $('#moderacion-detail-close').prop('hidden', !row.can_close);
-            // Remitir: solo el administrador que gestiona el caso.
             $('#moderacion-detail-refer').prop('hidden', !row.can_refer);
 
             renderReferrals(row.referrals);
 
-            var $chat = $('#moderacion-detail-chat');
+            var $messageChat = $('#moderacion-detail-chat');
 
             if (row.conversation_url && row.status_class === 'atendiendo') {
-                $chat.attr('href', row.conversation_url).prop('hidden', false);
+                $messageChat.attr('href', row.conversation_url).prop('hidden', false);
             } else {
-                $chat.prop('hidden', true).removeAttr('href');
+                $messageChat.prop('hidden', true).removeAttr('href');
             }
 
-            // Chat del ticket: existe desde que el caso se toma y se mantiene
-            // (en solo lectura) después de cerrarlo.
             var $ticketChat = $('#moderacion-detail-ticket-chat');
 
             if (row.ticket_chat_url) {
@@ -464,9 +580,327 @@
                 $ticketChat.prop('hidden', true).removeAttr('href');
             }
 
+            var $moduleLink = $('#moderacion-detail-module-link');
+
+            if (row.module_url) {
+                $moduleLink.attr('href', row.module_url).prop('hidden', false);
+            } else {
+                $moduleLink.prop('hidden', true).removeAttr('href');
+            }
+
+            var isSuggestion = row.type === 'sugerencia';
+
+            $('#moderacion-detail-tab-sugerencia-wrap').prop('hidden', !isSuggestion);
+
+            if (!isSuggestion) {
+                var firstTab = document.getElementById('moderacion-detail-tab-detalles');
+
+                if (firstTab && window.bootstrap && window.bootstrap.Tab) {
+                    window.bootstrap.Tab.getOrCreateInstance(firstTab).show();
+                }
+            }
+        }
+
+        function openReportDetail(row) {
+            detailReportId = row.id;
+            currentReportRow = row;
+            renderReportFields(row);
+            resetAttachmentTables();
+            resetSuggestion(row);
+            setTimeout(adjustAttachmentTables, 0);
+
             if (modal) {
                 modal.show();
             }
+
+            loadReportDetail(row.id);
+        }
+
+        function resetAttachmentTables() {
+            currentMedia = [];
+
+            Object.keys(attachmentTables).forEach(function (key) {
+                if (attachmentTables[key]) {
+                    attachmentTables[key].clear().draw();
+                }
+            });
+        }
+
+        function loadReportDetail(id) {
+            if (!detalleUrl || !id) {
+                return;
+            }
+
+            $.getJSON(detalleUrl.replace('__ID__', encodeURIComponent(id)))
+                .done(function (response) {
+                    var data = response || {};
+                    var report = data.report || {};
+
+                    if (Number(report.id) !== Number(detailReportId)) {
+                        return;
+                    }
+
+                    renderReportFields(report);
+                    renderAttachments(data.attachments || {}, data.links || []);
+                    renderSuggestion(report, data.suggestion_messages || []);
+                    adjustAttachmentTables();
+                })
+                .fail(function () {
+                    // La ficha de datos ya está visible; si falla la carga de
+                    // adjuntos, las tablas quedan vacías y la página sigue usable.
+                });
+        }
+
+        function mediaRow(item, index) {
+            var url = escapeText(item.url || '');
+            var name = escapeText(item.name || 'Archivo');
+            var isVideo = item.kind === 'video';
+            var isEvidence = item.is_evidence === true;
+            var preview = (isVideo
+                ? '<video src="' + url + '" muted preload="metadata"></video>'
+                : '<img src="' + url + '" alt="">') +
+                (isEvidence ? '<span class="moderacion-attachment-evidence">Evidencia</span>' : '');
+
+            return {
+                preview: '<button type="button" class="moderacion-attachment-open" data-media-index="' + index + '" aria-label="Abrir ' + name + '">' + preview + '</button>',
+                name: name,
+                date: escapeText(item.date || '—'),
+                size_label: escapeText(item.size_label || '—'),
+                actions: '<button type="button" class="btn btn-sm btn-outline-secondary moderacion-attachment-open" data-media-index="' + index + '" title="Abrir" aria-label="Abrir ' + name + '"><i class="fa-solid fa-expand" aria-hidden="true"></i></button>' +
+                    '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" download title="Descargar" aria-label="Descargar ' + name + '"><i class="fa-solid fa-download" aria-hidden="true"></i></a>'
+            };
+        }
+
+        function audioRow(item) {
+            var url = escapeText(item.url || '');
+            var name = escapeText(item.name || 'Audio');
+
+            return {
+                name: name,
+                date: escapeText(item.date || '—'),
+                size_label: escapeText(item.size_label || '—'),
+                audio: '<audio controls preload="none" src="' + url + '"></audio>',
+                actions: '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" download title="Descargar" aria-label="Descargar ' + name + '"><i class="fa-solid fa-download" aria-hidden="true"></i></a>'
+            };
+        }
+
+        function documentRow(item) {
+            var url = escapeText(item.url || '');
+            var name = escapeText(item.name || 'Documento');
+
+            return {
+                name: '<i class="fa-regular fa-file-lines moderacion-attachment-icon" aria-hidden="true"></i> ' + name,
+                date: escapeText(item.date || '—'),
+                size_label: escapeText(item.size_label || '—'),
+                actions: '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" title="Descargar" aria-label="Descargar ' + name + '"><i class="fa-solid fa-download" aria-hidden="true"></i></a>'
+            };
+        }
+
+        function linkRow(item) {
+            var url = escapeText(item.url || '');
+            var label = escapeText(item.url || '');
+
+            return {
+                url_html: '<a class="moderacion-attachment-link" href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + '</a>',
+                date: escapeText(item.date || '—'),
+                actions: '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" target="_blank" rel="noopener noreferrer" title="Abrir" aria-label="Abrir enlace"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>' +
+                    '<button type="button" class="btn btn-sm btn-outline-secondary moderacion-copy-link" data-url="' + url + '" title="Copiar enlace" aria-label="Copiar enlace"><i class="fa-regular fa-copy" aria-hidden="true"></i></button>'
+            };
+        }
+
+        function renderAttachments(attachments, links) {
+            var media = attachments.media || [];
+            var audios = attachments.audios || [];
+            var documents = attachments.documents || [];
+
+            currentMedia = media;
+
+            if (attachmentTables.media) {
+                attachmentTables.media.clear().rows.add(media.map(mediaRow)).draw();
+            }
+
+            if (attachmentTables.audios) {
+                attachmentTables.audios.clear().rows.add(audios.map(audioRow)).draw();
+            }
+
+            if (attachmentTables.documents) {
+                attachmentTables.documents.clear().rows.add(documents.map(documentRow)).draw();
+            }
+
+            if (attachmentTables.links) {
+                attachmentTables.links.clear().rows.add((links || []).map(linkRow)).draw();
+            }
+        }
+
+        function resetSuggestion(row) {
+            $('#moderacion-sugerencia-text').text(row && row.reason_full ? row.reason_full : '');
+            $('#moderacion-sugerencia-thread').empty();
+            $('#moderacion-sugerencia-body').val('');
+            $('#moderacion-sugerencia-error').text('').removeAttr('data-kind');
+            $('#moderacion-sugerencia-form').prop('hidden', true);
+        }
+
+        function renderSuggestion(report, messages) {
+            $('#moderacion-sugerencia-text').text(report.reason_full || report.reason || 'Sin texto de sugerencia.');
+
+            var $thread = $('#moderacion-sugerencia-thread').empty();
+
+            if (!messages.length) {
+                $thread.html('<p class="moderacion-sugerencia__empty">Todavía no hay respuestas.</p>');
+            } else {
+                messages.forEach(function (message) {
+                    $thread.append(
+                        '<article class="moderacion-sugerencia__message' + (message.is_admin ? ' is-admin' : '') + '">' +
+                        '<p class="moderacion-sugerencia__meta">' + escapeText(message.author) + ' · ' + escapeText(message.date) + '</p>' +
+                        '<p class="moderacion-sugerencia__body">' + escapeText(message.body) + '</p>' +
+                        '</article>'
+                    );
+                });
+            }
+
+            detailCanReply = Boolean(report.can_reply_suggestion);
+            $('#moderacion-sugerencia-form').prop('hidden', !detailCanReply);
+        }
+
+        function openMediaLightbox(index) {
+            if (!currentMedia.length) {
+                return;
+            }
+
+            lightboxItems = currentMedia;
+            lightboxIndex = Math.max(0, Math.min(parseInt(index, 10) || 0, lightboxItems.length - 1));
+            paintLightbox();
+
+            if (lightboxModal) {
+                lightboxModal.show();
+            }
+        }
+
+        function paintLightbox() {
+            var item = lightboxItems[lightboxIndex];
+
+            if (!item) {
+                return;
+            }
+
+            var $stage = $('#moderacion-lightbox-stage').empty();
+            var url = item.url || '';
+
+            if (item.kind === 'video') {
+                $stage.append($('<video controls></video>').attr('src', url));
+            } else {
+                $stage.append($('<img alt="">').attr({ src: url, alt: item.name || '' }));
+            }
+
+            $('#modal-moderacion-lightbox-title').text(item.name || 'Vista previa');
+            $('#moderacion-lightbox-download').attr('href', url).attr('download', item.name || 'archivo');
+            $('#moderacion-lightbox-prev, #moderacion-lightbox-next').prop('hidden', lightboxItems.length < 2);
+
+            var $thumbs = $('#moderacion-lightbox-thumbs').empty();
+
+            if (lightboxItems.length > 1) {
+                lightboxItems.forEach(function (entry, index) {
+                    var thumb = entry.kind === 'video'
+                        ? '<video src="' + escapeText(entry.url || '') + '" muted></video>'
+                        : '<img src="' + escapeText(entry.url || '') + '" alt="">';
+
+                    $thumbs.append(
+                        '<button type="button" class="moderacion-lightbox__thumb' +
+                        (index === lightboxIndex ? ' is-active' : '') +
+                        '" data-index="' + index + '" aria-label="Ver archivo ' + (index + 1) + '">' +
+                        thumb + '</button>'
+                    );
+                });
+            }
+        }
+
+        $('#moderacion-lightbox-prev').on('click', function () {
+            if (!lightboxItems.length) {
+                return;
+            }
+
+            lightboxIndex = (lightboxIndex - 1 + lightboxItems.length) % lightboxItems.length;
+            paintLightbox();
+        });
+
+        $('#moderacion-lightbox-next').on('click', function () {
+            if (!lightboxItems.length) {
+                return;
+            }
+
+            lightboxIndex = (lightboxIndex + 1) % lightboxItems.length;
+            paintLightbox();
+        });
+
+        $('#moderacion-lightbox-thumbs').on('click', '.moderacion-lightbox__thumb', function () {
+            lightboxIndex = parseInt($(this).attr('data-index'), 10) || 0;
+            paintLightbox();
+        });
+
+        $('#moderacion-detail-pane-adjuntos').on('click', '.moderacion-attachment-open', function () {
+            openMediaLightbox($(this).attr('data-media-index'));
+        });
+
+        $('#moderacion-detail-pane-adjuntos').on('click', '.moderacion-copy-link', function () {
+            var url = $(this).attr('data-url') || '';
+
+            if (!url) {
+                return;
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url);
+            } else {
+                $('<textarea>').val(url).appendTo('body').select();
+                document.execCommand('copy');
+                $('textarea').last().remove();
+            }
+        });
+
+        $('#moderacion-sugerencia-send').on('click', function () {
+            if (!detailReportId || !detailCanReply) {
+                return;
+            }
+
+            var body = $.trim($('#moderacion-sugerencia-body').val() || '');
+            var $error = $('#moderacion-sugerencia-error').text('').removeAttr('data-kind');
+
+            if (body === '') {
+                $error.text('Escribe la respuesta a la sugerencia.').attr('data-kind', 'error');
+                return;
+            }
+
+            $.ajax({
+                url: sugerenciaUrl.replace('__ID__', encodeURIComponent(detailReportId)),
+                method: 'POST',
+                dataType: 'json',
+                headers: {
+                    'X-CSRF-TOKEN': csrf
+                },
+                data: {
+                    body: body
+                }
+            }).done(function (response) {
+                var message = (response && response.reply) || null;
+                var $thread = $('#moderacion-sugerencia-thread');
+
+                $thread.find('.moderacion-sugerencia__empty').remove();
+
+                if (message) {
+                    $thread.append(
+                        '<article class="moderacion-sugerencia__message is-admin">' +
+                        '<p class="moderacion-sugerencia__meta">' + escapeText(message.author) + ' · ' + escapeText(message.date) + '</p>' +
+                        '<p class="moderacion-sugerencia__body">' + escapeText(message.body) + '</p>' +
+                        '</article>'
+                    );
+                }
+
+                $('#moderacion-sugerencia-body').val('');
+                $('#moderacion-sugerencia-error').text('Respuesta enviada.').attr('data-kind', 'success');
+            }).fail(function (xhr) {
+                var message = (xhr.responseJSON || {}).message || 'No se pudo enviar la respuesta.';
+                $error.text(message).attr('data-kind', 'error');
+            });
         });
 
         $('#moderacion-detail-take').on('click', function () {
@@ -767,17 +1201,24 @@
                     takeModal.hide();
                 }
 
+                reportesTable.ajax.reload(null, false);
+                refreshModerationCounts();
+
+                var chatId = response && (response.ticket_chat_id
+                    || (response.report && response.report.ticket_chat_id));
+
+                if (detailType === 'sugerencia') {
+                    // La sugerencia se responde desde su pestaña: se recarga la
+                    // ficha para habilitar el formulario sin cerrar el modal.
+                    loadReportDetail(detailReportId);
+                    return;
+                }
+
                 if (modal) {
                     modal.hide();
                 }
 
-                reportesTable.ajax.reload(null, false);
-                refreshModerationCounts();
-
-                // El caso ya tiene chat: se abre en la pestaña Reportes.
-                var chatId = response && (response.ticket_chat_id
-                    || (response.report && response.report.ticket_chat_id));
-
+                // El caso ya tiene chat: se abre en la pestaña Soporte.
                 if (chatId) {
                     document.dispatchEvent(new CustomEvent('chat:open', {
                         detail: { id: parseInt(chatId, 10) }

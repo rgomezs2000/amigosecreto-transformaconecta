@@ -81,7 +81,7 @@ class ModeracionTest extends TestCase
         $this->actingAs($admin)
             ->get(module_url('moderacion'))
             ->assertOk()
-            ->assertSee('Reportes del chat')
+            ->assertSee('Casos de ayuda y soporte')
             ->assertSee('tomar el caso')
             ->assertSee('Nº Ticket');
 
@@ -187,7 +187,7 @@ class ModeracionTest extends TestCase
         $this->actingAs($admin)
             ->get(module_url('moderacion'))
             ->assertOk()
-            ->assertSee('Reportes')
+            ->assertSee('Soporte')
             ->assertSee('Bloqueos entre usuarios')
             ->assertSee('Vetados de grupo')
             ->assertSee('moderacion-usuarios-table', false)
@@ -722,7 +722,7 @@ class ModeracionTest extends TestCase
         ]);
 
         $this->assertStringContainsString(
-            'Ir al chat',
+            'Abrir el chat del caso',
             $this->actingAs($admin)->getJson('/moderacion/datos?draw=1&start=0&length=10')->json('data.0.actions')
         );
 
@@ -773,7 +773,7 @@ class ModeracionTest extends TestCase
             ->assertJsonPath('data.0.can_close', false);
 
         $this->assertStringNotContainsString(
-            'Ir al chat',
+            'Ver el mensaje reportado',
             $this->actingAs($admin)->getJson('/moderacion/datos?draw=1&start=0&length=10')->json('data.0.actions')
         );
     }

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ChatMessage;
 use App\Models\ChatReport;
 use App\Models\Conversation;
 use App\Models\User;
@@ -19,7 +20,7 @@ class ReporteAvisos
 {
     public function __construct(private readonly PushNotifier $push) {}
 
-    public function abierto(ChatReport $report, Conversation $conversation): void
+    public function abierto(ChatReport $report, ?Conversation $conversation = null): void
     {
         $beneficiary = $report->reporter;
 
@@ -28,19 +29,30 @@ class ReporteAvisos
         }
 
         $ticket = $report->id;
-        $url = $this->url($conversation);
+        $url = $this->url($report, $conversation);
+        $esSugerencia = $report->isSuggestion();
 
         $this->correo(
             $beneficiary,
             'Caso Nº '.$ticket.' abierto (por atender)',
-            'Tu caso Nº '.$ticket.' quedó registrado',
-            [
-                'El caso está abierto y por atender.',
-                'Ticket: Nº '.$ticket,
-                'Motivo: '.$this->motivo($report),
-                'Fecha: '.now()->format('d/m/Y H:i'),
-                'El chat del caso está en solo lectura hasta que un administrador lo tome.',
-            ],
+            $esSugerencia
+                ? 'Tu sugerencia Nº '.$ticket.' quedó registrada'
+                : 'Tu caso Nº '.$ticket.' quedó registrado',
+            $esSugerencia
+                ? [
+                    'La sugerencia está abierta y por atender.',
+                    'Ticket: Nº '.$ticket,
+                    'Sugerencia: '.$this->motivo($report),
+                    'Fecha: '.now()->format('d/m/Y H:i'),
+                    'Cuando la administración responda, podrás leer la respuesta.',
+                ]
+                : [
+                    'El caso está abierto y por atender.',
+                    'Ticket: Nº '.$ticket,
+                    'Motivo: '.$this->motivo($report),
+                    'Fecha: '.now()->format('d/m/Y H:i'),
+                    'El chat del caso está en solo lectura hasta que un administrador lo tome.',
+                ],
             $url
         );
 
@@ -48,8 +60,51 @@ class ReporteAvisos
             $beneficiary,
             'chat.reporte',
             'Caso Nº '.$ticket.' abierto',
-            'Tu caso quedó registrado y está por atender. El chat se habilita cuando se tome.',
+            $esSugerencia
+                ? 'Tu sugerencia quedó registrada y está por atender.'
+                : 'Tu caso quedó registrado y está por atender. El chat se habilita cuando se tome.',
             $this->datosPush($report, $conversation, 'por_atender'),
+            $url,
+            'reporte'
+        );
+    }
+
+    /**
+     * Aviso al usuario cuando la administración responde su sugerencia.
+     */
+    public function sugerenciaRespondida(ChatReport $report, ChatMessage $message): void
+    {
+        $beneficiary = $report->reporter;
+
+        if ($beneficiary === null) {
+            return;
+        }
+
+        $conversation = $report->conversation;
+        $ticket = $report->id;
+        $url = $conversation !== null
+            ? module_url('chat').'?conversacion='.$conversation->id
+            : module_url('moderacion');
+
+        $this->correo(
+            $beneficiary,
+            'Respuesta a tu sugerencia Nº '.$ticket,
+            'La administración respondió tu sugerencia',
+            [
+                'Ticket: Nº '.$ticket,
+                'Respuesta: '.Str::limit(trim(strip_tags((string) $message->body)), 300),
+                'Fecha: '.now()->format('d/m/Y H:i'),
+                'Puedes leer la conversación en el chat del caso, en solo lectura.',
+            ],
+            $url
+        );
+
+        $this->push->send(
+            $beneficiary,
+            'chat.reporte',
+            'Respuesta a tu sugerencia Nº '.$ticket,
+            'La administración respondió tu sugerencia.',
+            $this->datosPush($report, $conversation, 'atendiendo'),
             $url,
             'reporte'
         );
@@ -79,7 +134,7 @@ class ReporteAvisos
                 'Motivo: '.$this->motivo($report),
                 'Fecha: '.$report->created_at?->format('d/m/Y H:i') ?? now()->format('d/m/Y H:i'),
             ],
-            ['label' => 'Abrir chat del caso', 'url' => $this->url($conversation)],
+            ['label' => 'Abrir el caso', 'url' => $this->url($report, $conversation)],
             [
                 'recipient_name' => $admin->name,
                 'eyebrow' => 'Reporte',
@@ -98,7 +153,8 @@ class ReporteAvisos
         }
 
         $ticket = $report->id;
-        $url = $this->url($conversation);
+        $esSugerencia = $report->isSuggestion();
+        $url = $this->url($report, $conversation);
 
         $this->correo(
             $beneficiary,
@@ -109,7 +165,9 @@ class ReporteAvisos
                 'Ticket: Nº '.$ticket,
                 'Motivo: '.$this->motivo($report),
                 'Fecha: '.now()->format('d/m/Y H:i'),
-                'El chat del caso ya está habilitado para que puedas responder.',
+                $esSugerencia
+                    ? 'Cuando la administración responda, podrás leer la respuesta.'
+                    : 'El chat del caso ya está habilitado para que puedas responder.',
             ],
             $url
         );
@@ -118,7 +176,9 @@ class ReporteAvisos
             $beneficiary,
             'chat.reporte',
             'Caso Nº '.$ticket.' en atención',
-            'El administrador '.$admin->name.' tomó tu caso y abrió el chat.',
+            $esSugerencia
+                ? 'El administrador '.$admin->name.' tomó tu sugerencia.'
+                : 'El administrador '.$admin->name.' tomó tu caso y abrió el chat.',
             $this->datosPush($report, $conversation, 'atendiendo'),
             $url,
             'reporte'
@@ -137,7 +197,7 @@ class ReporteAvisos
         string $observation
     ): void {
         $ticket = $report->id;
-        $url = $this->url($conversation);
+        $url = $this->url($report, $conversation);
 
         send_mail(
             $to->email,
@@ -151,7 +211,7 @@ class ReporteAvisos
                 'Observación de la remisión: '.Str::limit($observation, 300),
                 'Fecha: '.now()->format('d/m/Y H:i'),
             ],
-            ['label' => 'Abrir chat del caso', 'url' => $url],
+            ['label' => 'Abrir el caso', 'url' => $url],
             [
                 'recipient_name' => $to->name,
                 'eyebrow' => 'Reporte',
@@ -187,7 +247,9 @@ class ReporteAvisos
                 'Ticket: Nº '.$ticket,
                 'Motivo: '.$this->motivo($report),
                 'Fecha: '.now()->format('d/m/Y H:i'),
-                'El chat del caso sigue habilitado para que puedas responder.',
+                $report->isSuggestion()
+                    ? 'La respuesta de la administración se verá en el Centro de Ayuda y Soporte.'
+                    : 'El chat del caso sigue habilitado para que puedas responder.',
             ],
             $url
         );
@@ -212,7 +274,7 @@ class ReporteAvisos
         }
 
         $ticket = $report->id;
-        $url = $this->url($conversation);
+        $url = $this->url($report, $conversation);
         $observacion = trim((string) ($report->close_observation ?? ''));
 
         $lines = [
@@ -226,7 +288,9 @@ class ReporteAvisos
             $lines[] = 'Observación de cierre: '.Str::limit($observacion, 300);
         }
 
-        $lines[] = 'El chat del caso quedó en solo lectura.';
+        $lines[] = $report->isSuggestion()
+            ? 'La sugerencia quedó cerrada.'
+            : 'El chat del caso quedó en solo lectura.';
 
         $this->correo(
             $beneficiary,
@@ -254,7 +318,7 @@ class ReporteAvisos
             $subject,
             $title,
             $lines,
-            ['label' => 'Abrir chat del caso', 'url' => $url],
+            ['label' => 'Abrir el caso', 'url' => $url],
             [
                 'recipient_name' => $user->name,
                 'eyebrow' => 'Reporte',
@@ -267,11 +331,11 @@ class ReporteAvisos
     /**
      * @return array<string, mixed>
      */
-    private function datosPush(ChatReport $report, Conversation $conversation, string $phase): array
+    private function datosPush(ChatReport $report, ?Conversation $conversation, string $phase): array
     {
         return [
             'report_id' => $report->id,
-            'conversation_id' => $conversation->id,
+            'conversation_id' => $conversation?->id,
             'report_phase' => $phase,
         ];
     }
@@ -281,8 +345,12 @@ class ReporteAvisos
         return Str::limit(trim(strip_tags((string) $report->reason)), 160);
     }
 
-    private function url(Conversation $conversation): string
+    private function url(ChatReport $report, ?Conversation $conversation): string
     {
-        return module_url('chat').'?conversacion='.$conversation->id;
+        if ($conversation !== null && ! $report->isSuggestion()) {
+            return module_url('chat').'?conversacion='.$conversation->id;
+        }
+
+        return module_url('moderacion');
     }
 }

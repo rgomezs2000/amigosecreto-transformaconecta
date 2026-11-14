@@ -104,7 +104,6 @@ class AccessSeeder extends Seeder
             'acerca-de',
             'ayuda',
             'faq',
-            'contacto-soporte',
             'login',
             'logout',
         ];

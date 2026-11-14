@@ -6,6 +6,9 @@
      data-url-secret="{{ route('chat.amigo-secreto') }}"
      data-url-chat="{{ url('/chat') }}"
      data-url-destinatarios="{{ route('chat.destinatarios') }}"
+     data-url-encuestas="{{ url('/chat') }}"
+     data-url-votar="{{ url('/chat/encuestas') }}"
+     data-url-eventos="{{ route('chat.eventos') }}"
      data-url-preferencias="{{ route('notificaciones.preferencias') }}"
      data-sound="{{ ($shell['notificationPreferences']['chat_sound'] ?? false) ? '1' : '0' }}"
      data-in-app="{{ ($shell['notificationPreferences']['in_app'] ?? true) ? '1' : '0' }}"
@@ -235,6 +238,8 @@
                 <button type="button" class="chat-context-item" data-attach="file">Archivos y documentos</button>
                 <button type="button" class="chat-context-item" data-attach="contact">Contacto</button>
                 <button type="button" class="chat-context-item" data-attach="location">Ubicación</button>
+                <button type="button" class="chat-context-item" data-attach="poll" data-participant-only="1">Encuesta</button>
+                <button type="button" class="chat-context-item" data-attach="event" data-participant-only="1">Evento</button>
             </div>
 
             <input type="file" id="chat-camera-photo" accept="image/*" capture="environment" hidden>
@@ -485,6 +490,136 @@
         </x-slot:footer>
     </x-app-modal>
 @endif
+
+{{-- Reporte de contenido: motivo, enlaces y archivos de soporte. --}}
+<x-app-modal id="modal-chat-report" title="Reportar contenido" size="lg" scrollable>
+    <x-slot:body>
+        <p class="chat-hint" id="chat-report-context"></p>
+        <input type="hidden" id="chat-report-kind">
+        <input type="hidden" id="chat-report-target">
+
+        <div class="field">
+            <label for="chat-report-reason" class="form-label">Motivo del reporte</label>
+            <textarea class="form-control" id="chat-report-reason" rows="4" maxlength="2000"
+                      placeholder="Explica qué ocurrió y por qué lo reportas." required></textarea>
+        </div>
+
+        <div class="field">
+            <label for="chat-report-links" class="form-label">Enlaces de soporte (opcional)</label>
+            <textarea class="form-control" id="chat-report-links" rows="3"
+                      placeholder="Un enlace por línea. Ejemplo: https://..."></textarea>
+        </div>
+
+        <div class="field">
+            <span class="form-label d-block">Archivos de soporte</span>
+            <div class="chat-report-dropzone" id="chat-report-dropzone" tabindex="0" role="button"
+                 aria-controls="chat-report-files" aria-describedby="chat-report-files-help">
+                <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+                <p class="chat-report-dropzone__title">Haz clic o arrastra archivos aquí</p>
+                <p class="chat-report-dropzone__help" id="chat-report-files-help">
+                    La evidencia del mensaje se adjunta automáticamente. Puedes sumar imágenes,
+                    videos, audios o documentos.
+                </p>
+                <input type="file" id="chat-report-files" multiple hidden>
+            </div>
+            <ul class="chat-report-file-list" id="chat-report-file-list"></ul>
+        </div>
+
+        <p class="field-message" id="chat-report-error" role="status" aria-live="polite"></p>
+    </x-slot:body>
+
+    <x-slot:footer>
+        <button type="button" class="btn btn-primary" id="chat-report-send">
+            <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+            <span>Enviar reporte</span>
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+    </x-slot:footer>
+</x-app-modal>
+
+{{-- Nueva encuesta: pregunta, respuestas dinámicas y opciones de votación. --}}
+<x-app-modal id="modal-chat-poll" title="Nueva encuesta" scrollable>
+    <x-slot:body>
+        <div class="chat-poll-form">
+            <div class="field">
+                <label class="form-label" for="chat-poll-question">Pregunta</label>
+                <input class="form-control" id="chat-poll-question" maxlength="300"
+                       placeholder="¿Qué quieres preguntar?">
+            </div>
+
+            <div class="field">
+                <span class="form-label">Respuestas</span>
+                <div class="chat-poll-form__options" id="chat-poll-options"></div>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="chat-poll-add">
+                    <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                    Agregar respuesta
+                </button>
+                <p class="chat-hint">La encuesta necesita al menos dos respuestas y ninguna puede quedar en blanco.</p>
+            </div>
+
+            <div class="chat-poll-form__checks">
+                <label class="form-check">
+                    <input class="form-check-input" type="checkbox" id="chat-poll-multiple">
+                    <span>Permitir seleccionar varias respuestas</span>
+                </label>
+                <label class="form-check">
+                    <input class="form-check-input" type="checkbox" id="chat-poll-hide-voters">
+                    <span>Ocultar quiénes votaron</span>
+                </label>
+                <label class="form-check">
+                    <input class="form-check-input" type="checkbox" id="chat-poll-schedule">
+                    <span>Definir fecha y hora de finalización</span>
+                </label>
+            </div>
+
+            <div class="field" id="chat-poll-ends-field" hidden>
+                <label class="form-label" for="chat-poll-ends">Finaliza el</label>
+                <input type="datetime-local" class="form-control" id="chat-poll-ends">
+                <p class="chat-hint">Si no eliges una fecha, la encuesta se cierra a las 24 horas.</p>
+            </div>
+
+            <p class="field-message" id="chat-poll-error" role="status" aria-live="polite"></p>
+        </div>
+    </x-slot:body>
+
+    <x-slot:footer>
+        <button type="button" class="btn btn-primary" id="chat-poll-create">Crear encuesta</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+    </x-slot:footer>
+</x-app-modal>
+
+{{-- Adjuntar un evento: se listan todos los eventos creados, en cualquier etapa. --}}
+<x-app-modal id="modal-chat-event" title="Adjuntar evento" scrollable>
+    <x-slot:body>
+        <p class="chat-hint">Elige un evento para compartirlo en la conversación.</p>
+
+        <label class="chat-forward__search">
+            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="search" id="chat-event-search" placeholder="Buscar evento..." autocomplete="off">
+        </label>
+
+        <div class="chat-event-list" id="chat-event-list">
+            <p class="chat-hint">Cargando eventos...</p>
+        </div>
+
+        <p class="field-message" id="chat-event-error" role="status" aria-live="polite"></p>
+    </x-slot:body>
+
+    <x-slot:footer>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+    </x-slot:footer>
+</x-app-modal>
+
+{{-- Ficha de un evento adjunto: resumen para cualquier participante del chat. --}}
+<x-app-modal id="modal-chat-event-sheet" title="Ficha del evento" scrollable>
+    <x-slot:body>
+        <div class="chat-event-sheet" id="chat-event-sheet-body"></div>
+    </x-slot:body>
+
+    <x-slot:footer>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+    </x-slot:footer>
+</x-app-modal>
 
 @push('scripts')
     <script src="{{ asset('js/chat.js') }}?v={{ filemtime(public_path('js/chat.js')) }}"></script>

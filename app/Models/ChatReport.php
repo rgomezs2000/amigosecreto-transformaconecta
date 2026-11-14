@@ -15,9 +15,33 @@ class ChatReport extends Model
 
     public const STATUS_CLOSED = 'cerrado';
 
+    public const TYPE_MODERATION = 'moderacion';
+
+    public const TYPE_SUGGESTION = 'sugerencia';
+
+    public const TYPE_HELP = 'ayuda';
+
+    public const TYPE_SUPPORT = 'soporte';
+
+    /**
+     * Tipos válidos y su etiqueta para la interfaz.
+     *
+     * @var array<string, string>
+     */
+    public const TYPES = [
+        self::TYPE_MODERATION => 'Moderación y contenido',
+        self::TYPE_SUGGESTION => 'Sugerencia',
+        self::TYPE_HELP => 'Ayuda',
+        self::TYPE_SUPPORT => 'Soporte',
+    ];
+
     protected $table = 'chat_reports';
 
     protected $fillable = [
+        'type',
+        'module_code',
+        'context_url',
+        'context_label',
         'message_id',
         'reporter_id',
         'reason',
@@ -34,6 +58,7 @@ class ChatReport extends Model
 
     protected $attributes = [
         'status' => self::STATUS_PENDING,
+        'type' => self::TYPE_MODERATION,
     ];
 
     protected function casts(): array
@@ -96,6 +121,22 @@ class ChatReport extends Model
         return $this->hasMany(ChatReportReferral::class, 'report_id')->orderBy('id');
     }
 
+    /**
+     * Archivos adjuntos del caso (incluida la evidencia generada).
+     */
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(ChatReportAttachment::class, 'report_id')->orderBy('id');
+    }
+
+    /**
+     * Enlaces de soporte del caso.
+     */
+    public function links(): HasMany
+    {
+        return $this->hasMany(ChatReportLink::class, 'report_id')->orderBy('id');
+    }
+
     public function isPending(): bool
     {
         return $this->status === self::STATUS_PENDING;
@@ -111,6 +152,26 @@ class ChatReport extends Model
         return $this->status === self::STATUS_CLOSED;
     }
 
+    public function isModeration(): bool
+    {
+        return $this->type === self::TYPE_MODERATION;
+    }
+
+    public function isSuggestion(): bool
+    {
+        return $this->type === self::TYPE_SUGGESTION;
+    }
+
+    public function isHelp(): bool
+    {
+        return $this->type === self::TYPE_HELP;
+    }
+
+    public function isSupport(): bool
+    {
+        return $this->type === self::TYPE_SUPPORT;
+    }
+
     public function statusLabel(): string
     {
         return match ($this->status) {
@@ -118,5 +179,10 @@ class ChatReport extends Model
             self::STATUS_CLOSED => 'Cerrado',
             default => 'Por atender',
         };
+    }
+
+    public function typeLabel(): string
+    {
+        return self::TYPES[$this->type] ?? self::TYPES[self::TYPE_MODERATION];
     }
 }

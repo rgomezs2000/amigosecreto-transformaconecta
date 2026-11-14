@@ -1,17 +1,17 @@
 @extends('layouts.app')
 
-@section('title', 'Moderación · Amigo Secreto Inclusivo')
-@section('shell-title', 'Moderación')
+@section('title', 'Centro de Ayuda y Soporte · Amigo Secreto Inclusivo')
+@section('shell-title', 'Centro de Ayuda y Soporte')
 @section('shell-eyebrow', 'Administración')
 
 @section('page')
     <div class="roles-page moderacion-page">
-        <div class="moderacion-tabs" role="tablist" aria-label="Secciones de Moderación">
+        <div class="moderacion-tabs" role="tablist" aria-label="Secciones del Centro de Ayuda y Soporte">
             <button type="button" class="moderacion-tab is-active" id="moderacion-tab-reportes"
                     role="tab" aria-selected="true" aria-controls="moderacion-panel-reportes"
                     data-tab="reportes">
-                <i class="fa-solid fa-flag" aria-hidden="true"></i>
-                <span>Reportes</span>
+                <i class="fa-solid fa-headset" aria-hidden="true"></i>
+                <span>Soporte</span>
             </button>
             <button type="button" class="moderacion-tab" id="moderacion-tab-bloqueos"
                     role="tab" aria-selected="false" aria-controls="moderacion-panel-bloqueos"
@@ -29,11 +29,11 @@
 
         <section id="moderacion-panel-reportes" role="tabpanel" aria-labelledby="moderacion-tab-reportes"
                  data-panel="reportes" class="moderacion-panel">
-            <section class="matriz-card moderacion-summary" aria-label="Resumen de reportes">
+            <section class="matriz-card moderacion-summary" aria-label="Resumen de casos">
                 <div>
-                    <p class="dashboard-eyebrow">Reportes del chat</p>
+                    <p class="dashboard-eyebrow">Casos de ayuda y soporte</p>
                     <p class="moderacion-summary__total" data-moderation-count="reports">{{ format_count($total) }}</p>
-                    <div class="moderacion-summary__counts" aria-label="Reportes por estado">
+                    <div class="moderacion-summary__counts" aria-label="Casos por estado">
                         <span class="moderacion-summary__count">
                             <strong data-moderation-count="pending">{{ format_count($pendientes) }}</strong>
                             Por atender
@@ -48,17 +48,18 @@
                         </span>
                     </div>
                     <p class="notification-row__hint">
-                        Los reportes pasan por «Por atender», «Atendiendo» y «Cerrado». Abre el detalle
+                        Los casos pasan por «Por atender», «Atendiendo» y «Cerrado». Abre el detalle
                         para tomar el caso; solo quien lo toma puede cerrarlo, con observación y confirmación.
+                        Los tipos permiten separar moderación, sugerencias, ayuda y soporte.
                     </p>
                 </div>
             </section>
 
-            <section class="matriz-card roles-search-card moderacion-search-card" aria-label="Búsqueda de reportes">
+            <section class="matriz-card roles-search-card moderacion-search-card" aria-label="Búsqueda de casos">
                 <div class="roles-search">
-                    <label for="moderacion-search" class="form-label">Buscar reporte</label>
+                    <label for="moderacion-search" class="form-label">Buscar caso</label>
                     <input type="search" class="form-control" id="moderacion-search"
-                           placeholder="Motivo, persona o mensaje..." autocomplete="off">
+                           placeholder="Motivo, persona, mensaje o tipo..." autocomplete="off">
                 </div>
 
                 {{-- Mismo diseño de filtros que Usuarios: «Filtrar por» y el
@@ -67,11 +68,23 @@
                     <div class="matriz-filter">
                         <label for="moderacion-filter-type" class="form-label">Filtrar por</label>
                         <select class="form-select" id="moderacion-filter-type">
-                            <option value="all">Todos los reportes</option>
+                            <option value="all">Todos los casos</option>
+                            <option value="case_type">Tipo de caso</option>
                             <option value="date">Por fecha</option>
                             <option value="status">Estado</option>
                             <option value="manager">Gestionado por</option>
                             <option value="referred">Remitido a</option>
+                        </select>
+                    </div>
+
+                    <div class="matriz-filter d-none" id="moderacion-filter-case-type-wrap">
+                        <label for="moderacion-filter-case-type" class="form-label">Tipo de caso</label>
+                        <select class="form-select" id="moderacion-filter-case-type">
+                            <option value="">Todos los tipos</option>
+                            <option value="moderacion">Moderación y contenido</option>
+                            <option value="sugerencia">Sugerencia</option>
+                            <option value="ayuda">Ayuda</option>
+                            <option value="soporte">Soporte</option>
                         </select>
                     </div>
 
@@ -143,6 +156,7 @@
                             <th scope="col" class="roles-name">Autor del mensaje</th>
                             <th scope="col" class="roles-name">Motivo</th>
                             <th scope="col" class="roles-name">Conversación</th>
+                            <th scope="col" class="roles-name">Tipo</th>
                             <th scope="col" class="roles-actions">Acciones</th>
                         </tr>
                     </thead>
@@ -267,6 +281,8 @@
          data-url-usuarios="{{ route('moderacion.bloqueos.usuarios') }}"
          data-url-grupos="{{ route('moderacion.grupos') }}"
          data-url-contadores="{{ route('moderacion.contadores') }}"
+         data-url-detalle="{{ route('moderacion.detalle', ['report' => '__ID__']) }}"
+         data-url-sugerencia="{{ route('moderacion.reportes.sugerencia', ['report' => '__ID__']) }}"
          data-url-tomar="{{ route('moderacion.reportes.tomar', ['report' => '__ID__']) }}"
          data-url-cerrar="{{ route('moderacion.reportes.cerrar', ['report' => '__ID__']) }}"
          data-url-remitir="{{ route('moderacion.reportes.remitir', ['report' => '__ID__']) }}"
@@ -274,80 +290,247 @@
          data-csrf="{{ csrf_token() }}"
          hidden></div>
 
-    <x-app-modal id="modal-moderacion-detail" title="Detalle del reporte">
+    <x-app-modal id="modal-moderacion-detail" title="Detalle del caso" size="xl" scrollable>
         <x-slot:body>
-            <dl class="perfil-data">
-                <div class="perfil-data__item">
-                    <dt>Ticket Nº:</dt>
-                    <dd id="moderacion-detail-ticket"></dd>
+            <ul class="nav nav-tabs moderacion-detail-tabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="moderacion-detail-tab-detalles"
+                            data-bs-toggle="tab" data-bs-target="#moderacion-detail-pane-detalles"
+                            type="button" role="tab" aria-controls="moderacion-detail-pane-detalles"
+                            aria-selected="true">
+                        Detalles
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="moderacion-detail-tab-adjuntos"
+                            data-bs-toggle="tab" data-bs-target="#moderacion-detail-pane-adjuntos"
+                            type="button" role="tab" aria-controls="moderacion-detail-pane-adjuntos"
+                            aria-selected="false">
+                        Archivos y datos adjuntos
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation" id="moderacion-detail-tab-sugerencia-wrap" hidden>
+                    <button class="nav-link" id="moderacion-detail-tab-sugerencia"
+                            data-bs-toggle="tab" data-bs-target="#moderacion-detail-pane-sugerencia"
+                            type="button" role="tab" aria-controls="moderacion-detail-pane-sugerencia"
+                            aria-selected="false">
+                        Sugerencia
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content moderacion-detail-content">
+                <div class="tab-pane fade show active" id="moderacion-detail-pane-detalles"
+                     role="tabpanel" aria-labelledby="moderacion-detail-tab-detalles" tabindex="0">
+                    <dl class="perfil-data moderacion-detail-data">
+                        <div class="perfil-data__item">
+                            <dt>Ticket Nº:</dt>
+                            <dd id="moderacion-detail-ticket"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Tipo de caso</dt>
+                            <dd id="moderacion-detail-type"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Fecha</dt>
+                            <dd id="moderacion-detail-date"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Estado</dt>
+                            <dd id="moderacion-detail-status"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Asignado a</dt>
+                            <dd id="moderacion-detail-assigned"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Gestionado por</dt>
+                            <dd id="moderacion-detail-manager"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Remitido a</dt>
+                            <dd id="moderacion-detail-referred"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Tomado el</dt>
+                            <dd id="moderacion-detail-taken"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Observación al tomar</dt>
+                            <dd id="moderacion-detail-attention"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Reportado por</dt>
+                            <dd id="moderacion-detail-reporter"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Autor del mensaje</dt>
+                            <dd id="moderacion-detail-author"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Conversación</dt>
+                            <dd id="moderacion-detail-conversation"></dd>
+                        </div>
+                        <div class="perfil-data__item perfil-data__item--wide" id="moderacion-detail-context-wrap" hidden>
+                            <dt>Módulo o funcionalidad</dt>
+                            <dd id="moderacion-detail-context"></dd>
+                        </div>
+                        <div class="perfil-data__item perfil-data__item--wide">
+                            <dt>Motivo o sugerencia</dt>
+                            <dd id="moderacion-detail-reason"></dd>
+                        </div>
+                        <div class="perfil-data__item perfil-data__item--wide" id="moderacion-detail-message-wrap">
+                            <dt>Mensaje reportado</dt>
+                            <dd id="moderacion-detail-message"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Cerrado el</dt>
+                            <dd id="moderacion-detail-closed-at"></dd>
+                        </div>
+                        <div class="perfil-data__item">
+                            <dt>Cerrado por</dt>
+                            <dd id="moderacion-detail-closed-by"></dd>
+                        </div>
+                        <div class="perfil-data__item perfil-data__item--wide">
+                            <dt>Observación de cierre</dt>
+                            <dd id="moderacion-detail-close-observation"></dd>
+                        </div>
+                        <div class="perfil-data__item perfil-data__item--wide">
+                            <dt>Remisiones</dt>
+                            <dd>
+                                <div class="moderacion-referrals" id="moderacion-detail-referrals"></div>
+                            </dd>
+                        </div>
+                    </dl>
                 </div>
-                <div class="perfil-data__item">
-                    <dt>Fecha</dt>
-                    <dd id="moderacion-detail-date"></dd>
+
+                <div class="tab-pane fade" id="moderacion-detail-pane-adjuntos"
+                     role="tabpanel" aria-labelledby="moderacion-detail-tab-adjuntos" tabindex="0">
+                    <ul class="nav nav-pills moderacion-attachment-tabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="moderacion-attachments-tab-media"
+                                    data-bs-toggle="tab" data-bs-target="#moderacion-attachments-pane-media"
+                                    type="button" role="tab" aria-controls="moderacion-attachments-pane-media"
+                                    aria-selected="true">
+                                Fotos y videos
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="moderacion-attachments-tab-audios"
+                                    data-bs-toggle="tab" data-bs-target="#moderacion-attachments-pane-audios"
+                                    type="button" role="tab" aria-controls="moderacion-attachments-pane-audios"
+                                    aria-selected="false">
+                                Audios
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="moderacion-attachments-tab-documents"
+                                    data-bs-toggle="tab" data-bs-target="#moderacion-attachments-pane-documents"
+                                    type="button" role="tab" aria-controls="moderacion-attachments-pane-documents"
+                                    aria-selected="false">
+                                Documentos
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="moderacion-attachments-tab-links"
+                                    data-bs-toggle="tab" data-bs-target="#moderacion-attachments-pane-links"
+                                    type="button" role="tab" aria-controls="moderacion-attachments-pane-links"
+                                    aria-selected="false">
+                                Enlaces
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content moderacion-attachment-content">
+                        <div class="tab-pane fade show active" id="moderacion-attachments-pane-media"
+                             role="tabpanel" aria-labelledby="moderacion-attachments-tab-media" tabindex="0">
+                            <table id="moderacion-attachments-media-table"
+                                   class="table table-striped align-middle w-100 moderacion-attachments-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Vista previa</th>
+                                        <th scope="col">Archivo</th>
+                                        <th scope="col">Fecha</th>
+                                        <th scope="col">Tamaño</th>
+                                        <th scope="col" class="roles-actions">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+
+                        <div class="tab-pane fade" id="moderacion-attachments-pane-audios"
+                             role="tabpanel" aria-labelledby="moderacion-attachments-tab-audios" tabindex="0">
+                            <table id="moderacion-attachments-audios-table"
+                                   class="table table-striped align-middle w-100 moderacion-attachments-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Archivo</th>
+                                        <th scope="col">Fecha</th>
+                                        <th scope="col">Tamaño</th>
+                                        <th scope="col">Audio</th>
+                                        <th scope="col" class="roles-actions">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+
+                        <div class="tab-pane fade" id="moderacion-attachments-pane-documents"
+                             role="tabpanel" aria-labelledby="moderacion-attachments-tab-documents" tabindex="0">
+                            <table id="moderacion-attachments-documents-table"
+                                   class="table table-striped align-middle w-100 moderacion-attachments-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Documento</th>
+                                        <th scope="col">Fecha</th>
+                                        <th scope="col">Tamaño</th>
+                                        <th scope="col" class="roles-actions">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+
+                        <div class="tab-pane fade" id="moderacion-attachments-pane-links"
+                             role="tabpanel" aria-labelledby="moderacion-attachments-tab-links" tabindex="0">
+                            <table id="moderacion-attachments-links-table"
+                                   class="table table-striped align-middle w-100 moderacion-attachments-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Enlace</th>
+                                        <th scope="col">Fecha</th>
+                                        <th scope="col" class="roles-actions">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
-                <div class="perfil-data__item">
-                    <dt>Estado</dt>
-                    <dd id="moderacion-detail-status"></dd>
+
+                <div class="tab-pane fade" id="moderacion-detail-pane-sugerencia"
+                     role="tabpanel" aria-labelledby="moderacion-detail-tab-sugerencia" tabindex="0">
+                    <div class="moderacion-sugerencia">
+                        <p class="moderacion-sugerencia__label">Sugerencia del usuario</p>
+                        <p class="moderacion-sugerencia__text" id="moderacion-sugerencia-text"></p>
+
+                        <p class="moderacion-sugerencia__label">Conversación de la sugerencia</p>
+                        <div class="moderacion-sugerencia__thread" id="moderacion-sugerencia-thread"></div>
+
+                        <div class="moderacion-sugerencia__form" id="moderacion-sugerencia-form" hidden>
+                            <label for="moderacion-sugerencia-body" class="form-label">Respuesta</label>
+                            <textarea class="form-control" id="moderacion-sugerencia-body" rows="3"
+                                      maxlength="4000"></textarea>
+                            <p class="field-message" id="moderacion-sugerencia-error" role="status"></p>
+                            <button type="button" class="btn btn-primary" id="moderacion-sugerencia-send">
+                                <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                                <span>Enviar respuesta</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div class="perfil-data__item">
-                    <dt>Asignado a</dt>
-                    <dd id="moderacion-detail-assigned"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Gestionado por</dt>
-                    <dd id="moderacion-detail-manager"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Remitido a</dt>
-                    <dd id="moderacion-detail-referred"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Tomado el</dt>
-                    <dd id="moderacion-detail-taken"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Observación al tomar</dt>
-                    <dd id="moderacion-detail-attention"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Reportado por</dt>
-                    <dd id="moderacion-detail-reporter"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Autor del mensaje</dt>
-                    <dd id="moderacion-detail-author"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Conversación</dt>
-                    <dd id="moderacion-detail-conversation"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Motivo</dt>
-                    <dd id="moderacion-detail-reason"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Mensaje reportado</dt>
-                    <dd id="moderacion-detail-message"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Cerrado el</dt>
-                    <dd id="moderacion-detail-closed-at"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Cerrado por</dt>
-                    <dd id="moderacion-detail-closed-by"></dd>
-                </div>
-                <div class="perfil-data__item">
-                    <dt>Observación de cierre</dt>
-                    <dd id="moderacion-detail-close-observation"></dd>
-                </div>
-                <div class="perfil-data__item perfil-data__item--wide">
-                    <dt>Remisiones</dt>
-                    <dd>
-                        <div class="moderacion-referrals" id="moderacion-detail-referrals"></div>
-                    </dd>
-                </div>
-            </dl>
+            </div>
         </x-slot:body>
 
         <x-slot:footer>
@@ -364,15 +547,19 @@
                 <i class="fa-solid fa-share" aria-hidden="true"></i>
                 <span>Remitir caso</span>
             </button>
-            <a class="btn btn-primary" id="moderacion-detail-chat" href="#" hidden>
-                <i class="fa-solid fa-comments" aria-hidden="true"></i>
-                <span>Ir al chat</span>
+            <a class="btn btn-outline-secondary" id="moderacion-detail-chat" href="#" hidden>
+                <i class="fa-solid fa-message" aria-hidden="true"></i>
+                <span>Ver mensaje</span>
             </a>
-            {{-- Chat del ticket: se abre al tomar el caso y sigue disponible,
+            {{-- Chat del caso: se abre al tomarlo y sigue disponible,
                  en solo lectura, después de cerrarlo. --}}
-            <a class="btn btn-outline-secondary" id="moderacion-detail-ticket-chat" href="#" hidden>
-                <i class="fa-solid fa-ticket" aria-hidden="true"></i>
-                <span>Chat del ticket</span>
+            <a class="btn btn-primary" id="moderacion-detail-ticket-chat" href="#" hidden>
+                <i class="fa-solid fa-comments" aria-hidden="true"></i>
+                <span>Chat</span>
+            </a>
+            <a class="btn btn-outline-secondary" id="moderacion-detail-module-link" href="#" hidden>
+                <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                <span>Ir al módulo</span>
             </a>
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
         </x-slot:footer>
@@ -447,6 +634,31 @@
         <x-slot:footer>
             <button type="button" class="btn btn-success" id="moderacion-close-confirm">Sí, cerrar caso</button>
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">No cerrar</button>
+        </x-slot:footer>
+    </x-app-modal>
+
+    <x-app-modal id="modal-moderacion-lightbox" title="Vista previa" size="xl">
+        <x-slot:body>
+            <div class="moderacion-lightbox">
+                <button type="button" class="moderacion-lightbox__arrow moderacion-lightbox__arrow--prev"
+                        id="moderacion-lightbox-prev" aria-label="Anterior" hidden>
+                    <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+                </button>
+                <div class="moderacion-lightbox__stage" id="moderacion-lightbox-stage"></div>
+                <button type="button" class="moderacion-lightbox__arrow moderacion-lightbox__arrow--next"
+                        id="moderacion-lightbox-next" aria-label="Siguiente" hidden>
+                    <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="moderacion-lightbox__thumbs" id="moderacion-lightbox-thumbs"></div>
+        </x-slot:body>
+
+        <x-slot:footer>
+            <a class="btn btn-outline-secondary" id="moderacion-lightbox-download" href="#" download>
+                <i class="fa-solid fa-download" aria-hidden="true"></i>
+                <span>Descargar</span>
+            </a>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
         </x-slot:footer>
     </x-app-modal>
 

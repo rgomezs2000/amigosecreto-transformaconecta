@@ -109,24 +109,38 @@ class AyudaTest extends TestCase
         ]);
     }
 
-    public function test_los_modulos_de_ayuda_quedan_para_administrador_y_usuario(): void
+    public function test_los_accesos_de_ayuda_y_contacto_son_los_esperados(): void
     {
         $this->seed();
 
-        $modules = Module::query()
-            ->whereIn('code', ['acerca-de', 'ayuda', 'faq', 'contacto-soporte'])
+        $admin = Profile::query()->where('slug', 'administrador')->firstOrFail();
+        $usuario = Profile::query()->where('slug', 'usuario')->firstOrFail();
+
+        $helpModules = Module::query()
+            ->whereIn('code', ['acerca-de', 'ayuda', 'faq'])
             ->get();
 
-        foreach (['administrador', 'usuario'] as $profileSlug) {
-            $profile = Profile::query()->where('slug', $profileSlug)->firstOrFail();
+        $contacto = Module::query()->where('code', 'contacto-soporte')->firstOrFail();
 
-            foreach ($modules as $module) {
+        foreach ([$admin, $usuario] as $profile) {
+            foreach ($helpModules as $module) {
                 $this->assertDatabaseHas('profile_permission_module', [
                     'profile_id' => $profile->id,
                     'module_id' => $module->id,
                 ]);
             }
         }
+
+        // Contacto y soporte es solo para participantes.
+        $this->assertDatabaseHas('profile_permission_module', [
+            'profile_id' => $usuario->id,
+            'module_id' => $contacto->id,
+        ]);
+
+        $this->assertDatabaseMissing('profile_permission_module', [
+            'profile_id' => $admin->id,
+            'module_id' => $contacto->id,
+        ]);
     }
 
     public function test_acerca_de_muestra_la_version_y_el_contenido_guardado(): void
@@ -262,6 +276,23 @@ class AyudaTest extends TestCase
             ->get('/ayuda/contacto-soporte')
             ->assertOk()
             ->assertSee('Este módulo está en construcción.');
+    }
+
+    public function test_el_administrador_no_ve_ni_entra_a_contacto_soporte(): void
+    {
+        $admin = $this->administrador();
+        $contacto = Module::query()->where('code', 'contacto-soporte')->firstOrFail();
+
+        $this->assertFalse($admin->hasModuleAccess($contacto));
+
+        $this->actingAs($admin)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertDontSee('Contacto y soporte');
+
+        $this->actingAs($admin)
+            ->get('/ayuda/contacto-soporte')
+            ->assertForbidden();
     }
 
     public function test_las_pantallas_de_ayuda_no_muestran_volver_al_panel(): void

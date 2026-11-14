@@ -92,7 +92,7 @@ class RestablecerDinamica extends Command
         $avisos = $this->usuariosAEliminar($superAdmin->id);
 
         $steps = $this->steps($superAdmin->id);
-        $total = count($steps) + 2; // + archivos de adjuntos + correos de aviso.
+        $total = count($steps) + 3; // + archivos del chat + archivos de casos + correos de aviso.
 
         $progress->note($run, 'Inicio del restablecimiento de la dinámica.', 'info');
         $progress->note($run, 'Se conserva la cuenta '.$superAdmin->username.' (#'.$superAdmin->id.').', 'info');
@@ -134,7 +134,11 @@ class RestablecerDinamica extends Command
         // transacción para no dejar archivos de mensajes que ya no existen.
         $files = $this->purgeAttachmentFiles();
 
-        $progress->step($run, $total - 1, $total, 'Archivos de los adjuntos', $files);
+        $progress->step($run, $total - 2, $total, 'Archivos de los adjuntos del chat', $files);
+
+        $reportFiles = $this->purgeReportFiles();
+
+        $progress->step($run, $total - 1, $total, 'Archivos de casos de ayuda y soporte', $reportFiles);
 
         // Avisos por correo: solo si el borrado ya está confirmado.
         $enviados = $this->enviarAvisos($run, $progress, $avisos);
@@ -162,6 +166,8 @@ class RestablecerDinamica extends Command
         return [
             'Adjuntos del chat' => fn (): int => DB::table('chat_message_attachments')->delete(),
             'Reacciones del chat' => fn (): int => DB::table('chat_message_reactions')->delete(),
+            'Adjuntos de casos' => fn (): int => DB::table('chat_report_attachments')->delete(),
+            'Enlaces de casos' => fn (): int => DB::table('chat_report_links')->delete(),
             'Reportes de moderación' => fn (): int => DB::table('chat_reports')->delete(),
             'Lecturas de moderación' => fn (): int => DB::table('chat_moderation_reads')->delete(),
             'Bitácora de grupos' => fn (): int => DB::table('chat_group_audits')->delete(),
@@ -311,6 +317,30 @@ class RestablecerDinamica extends Command
             $files = count($disk->allFiles('chat'));
 
             $disk->deleteDirectory('chat');
+
+            return $files;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return 0;
+        }
+    }
+
+    /**
+     * Elimina los archivos de los casos de ayuda y soporte.
+     */
+    private function purgeReportFiles(): int
+    {
+        try {
+            $disk = Storage::disk('local');
+
+            if (! $disk->exists('reportes')) {
+                return 0;
+            }
+
+            $files = count($disk->allFiles('reportes'));
+
+            $disk->deleteDirectory('reportes');
 
             return $files;
         } catch (Throwable $exception) {

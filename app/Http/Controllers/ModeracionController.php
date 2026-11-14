@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Concerns\AuthorizesModeracion;
 use App\Models\ChatBlock;
 use App\Models\ChatReport;
+use App\Models\ChatReportAttachment;
 use App\Models\Conversation;
 use App\Models\GroupBan;
 use App\Models\Module;
@@ -17,15 +18,16 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * Pantalla del módulo de Moderación y sus reportes del chat.
+ * Centro de Ayuda y Soporte y sus casos.
  *
- * La pantalla tiene tres pestañas: Reportes (solo lectura: muestra los
- * reportes recopilados y enlaza al chat para revisar la conversación),
- * Bloqueos entre usuarios y Vetados de grupo. Los dos últimos apartados
- * viven en sus propios controladores.
+ * La pantalla tiene tres pestañas: Soporte (casos de moderación,
+ * sugerencias, ayuda y soporte), Bloqueos entre usuarios y Vetados de grupo.
+ * Los dos últimos apartados viven en sus propios controladores.
  */
 class ModeracionController extends Controller
 {
@@ -63,7 +65,7 @@ class ModeracionController extends Controller
     {
         $this->ensureModeracionAccess();
 
-        return api_success('Contadores de moderación.', [
+        return api_success('Contadores del Centro de Ayuda y Soporte.', [
             'reports' => ChatReport::query()->count(),
             'pending' => ChatReport::query()->where('status', ChatReport::STATUS_PENDING)->count(),
             'attending' => ChatReport::query()->where('status', ChatReport::STATUS_ATTENDING)->count(),
@@ -104,6 +106,8 @@ class ModeracionController extends Controller
             $query->where(function ($query) use ($like, $search) {
                 $query->where('reason', 'like', $like)
                     ->orWhere('status', 'like', $like)
+                    ->orWhere('type', 'like', $like)
+                    ->orWhere('context_label', 'like', $like)
                     ->orWhereHas('reporter', fn ($user) => $user->where('name', 'like', $like))
                     ->orWhereHas('assignedAdmin', fn ($user) => $user->where('name', 'like', $like))
                     ->orWhereHas('takenBy', fn ($user) => $user->where('name', 'like', $like))
@@ -148,6 +152,14 @@ class ModeracionController extends Controller
             }
         }
 
+        if ($filterType === 'case_type') {
+            $type = (string) $request->input('case_type', '');
+
+            if (array_key_exists($type, ChatReport::TYPES)) {
+                $query->where('type', $type);
+            }
+        }
+
         // «Gestionado por»: administrador que tomó y gestionó el caso
         // originalmente, aunque después lo haya remitido.
         if ($filterType === 'manager') {
@@ -181,6 +193,7 @@ class ModeracionController extends Controller
             5 => 'reporter_id',
             6 => 'message_id',
             7 => 'reason',
+            9 => 'type',
             default => 'created_at',
         };
 
@@ -198,6 +211,159 @@ class ModeracionController extends Controller
             'recordsTotal' => $recordsTotal,
             'recordsFiltered' => $recordsFiltered,
             'data' => $data,
+        ]);
+    }
+
+    /**
+     * Ficha completa de un caso: datos, adjuntos, enlaces y sugerencia.
+     */
+    public function detalle(ChatReport $report): JsonResponse
+    {
+        $this->ensureModeracionAccess();
+
+        $report->load([
+            'message.conversation.users',
+            'message.user',
+            'reporter',
+            'assignedAdmin',
+            'takenBy',
+            'referredTo',
+            'closedBy',
+            'conversation.users',
+            'conversation.messages.user',
+            'referrals.fromAdmin',
+            'referrals.toAdmin',
+            'attachments',
+            'links',
+        ]);
+
+        $attachments = $report->attachments->map(fn (ChatReportAttachment $attachment) => [
+            'id' => (int) $attachment->id,
+            'kind' => $attachment->kind,
+            'name' => $attachment->name,
+            'mime' => (string) $attachment->mime,
+            'size' => (int) $attachment->size,
+            'size_label' => $attachment->humanSize(),
+            'url' => route('moderacion.adjuntos', ['attachment' => $attachment->id]),
+            'is_evidence' => (bool) $attachment->is_evidence,
+            'date' => $attachment->created_at?->format('d/m/Y H:i') ?? '—',
+        ])->values()->all();
+
+        $media = array_values(array_filter($attachments, fn (array $item) => in_array($item['kind'], [
+            ChatReportAttachment::KIND_IMAGE,
+            ChatReportAttachment::KIND_VIDEO,
+            ChatReportAttachment::KIND_EVIDENCE,
+        ], true)));
+
+        $audios = array_values(array_filter($attachments, fn (array $item) => $item['kind'] === ChatReportAttachment::KIND_AUDIO));
+        $documents = array_values(array_filter($attachments, fn (array $item) => $item['kind'] === ChatReportAttachment::KIND_DOCUMENT));
+
+        $links = $report->links->map(fn ($link) => [
+            'id' => (int) $link->id,
+            'url' => (string) $link->url,
+            'date' => $link->created_at?->format('d/m/Y H:i') ?? '—',
+        ])->values()->all();
+
+        $suggestionMessages = [];
+
+        if ($report->isSuggestion() && $report->conversation !== null) {
+            $suggestionMessages = $report->conversation->messages()
+                ->with('user')
+                ->orderBy('id')
+                ->get()
+                ->map(fn ($message) => [
+                    'id' => (int) $message->id,
+                    'body' => (string) $message->body,
+                    'author' => $message->user?->name ?? 'Sistema',
+                    'is_admin' => (bool) $message->user?->isAdmin(),
+                    'date' => $message->created_at?->format('d/m/Y H:i') ?? '—',
+                ])
+                ->values()
+                ->all();
+        }
+
+        return api_success('Detalle del caso.', [
+            'report' => $this->rowData($report),
+            'attachments' => [
+                'media' => $media,
+                'audios' => $audios,
+                'documents' => $documents,
+            ],
+            'links' => $links,
+            'suggestion_messages' => $suggestionMessages,
+        ]);
+    }
+
+    /**
+     * Sirve un archivo adjunto del caso (solo administración).
+     */
+    public function adjunto(ChatReportAttachment $attachment): BinaryFileResponse
+    {
+        $this->ensureModeracionAccess();
+
+        $path = Storage::disk('local')->path($attachment->path);
+
+        if (! is_file($path)) {
+            abort(404);
+        }
+
+        $headers = [
+            'Content-Type' => $attachment->mime ?: 'application/octet-stream',
+        ];
+
+        if ($attachment->isImage() || $attachment->isVideo() || $attachment->isAudio()) {
+            return response()->file($path, $headers);
+        }
+
+        return response()->download($path, $attachment->name, $headers);
+    }
+
+    /**
+     * Respuesta del administrador a una sugerencia.
+     */
+    public function sugerencia(Request $request, ChatReport $report): JsonResponse
+    {
+        $this->ensureModeracionAccess();
+
+        if (! $report->isSuggestion()) {
+            return api_error('Este caso no es una sugerencia.', 422);
+        }
+
+        if (! $report->isAttending()) {
+            return api_error('Toma el caso antes de responder la sugerencia.', 422);
+        }
+
+        if ((int) $report->assigned_to !== (int) $request->user()->id) {
+            return api_error('Solo el administrador que gestiona el caso puede responder.', 403);
+        }
+
+        $validator = validator($request->all(), [
+            'body' => ['required', 'string', 'max:4000'],
+        ], [
+            'body.required' => 'Escribe la respuesta a la sugerencia.',
+            'body.max' => 'La respuesta no puede pasar de 4000 caracteres.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $message = $this->reporteChat->responderSugerencia(
+            $report,
+            $request->user(),
+            $validator->validated()['body']
+        );
+
+        $this->reporteAvisos->sugerenciaRespondida($report, $message);
+
+        return api_success('Respuesta enviada.', [
+            'reply' => [
+                'id' => (int) $message->id,
+                'body' => (string) $message->body,
+                'author' => $message->user?->name ?? 'Administración',
+                'is_admin' => true,
+                'date' => $message->created_at?->format('d/m/Y H:i') ?? now()->format('d/m/Y H:i'),
+            ],
         ]);
     }
 
@@ -459,7 +625,7 @@ class ModeracionController extends Controller
     {
         $message = $report->message;
         $conversation = $message?->conversation;
-        $conversationUrl = $conversation !== null
+        $conversationUrl = $conversation !== null && $report->isModeration()
             ? module_url('chat').'?conversacion='.$conversation->id
             : null;
         $conversationLabel = $this->conversationLabel($conversation);
@@ -467,8 +633,21 @@ class ModeracionController extends Controller
         $authorName = $message?->user?->name ?? '—';
         $status = $report->status ?: ChatReport::STATUS_PENDING;
         $statusLabel = $report->statusLabel();
+        $typeLabel = $report->typeLabel();
         $isMine = $report->assigned_to !== null
             && (int) $report->assigned_to === (int) auth()->id();
+
+        // Módulo o funcionalidad donde ocurrió el inconveniente (soporte).
+        $moduleUrl = null;
+
+        if (filled($report->module_code)) {
+            $module = Module::activeByCode((string) $report->module_code);
+            $moduleUrl = $module?->url();
+        }
+
+        if ($moduleUrl === null && filled($report->context_url)) {
+            $moduleUrl = (string) $report->context_url;
+        }
 
         // Gestor original y último remitido. Si el caso se tomó antes de esta
         // columna, se usa el asignado actual como respaldo.
@@ -494,6 +673,7 @@ class ModeracionController extends Controller
         // tomarlo (aunque sí puede ver la ficha y monitorear el caso).
         $ticketChat = $report->conversation;
         $canOpenTicketChat = $ticketChat !== null
+            && ! $report->isSuggestion()
             && $ticketChat->users->contains('id', auth()->id());
         $ticketChatUrl = $canOpenTicketChat
             ? module_url('chat').'?conversacion='.$ticketChat->id
@@ -508,6 +688,13 @@ class ModeracionController extends Controller
             'status_label' => $statusLabel,
             'status_class' => $status,
             'status_html' => '<span class="moderacion-status moderacion-status--'.e($status).'">'.e($statusLabel).'</span>',
+            'type' => $report->type,
+            'type_label' => $typeLabel,
+            'type_html' => '<span class="moderacion-type moderacion-type--'.e($report->type).'">'.e($typeLabel).'</span>',
+            'module_code' => (string) ($report->module_code ?? ''),
+            'module_url' => $moduleUrl,
+            'context_label' => (string) ($report->context_label ?? ''),
+            'context_url' => (string) ($report->context_url ?? ''),
             'assigned_name' => e($report->assignedAdmin?->name ?? '—'),
             'assigned_raw' => $report->assignedAdmin?->name ?? '—',
             // Columna y filtro «Gestionado por»: administrador original.
@@ -525,6 +712,7 @@ class ModeracionController extends Controller
             'close_observation' => (string) ($report->close_observation ?? ''),
             'can_take' => $report->isPending(),
             'can_close' => $report->isAttending() && $isMine,
+            'can_reply_suggestion' => $report->isSuggestion() && $report->isAttending() && $isMine,
             'reporter' => e($reporterName),
             'reporter_raw' => $reporterName,
             'author' => e($authorName),
@@ -546,6 +734,7 @@ class ModeracionController extends Controller
                 'report' => $report,
                 'conversationUrl' => $conversationUrl,
                 'ticketChatUrl' => $ticketChatUrl,
+                'moduleUrl' => $moduleUrl,
             ])->render(),
         ];
     }
@@ -573,4 +762,3 @@ class ModeracionController extends Controller
         return $names !== '' ? 'Directa: '.$names : 'Conversación directa';
     }
 }
-

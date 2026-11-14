@@ -27,6 +27,9 @@
         var secretUrl = $widget.attr('data-url-secret');
         var chatBase = $widget.attr('data-url-chat');
         var destinatariosUrl = $widget.attr('data-url-destinatarios');
+        var encuestasUrl = $widget.attr('data-url-encuestas') || chatBase;
+        var votarUrl = $widget.attr('data-url-votar') || (chatBase + '/encuestas');
+        var eventosUrl = $widget.attr('data-url-eventos') || (chatBase + '/eventos');
         var preferenciasUrl = $widget.attr('data-url-preferencias');
         var soundEnabled = $widget.attr('data-sound') === '1';
         var inAppEnabled = $widget.attr('data-in-app') === '1';
@@ -345,11 +348,96 @@
             );
         }
 
+        /**
+         * Tarjeta de una encuesta dentro de la burbuja: pregunta, opciones con
+         * su porcentaje y, si se permite, quiénes votaron.
+         */
+        function pollHtml(poll, messageId) {
+            if (!poll) {
+                return '';
+            }
+
+            var meta = (poll.multiple ? 'Varias respuestas' : 'Una sola respuesta') +
+                ' · ' + poll.total_votes + (poll.total_votes === 1 ? ' voto' : ' votos') +
+                ' · ' + (poll.hide_voters ? 'Votantes ocultos' : 'Votantes visibles');
+
+            var options = (poll.options || []).map(function (option) {
+                var inputType = poll.multiple ? 'checkbox' : 'radio';
+                var checked = option.mine ? ' checked' : '';
+                var disabled = poll.can_vote ? '' : ' disabled';
+                var voters = (option.voters && option.voters.length)
+                    ? '<span class="chat-poll__voters">' + escape(option.voters.join(', ')) + '</span>'
+                    : '';
+
+                return '<li class="chat-poll__option' + (option.mine ? ' is-mine' : '') + '">' +
+                    '<label class="chat-poll__choice">' +
+                    '<input type="' + inputType + '" class="chat-poll__input" name="chat-poll-' + poll.id + '"' +
+                    ' value="' + option.id + '"' + checked + disabled + '>' +
+                    '<span class="chat-poll__label">' + escape(option.label) + '</span>' +
+                    '<span class="chat-poll__percent">' + option.percent + '%</span>' +
+                    '<span class="chat-poll__count">' + option.votes + '</span>' +
+                    '</label>' +
+                    '<span class="chat-poll__bar" aria-hidden="true"><span style="width:' + option.percent + '%"></span></span>' +
+                    voters +
+                    '</li>';
+            }).join('');
+
+            var footer = poll.closed
+                ? 'Encuesta cerrada'
+                : (poll.can_vote ? 'Puedes votar cuando quieras' : 'Ya no puedes votar');
+
+            if (poll.ends_at_label) {
+                footer += ' · ' + (poll.closed ? 'Cerrada el ' : 'Cierra el ') + poll.ends_at_label;
+            }
+
+            return '<div class="chat-poll" data-poll-id="' + poll.id + '" data-message-id="' + messageId + '">' +
+                '<p class="chat-poll__question">' + escape(poll.question) + '</p>' +
+                '<p class="chat-poll__meta">' + escape(meta) + '</p>' +
+                '<ul class="chat-poll__options">' + options + '</ul>' +
+                '<p class="chat-poll__footer">' + escape(footer) + '</p>' +
+                '</div>';
+        }
+
+        /**
+         * Tarjeta de un evento adjunto: solo el resumen; el detalle abre la
+         * ficha del evento.
+         */
+        function eventCardHtml(event) {
+            if (!event) {
+                return '';
+            }
+
+            var meta = [];
+
+            if (event.status) {
+                meta.push(event.status);
+            }
+
+            if (event.exchange_at) {
+                meta.push('Intercambio ' + event.exchange_at);
+            }
+
+            meta.push(event.participants + (event.participants === 1 ? ' participante' : ' participantes'));
+
+            return '<div class="chat-event" data-event-id="' + event.id + '">' +
+                '<p class="chat-event__eyebrow">Evento</p>' +
+                '<p class="chat-event__name">' + escape(event.name) +
+                ' <span class="chat-event__year">' + escape(event.year) + '</span></p>' +
+                '<p class="chat-event__meta">' + escape(meta.join(' · ')) + '</p>' +
+                '<button type="button" class="btn btn-sm btn-outline-secondary chat-event-open" data-event-id="' +
+                event.id + '">Ver detalle</button>' +
+                '</div>';
+        }
+
         function messageHtml(message) {
             var attachment = '';
-            var body = message.deleted
-                ? '<p class="chat-message__deleted">' + escape(message.deleted_label) + '</p>'
-                : '<p class="chat-message__body">' + linkify(highlightMentions(message.body || '')) + '</p>';
+            var pollCard = pollHtml(message.poll, message.id);
+            var eventCard = eventCardHtml(message.event);
+            var body = (pollCard || eventCard) && !message.deleted
+                ? ''
+                : (message.deleted
+                    ? '<p class="chat-message__deleted">' + escape(message.deleted_label) + '</p>'
+                    : '<p class="chat-message__body">' + linkify(highlightMentions(message.body || '')) + '</p>');
             var fileName = message.attachment_name || 'Archivo';
             var mediaType = message.type;
 
@@ -482,7 +570,7 @@
                 ' data-can-edit="' + (message.can_edit ? '1' : '0') + '"' +
                 ' data-can-delete="' + (message.can_delete ? '1' : '0') + '"' +
                 ' data-reported="' + (message.reported ? '1' : '0') + '">' +
-                quote + attachment + body + linkCard +
+                quote + pollCard + eventCard + attachment + body + linkCard +
                 '<p class="chat-message__meta">' + escape(message.sender) +
                 (adminBadge ? ' ' + adminBadge : '') +
                 ' · ' + escape(message.created_at) + ' ' +
@@ -707,6 +795,8 @@
                 before.sender_is_admin !== message.sender_is_admin ||
                 JSON.stringify(before.reply) !== JSON.stringify(message.reply) ||
                 JSON.stringify(before.attachments) !== JSON.stringify(message.attachments) ||
+                JSON.stringify(before.poll) !== JSON.stringify(message.poll) ||
+                JSON.stringify(before.event) !== JSON.stringify(message.event) ||
                 before.link_url !== message.link_url) {
                 $node.replaceWith(messageHtml(message));
                 rememberMessage(message);
@@ -831,6 +921,7 @@
 
             if (!$box.children('.chat-message').length) {
                 lastData = response;
+                refreshAttachExtras();
                 renderMessages();
                 return;
             }
@@ -933,6 +1024,7 @@
                     if (!painted) {
                         lastData = response;
                         applyConversation(response.conversation);
+                        refreshAttachExtras();
                         setMentionCatalog(response.mentionables || []);
                         renderMessages();
                         return;
@@ -2127,16 +2219,7 @@
             }
 
             if (action === 'report') {
-                confirmDialog('¿Reportar esta conversación a la administración?', function () {
-                    post(chatBase + '/' + target.id + '/reportar-conversacion', {})
-                        .done(function () {
-                            alertDialog('Reporte enviado a la administración.');
-                        })
-                        .fail(function (xhr) {
-                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo reportar.');
-                        });
-                });
-
+                openReportModal('conversation', target.id, 'Vas a reportar esta conversación.');
                 return;
             }
 
@@ -2284,15 +2367,7 @@
             }
 
             if (action === 'report') {
-                promptDialog('Reportar usuario', 'Escribe el motivo del reporte:', function (value) {
-                    post(chatBase + '/usuarios/' + target.id + '/reportar', { reason: value })
-                        .done(function () {
-                            alertDialog('Reporte enviado a la administración.');
-                        })
-                        .fail(function (xhr) {
-                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo enviar el reporte.');
-                        });
-                });
+                openReportModal('user', target.id, 'Vas a reportar a ' + (target.name || 'esta persona') + '.');
             }
         });
 
@@ -2389,19 +2464,7 @@
             }
 
             if (action === 'report') {
-                promptDialog('Reportar mensaje', 'Escribe el motivo del reporte:', function (value) {
-                    if (!value) {
-                        return;
-                    }
-
-                    post(chatBase + '/mensajes/' + id + '/reportar', { reason: value })
-                        .done(function () {
-                            alertDialog('Reporte enviado a la administración.');
-                        })
-                        .fail(function (xhr) {
-                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo reportar.');
-                        });
-                });
+                openReportModal('message', id, 'Vas a reportar este mensaje.');
             }
         });
 
@@ -2634,6 +2697,213 @@
         var forwardModal = forwardModalElement && window.bootstrap && window.bootstrap.Modal
             ? window.bootstrap.Modal.getOrCreateInstance(forwardModalElement)
             : null;
+
+        /* ------------------------------------------------------------------
+           Reportar: motivo, enlaces y archivos de soporte
+           ------------------------------------------------------------------ */
+
+        var reportModalElement = document.getElementById('modal-chat-report');
+        var reportModal = reportModalElement && window.bootstrap && window.bootstrap.Modal
+            ? window.bootstrap.Modal.getOrCreateInstance(reportModalElement)
+            : null;
+        var reportKind = null;
+        var reportTarget = null;
+        var reportFiles = [];
+
+        function formatFileSize(bytes) {
+            var size = parseInt(bytes, 10) || 0;
+
+            if (size >= 1048576) {
+                return (size / 1048576).toFixed(1).replace('.', ',') + ' MB';
+            }
+
+            if (size >= 1024) {
+                return Math.round(size / 1024) + ' KB';
+            }
+
+            return size + ' B';
+        }
+
+        function renderReportFiles() {
+            var $list = $('#chat-report-file-list').empty();
+
+            reportFiles.forEach(function (file, index) {
+                var icon = file.type.indexOf('image/') === 0
+                    ? 'fa-image'
+                    : (file.type.indexOf('video/') === 0
+                        ? 'fa-video'
+                        : (file.type.indexOf('audio/') === 0 ? 'fa-headphones' : 'fa-file-lines'));
+
+                $list.append(
+                    '<li class="chat-report-file">' +
+                    '<i class="fa-solid ' + icon + '" aria-hidden="true"></i>' +
+                    '<span class="chat-report-file__name">' + escape(file.name) + '</span>' +
+                    '<span class="chat-report-file__size">' + formatFileSize(file.size) + '</span>' +
+                    '<button type="button" class="chat-report-file__remove" data-index="' + index +
+                    '" aria-label="Quitar ' + escape(file.name) + '">' +
+                    '<i class="fa-solid fa-xmark" aria-hidden="true"></i></button>' +
+                    '</li>'
+                );
+            });
+        }
+
+        function addReportFiles(fileList) {
+            var files = Array.prototype.slice.call(fileList || []);
+            var error = '';
+
+            files.forEach(function (file) {
+                if (reportFiles.length >= 10) {
+                    error = 'Puedes adjuntar hasta 10 archivos.';
+                    return;
+                }
+
+                if (file.size > 52428800) {
+                    error = 'Cada archivo puede pesar hasta 50 MB.';
+                    return;
+                }
+
+                var duplicate = reportFiles.some(function (current) {
+                    return current.name === file.name
+                        && current.size === file.size
+                        && current.lastModified === file.lastModified;
+                });
+
+                if (!duplicate) {
+                    reportFiles.push(file);
+                }
+            });
+
+            $('#chat-report-error').text(error).attr('data-kind', error ? 'error' : '');
+            renderReportFiles();
+        }
+
+        function resetReportForm() {
+            reportFiles = [];
+            reportKind = null;
+            reportTarget = null;
+            $('#chat-report-kind, #chat-report-target').val('');
+            $('#chat-report-reason').val('');
+            $('#chat-report-links').val('');
+            $('#chat-report-files').val('');
+            $('#chat-report-file-list').empty();
+            $('#chat-report-error').text('').removeAttr('data-kind');
+            $('#chat-report-send').prop('disabled', false);
+        }
+
+        function openReportModal(kind, target, context) {
+            resetReportForm();
+            reportKind = kind;
+            reportTarget = target;
+            $('#chat-report-kind').val(kind);
+            $('#chat-report-target').val(target);
+            $('#chat-report-context').text(context || '');
+            $('#modal-chat-report-title').text(
+                kind === 'user' ? 'Reportar usuario' : (kind === 'conversation' ? 'Reportar conversación' : 'Reportar mensaje')
+            );
+
+            if (reportModal) {
+                reportModal.show();
+            }
+        }
+
+        $('#chat-report-dropzone').on('click', function () {
+            $('#chat-report-files').trigger('click');
+        }).on('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                $('#chat-report-files').trigger('click');
+            }
+        }).on('dragover dragenter', function (event) {
+            event.preventDefault();
+            $(this).addClass('is-dragging');
+        }).on('dragleave', function () {
+            $(this).removeClass('is-dragging');
+        }).on('drop', function (event) {
+            event.preventDefault();
+            $(this).removeClass('is-dragging');
+            addReportFiles(event.originalEvent.dataTransfer.files);
+        });
+
+        $('#chat-report-files').on('change', function () {
+            addReportFiles(this.files);
+            this.value = '';
+        });
+
+        $('#chat-report-file-list').on('click', '.chat-report-file__remove', function () {
+            reportFiles.splice(parseInt($(this).attr('data-index'), 10), 1);
+            renderReportFiles();
+        });
+
+        function reportEndpoint(kind, target) {
+            if (kind === 'message') {
+                return chatBase + '/mensajes/' + target + '/reportar';
+            }
+
+            if (kind === 'user') {
+                return chatBase + '/usuarios/' + target + '/reportar';
+            }
+
+            return chatBase + '/' + target + '/reportar-conversacion';
+        }
+
+        $('#chat-report-send').on('click', function () {
+            if (!reportKind || !reportTarget) {
+                return;
+            }
+
+            var reason = $.trim($('#chat-report-reason').val() || '');
+            var $error = $('#chat-report-error').text('').removeAttr('data-kind');
+
+            if (reason === '') {
+                $error.text('Escribe el motivo del reporte.').attr('data-kind', 'error');
+                return;
+            }
+
+            var form = new FormData();
+            form.append('_token', token);
+            form.append('reason', reason);
+
+            ($('#chat-report-links').val() || '').split(/\r?\n/).forEach(function (line) {
+                var link = $.trim(line);
+
+                if (link !== '') {
+                    form.append('links[]', link);
+                }
+            });
+
+            reportFiles.forEach(function (file) {
+                form.append('files[]', file);
+            });
+
+            var $button = $(this);
+            $button.prop('disabled', true);
+            $error.text('Enviando...').attr('data-kind', 'info');
+
+            $.ajax({
+                url: reportEndpoint(reportKind, reportTarget),
+                method: 'POST',
+                data: form,
+                processData: false,
+                contentType: false,
+                dataType: 'json',
+                headers: {
+                    'X-CSRF-TOKEN': token,
+                    'Accept': 'application/json'
+                }
+            }).done(function () {
+                if (reportModal) {
+                    reportModal.hide();
+                }
+
+                resetReportForm();
+                alertDialog('Reporte enviado a la administración.');
+            }).fail(function (xhr) {
+                var message = (xhr.responseJSON || {}).message || 'No se pudo enviar el reporte.';
+                $error.text(message).attr('data-kind', 'error');
+            }).always(function () {
+                $button.prop('disabled', false);
+            });
+        });
 
         var FORWARD_SECTIONS = [
             { key: 'groups', title: 'Grupos' },
@@ -3948,6 +4218,7 @@
 
         $('#chat-attach').on('click', function (event) {
             event.stopPropagation();
+            refreshAttachExtras();
             $('#chat-attach-menu').prop('hidden', false);
         });
 
@@ -4901,24 +5172,16 @@
                     return;
                 }
 
-                promptDialog('Reportar usuario', 'Escribe el motivo del reporte:', function (value) {
-                    post(chatBase + '/usuarios/' + other.id + '/reportar', { reason: value })
-                        .done(function () {
-                            alertDialog('Reporte enviado a la administración.');
-                        })
-                        .fail(profileError);
-                });
+                openReportModal('user', other.id, 'Vas a reportar a ' + (other.name || 'esta persona') + '.');
                 return;
             }
 
             if (action === 'report-group') {
-                confirmDialog('¿Reportar este grupo a la administración?', function () {
-                    post(chatBase + '/' + currentId + '/reportar-conversacion', {})
-                        .done(function () {
-                            alertDialog('Reporte enviado a la administración.');
-                        })
-                        .fail(profileError);
-                });
+                openReportModal(
+                    'conversation',
+                    currentId,
+                    'Vas a reportar la conversación ' + (profileData.name || 'de este grupo') + '.'
+                );
                 return;
             }
 
@@ -5617,6 +5880,409 @@
 
         refresh();
         setBadge(0);
+
+        /* ------------------------------------------------------------------
+           Encuestas y eventos adjuntos (solo en chats directos y grupos)
+           ------------------------------------------------------------------ */
+
+        function chatConversationType() {
+            return (lastData && lastData.conversation && lastData.conversation.type) || null;
+        }
+
+        function canAttachPollOrEvent() {
+            return ! currentModeration
+                && currentId !== null
+                && ['direct', 'group'].indexOf(chatConversationType()) !== -1;
+        }
+
+        function refreshAttachExtras() {
+            $('#chat-attach-menu [data-participant-only]').prop('hidden', ! canAttachPollOrEvent());
+        }
+
+        function showPollError(message) {
+            $('#chat-poll-error').attr('data-kind', 'error').text(message || '');
+        }
+
+        function clearPollError() {
+            $('#chat-poll-error').removeAttr('data-kind').text('');
+        }
+
+        var pollOptionSeq = 0;
+
+        function updatePollOptionButtons() {
+            var count = $('#chat-poll-options .chat-poll-form__row').length;
+
+            $('#chat-poll-options .chat-poll-remove').prop('disabled', count <= 2);
+            $('#chat-poll-add').prop('disabled', count >= 10);
+        }
+
+        function addPollOption(value) {
+            var $list = $('#chat-poll-options');
+
+            if ($list.children().length >= 10) {
+                return;
+            }
+
+            pollOptionSeq += 1;
+            var id = 'chat-poll-option-' + pollOptionSeq;
+
+            $list.append('<div class="chat-poll-form__row">' +
+                '<input class="form-control" id="' + id + '" maxlength="120" placeholder="Respuesta">' +
+                '<button type="button" class="btn btn-sm btn-outline-secondary chat-poll-remove"' +
+                ' aria-label="Quitar respuesta" title="Quitar respuesta">' +
+                '<i class="fa-solid fa-xmark" aria-hidden="true"></i></button>' +
+                '</div>');
+
+            $list.children().last().find('input').val(value || '');
+            updatePollOptionButtons();
+        }
+
+        function resetPollForm() {
+            $('#chat-poll-options').empty();
+            addPollOption('');
+            addPollOption('');
+            $('#chat-poll-question').val('');
+            $('#chat-poll-multiple').prop('checked', false);
+            $('#chat-poll-hide-voters').prop('checked', false);
+            $('#chat-poll-schedule').prop('checked', false);
+            $('#chat-poll-ends').val('');
+            $('#chat-poll-ends-field').prop('hidden', true);
+            clearPollError();
+            updatePollOptionButtons();
+        }
+
+        function openPollModal() {
+            if (! canAttachPollOrEvent()) {
+                return;
+            }
+
+            resetPollForm();
+            window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modal-chat-poll')).show();
+            window.setTimeout(function () {
+                $('#chat-poll-question').trigger('focus');
+            }, 300);
+        }
+
+        /**
+         * Solo se crea desde el modal abierto: evita envíos dobles si el botón
+         * se pulsa de nuevo mientras la ventana ya se cerró.
+         */
+        function pollModalOpen() {
+            var element = document.getElementById('modal-chat-poll');
+
+            return !! element && element.classList.contains('show');
+        }
+
+        function createPoll() {
+            if (! canAttachPollOrEvent() || ! pollModalOpen()) {
+                return;
+            }
+
+            var question = $.trim($('#chat-poll-question').val());
+            var options = $('#chat-poll-options input').map(function () {
+                return $.trim($(this).val());
+            }).get();
+
+            if (question === '') {
+                showPollError('Escribe la pregunta de la encuesta.');
+                return;
+            }
+
+            if (options.some(function (value) { return value === ''; })) {
+                showPollError('Las respuestas no pueden estar en blanco.');
+                return;
+            }
+
+            if (options.length < 2) {
+                showPollError('La encuesta necesita al menos dos respuestas.');
+                return;
+            }
+
+            var normalized = options.map(function (value) { return value.toLocaleLowerCase(); });
+
+            if (new Set(normalized).size !== normalized.length) {
+                showPollError('Las respuestas deben ser diferentes entre sí.');
+                return;
+            }
+
+            var endsAt = '';
+
+            if ($('#chat-poll-schedule').is(':checked')) {
+                endsAt = $('#chat-poll-ends').val();
+
+                if (! endsAt) {
+                    showPollError('Elige la fecha y hora de finalización.');
+                    return;
+                }
+            }
+
+            clearPollError();
+
+            var $button = $('#chat-poll-create').prop('disabled', true);
+
+            $.ajax({
+                url: encuestasUrl + '/' + currentId + '/encuestas',
+                method: 'POST',
+                dataType: 'json',
+                data: {
+                    question: question,
+                    options: options,
+                    multiple: $('#chat-poll-multiple').is(':checked') ? 1 : 0,
+                    hide_voters: $('#chat-poll-hide-voters').is(':checked') ? 1 : 0,
+                    ends_at: endsAt
+                },
+                headers: {
+                    'X-CSRF-TOKEN': token
+                }
+            }).done(function (response) {
+                window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modal-chat-poll')).hide();
+
+                if (response && response.message) {
+                    appendMessage(response.message);
+                    $('#chat-messages').scrollTop($('#chat-messages')[0].scrollHeight);
+                }
+            }).fail(function (xhr) {
+                showPollError((xhr.responseJSON || {}).message || 'No se pudo crear la encuesta.');
+            }).always(function () {
+                $button.prop('disabled', false);
+            });
+        }
+
+        // --- voto en una encuesta ---
+
+        $(document).on('change', '.chat-poll__input', function () {
+            var $poll = $(this).closest('.chat-poll');
+            var pollId = parseInt($poll.data('poll-id'), 10);
+            var messageId = parseInt($poll.data('message-id'), 10);
+
+            if (! pollId || currentModeration) {
+                $(this).prop('checked', ! $(this).prop('checked'));
+                return;
+            }
+
+            var values = $poll.find('.chat-poll__input:checked').map(function () {
+                return parseInt($(this).val(), 10);
+            }).get();
+
+            if (! values.length) {
+                return;
+            }
+
+            $poll.addClass('is-voting');
+
+            $.ajax({
+                url: votarUrl + '/' + pollId + '/votar',
+                method: 'POST',
+                dataType: 'json',
+                data: { options: values },
+                headers: {
+                    'X-CSRF-TOKEN': token
+                }
+            }).done(function (response) {
+                if (response && response.poll) {
+                    var $current = $('#chat-messages .chat-poll[data-poll-id="' + pollId + '"]');
+
+                    if ($current.length) {
+                        $current.replaceWith(pollHtml(response.poll, messageId));
+                    }
+                }
+            }).fail(function (xhr) {
+                var data = xhr.responseJSON || {};
+
+                alertDialog(data.message || 'No se pudo registrar el voto.');
+                refreshMessages([messageId]);
+            }).always(function () {
+                $poll.removeClass('is-voting');
+            });
+        });
+
+        // --- eventos adjuntos ---
+
+        var availableEvents = [];
+        var eventsLoaded = false;
+
+        function renderEventList() {
+            var term = $.trim(String($('#chat-event-search').val() || '')).toLocaleLowerCase();
+            var items = availableEvents.filter(function (event) {
+                return ! term || String(event.name + ' ' + event.year).toLocaleLowerCase().indexOf(term) !== -1;
+            });
+
+            if (! availableEvents.length) {
+                $('#chat-event-list').html('<p class="chat-hint">Todavía no hay eventos creados.</p>');
+                return;
+            }
+
+            if (! items.length) {
+                $('#chat-event-list').html('<p class="chat-hint">Ningún evento coincide con la búsqueda.</p>');
+                return;
+            }
+
+            $('#chat-event-list').html(items.map(function (event) {
+                return '<button type="button" class="chat-event-item chat-event-attach" data-event-id="' + event.id + '">' +
+                    '<span class="chat-event-item__name">' + escape(event.name) +
+                    ' <span class="chat-event-item__year">' + escape(event.year) + '</span></span>' +
+                    '<span class="chat-event-item__meta">' + escape(event.status) +
+                    ' · ' + (event.exchange_at ? 'Intercambio ' + escape(event.exchange_at) : 'Sin fecha') +
+                    ' · ' + event.participants + (event.participants === 1 ? ' participante' : ' participantes') +
+                    '</span>' +
+                    '</button>';
+            }).join(''));
+        }
+
+        function openEventModal() {
+            if (! canAttachPollOrEvent()) {
+                return;
+            }
+
+            $('#chat-event-search').val('');
+            $('#chat-event-error').removeAttr('data-kind').text('');
+            window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modal-chat-event')).show();
+
+            if (eventsLoaded && availableEvents.length) {
+                renderEventList();
+                return;
+            }
+
+            $('#chat-event-list').html('<p class="chat-hint">Cargando eventos...</p>');
+
+            $.getJSON(eventosUrl).done(function (response) {
+                availableEvents = (response && response.events) || [];
+                eventsLoaded = true;
+                renderEventList();
+            }).fail(function (xhr) {
+                $('#chat-event-list').html('<p class="chat-hint">No se pudieron cargar los eventos.</p>');
+                $('#chat-event-error').attr('data-kind', 'error')
+                    .text((xhr.responseJSON || {}).message || '');
+            });
+        }
+
+        function attachEvent(eventId) {
+            if (! canAttachPollOrEvent() || ! eventId) {
+                return;
+            }
+
+            var modal = document.getElementById('modal-chat-event');
+
+            if (! modal || ! modal.classList.contains('show')) {
+                return;
+            }
+
+            $('#chat-event-error').removeAttr('data-kind').text('');
+
+            $.ajax({
+                url: encuestasUrl + '/' + currentId + '/eventos',
+                method: 'POST',
+                dataType: 'json',
+                data: { event_id: eventId },
+                headers: {
+                    'X-CSRF-TOKEN': token
+                }
+            }).done(function (response) {
+                window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modal-chat-event')).hide();
+
+                if (response && response.message) {
+                    appendMessage(response.message);
+                    $('#chat-messages').scrollTop($('#chat-messages')[0].scrollHeight);
+                }
+            }).fail(function (xhr) {
+                $('#chat-event-error').attr('data-kind', 'error')
+                    .text((xhr.responseJSON || {}).message || 'No se pudo adjuntar el evento.');
+            });
+        }
+
+        function openEventSheet(eventId) {
+            var $body = $('#chat-event-sheet-body');
+            $body.html('<p class="chat-hint">Cargando...</p>');
+            window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modal-chat-event-sheet')).show();
+
+            $.getJSON(eventosUrl + '/' + eventId).done(function (response) {
+                var event = (response && response.event) || null;
+
+                if (! event) {
+                    $body.html('<p class="chat-hint">No se encontró el evento.</p>');
+                    return;
+                }
+
+                var rows = [
+                    ['Evento', event.name],
+                    ['Año', String(event.year)],
+                    ['Estado', event.status],
+                    ['Intercambio', event.exchange_at || 'Sin fecha'],
+                    ['Inscripciones', event.registration_opens_at && event.registration_closes_at
+                        ? event.registration_opens_at + ' al ' + event.registration_closes_at
+                        : 'Sin fechas'],
+                    ['Dinámica', event.dynamic_starts_at || 'Sin fecha'],
+                    ['Participantes', String(event.participants)]
+                ];
+
+                $body.html('<dl class="perfil-data chat-event-sheet__data">' +
+                    rows.map(function (row) {
+                        return '<div><dt>' + escape(row[0]) + '</dt><dd>' + escape(row[1]) + '</dd></div>';
+                    }).join('') +
+                    '</dl>');
+            }).fail(function (xhr) {
+                $body.html('<p class="chat-hint">' + escape((xhr.responseJSON || {}).message || 'No se pudo abrir el evento.') + '</p>');
+            });
+        }
+
+        $('#chat-attach-menu').on('click', '[data-attach="poll"]', function () {
+            $('#chat-attach-menu').prop('hidden', true);
+            openPollModal();
+        });
+
+        $('#chat-attach-menu').on('click', '[data-attach="event"]', function () {
+            $('#chat-attach-menu').prop('hidden', true);
+            openEventModal();
+        });
+
+        $('#chat-poll-add').on('click', function () {
+            addPollOption('');
+        });
+
+        $('#chat-poll-options').on('click', '.chat-poll-remove', function () {
+            if ($('#chat-poll-options .chat-poll-form__row').length <= 2) {
+                return;
+            }
+
+            $(this).closest('.chat-poll-form__row').remove();
+            updatePollOptionButtons();
+        });
+
+        $('#chat-poll-schedule').on('change', function () {
+            var checked = $(this).is(':checked');
+
+            $('#chat-poll-ends-field').prop('hidden', ! checked);
+
+            if (checked && ! $('#chat-poll-ends').val()) {
+                var now = new Date();
+                now.setDate(now.getDate() + 1);
+                now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+                $('#chat-poll-ends').val(now.toISOString().slice(0, 16));
+            }
+        });
+
+        $('#chat-poll-create').on('click', function () {
+            createPoll();
+        });
+
+        $('#chat-poll-question').on('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                createPoll();
+            }
+        });
+
+        $('#chat-event-search').on('input', function () {
+            renderEventList();
+        });
+
+        $('#chat-event-list').on('click', '.chat-event-attach', function () {
+            attachEvent(parseInt($(this).attr('data-event-id'), 10) || 0);
+        });
+
+        $(document).on('click', '.chat-event-open', function () {
+            openEventSheet(parseInt($(this).attr('data-event-id'), 10) || 0);
+        });
 
         // El contador se consulta aunque el panel esté cerrado: así el botón
         // flotante muestra los mensajes nuevos apenas llegan.

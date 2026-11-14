@@ -1,17 +1,16 @@
 <?php
 
-use App\Http\Controllers\CategoriasController;
 use App\Http\Controllers\AmigoSecretoController;
+use App\Http\Controllers\CategoriasController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DinamicaController;
 use App\Http\Controllers\EventoReinicioController;
 use App\Http\Controllers\EventosController;
-use App\Http\Controllers\GroupModerationController;
 use App\Http\Controllers\GoogleAuthController;
+use App\Http\Controllers\GroupModerationController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\LogoutController;
-use App\Http\Controllers\SessionController;
 use App\Http\Controllers\MatrizPerfilesController;
 use App\Http\Controllers\ModeracionBloqueosController;
 use App\Http\Controllers\ModeracionController;
@@ -24,6 +23,7 @@ use App\Http\Controllers\ParticipantesController;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\PermisosController;
 use App\Http\Controllers\RolesController;
+use App\Http\Controllers\SessionController;
 use App\Http\Controllers\SorteoCiegoController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\UsuariosAsociadosController;
@@ -135,6 +135,24 @@ Route::get('/moderacion/datos', [ModeracionController::class, 'datos'])
     ->middleware('auth')
     ->name('moderacion.datos');
 
+// Ficha completa del caso: datos, adjuntos, enlaces y sugerencia.
+Route::get('/moderacion/reportes/{report}/detalle', [ModeracionController::class, 'detalle'])
+    ->middleware('auth')
+    ->whereNumber('report')
+    ->name('moderacion.detalle');
+
+// Archivos adjuntos del caso, servidos fuera de la carpeta pública.
+Route::get('/moderacion/adjuntos/{attachment}', [ModeracionController::class, 'adjunto'])
+    ->middleware('auth')
+    ->whereNumber('attachment')
+    ->name('moderacion.adjuntos');
+
+// Respuesta del administrador a una sugerencia.
+Route::post('/moderacion/reportes/{report}/sugerencia', [ModeracionController::class, 'sugerencia'])
+    ->middleware('auth')
+    ->whereNumber('report')
+    ->name('moderacion.reportes.sugerencia');
+
 Route::get('/moderacion/contadores', [ModeracionController::class, 'contadores'])
     ->middleware('auth')
     ->name('moderacion.contadores');
@@ -216,6 +234,27 @@ Route::post('/chat/mensajes/{message}/reenviar', [ChatController::class, 'reenvi
 Route::get('/chat/{conversation}/mensajes', [ChatController::class, 'mensajes'])
     ->middleware('auth')
     ->name('chat.mensajes');
+
+// Encuestas y eventos adjuntos: solo en chats directos y salas de grupo.
+Route::post('/chat/{conversation}/encuestas', [ChatController::class, 'crearEncuesta'])
+    ->middleware('auth')
+    ->name('chat.encuestas.crear');
+
+Route::post('/chat/encuestas/{poll}/votar', [ChatController::class, 'votarEncuesta'])
+    ->middleware('auth')
+    ->name('chat.encuestas.votar');
+
+Route::get('/chat/eventos', [ChatController::class, 'eventosDisponibles'])
+    ->middleware('auth')
+    ->name('chat.eventos');
+
+Route::get('/chat/eventos/{event}', [ChatController::class, 'fichaEvento'])
+    ->middleware('auth')
+    ->name('chat.eventos.ficha');
+
+Route::post('/chat/{conversation}/eventos', [ChatController::class, 'adjuntarEvento'])
+    ->middleware('auth')
+    ->name('chat.eventos.adjuntar');
 
 Route::post('/chat/{conversation}/mensajes', [ChatController::class, 'enviar'])
     ->middleware('auth')

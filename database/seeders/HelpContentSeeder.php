@@ -773,7 +773,7 @@ class HelpContentSeeder extends Seeder
                     $this->p('El módulo ya está activo y visible en el menú. Como todavía no tiene controlador propio, al abrirlo muestra el marcador de posición «Este módulo está en construcción».'),
                     $this->steps([
                         'Conecta su controlador y vista en ModulePages.',
-                        'Concede el módulo al perfil que corresponda en la Matriz de perfiles. Administrador y Usuario ya lo tienen.',
+                        'Concede el módulo al perfil Usuario. El Administrador no debe verlo: es un canal para participantes.',
                         'Prueba el formulario o el canal de contacto antes de anunciarlo.',
                         'Actualiza la ayuda pública para explicar el canal disponible.',
                     ]),
@@ -837,7 +837,7 @@ class HelpContentSeeder extends Seeder
                 $this->p('Agrega el artículo con audience = «admin». Aparecerá en la sección Administración y solo lo verá el rol Administrador.'),
             ], HelpArticle::AUDIENCE_ADMIN),
             $this->faq('admin-contacto', $admin, 770, '¿Cómo habilito la lógica de Contacto y soporte?', [
-                $this->p('El módulo ya está activo y visible en el menú, con el marcador de posición. Para habilitar su lógica, conecta su controlador y vista en ModulePages y prueba el canal antes de anunciarlo. Los perfiles Administrador y Usuario ya tienen acceso.'),
+                $this->p('El módulo ya está activo y visible en el menú del perfil Usuario, con el marcador de posición. El Administrador no lo ve. Para habilitar su lógica, conecta su controlador y vista en ModulePages y prueba el canal antes de anunciarlo.'),
             ], HelpArticle::AUDIENCE_ADMIN),
             $this->faq('admin-datos', $admin, 780, '¿Dónde se guarda el contenido?', [
                 $this->facts([

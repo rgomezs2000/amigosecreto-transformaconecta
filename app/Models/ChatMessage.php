@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ChatMessage extends Model
 {
@@ -25,6 +26,7 @@ class ChatMessage extends Model
         'longitude',
         'delivered_at',
         'type',
+        'event_id',
         'attachment_path',
         'attachment_name',
         'attachment_mime',
@@ -96,6 +98,22 @@ class ChatMessage extends Model
     public function reports(): HasMany
     {
         return $this->hasMany(ChatReport::class, 'message_id');
+    }
+
+    /**
+     * Encuesta adjunta al mensaje (los mensajes de tipo «poll»).
+     */
+    public function poll(): HasOne
+    {
+        return $this->hasOne(ChatPoll::class, 'message_id');
+    }
+
+    /**
+     * Evento adjunto al mensaje (los mensajes de tipo «event»).
+     */
+    public function event(): BelongsTo
+    {
+        return $this->belongsTo(Event::class);
     }
 
     public function isDeleted(): bool

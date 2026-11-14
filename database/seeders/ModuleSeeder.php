@@ -27,7 +27,7 @@ class ModuleSeeder extends Seeder
             ['code' => 'usuarios', 'name' => 'Usuarios', 'slug' => 'usuarios', 'group' => 'Usuarios', 'icon' => 'fa-users', 'order' => 40],
             ['code' => 'eventos', 'name' => 'Eventos', 'slug' => 'eventos', 'group' => 'Eventos', 'icon' => 'fa-calendar-days', 'order' => 50],
             ['code' => 'control-notificaciones', 'name' => 'Control de Notificaciones', 'slug' => 'control-notificaciones', 'group' => 'Administración', 'icon' => 'fa-bell-slash', 'order' => 55],
-            ['code' => 'moderacion', 'name' => 'Moderación', 'slug' => 'moderacion', 'group' => 'Administración', 'icon' => 'fa-shield-halved', 'order' => 57],
+            ['code' => 'moderacion', 'name' => 'Centro de Ayuda y Soporte', 'slug' => 'moderacion', 'group' => 'Administración', 'icon' => 'fa-shield-halved', 'order' => 57],
             // Solo el superadministrador: el acceso se concede por usuario en
             // SuperAdminAccessSeeder, nunca al perfil Administrador.
             ['code' => 'restablecer-dinamica', 'name' => 'Restablecer dinámica', 'slug' => 'restablecer-dinamica', 'group' => 'Administración', 'icon' => 'fa-arrows-rotate', 'order' => 58],

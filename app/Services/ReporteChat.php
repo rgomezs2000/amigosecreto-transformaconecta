@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ChatMessage;
 use App\Models\ChatReport;
 use App\Models\Conversation;
 use App\Models\User;
@@ -22,15 +23,23 @@ class ReporteChat
 
     /**
      * Crea (o reutiliza) el chat del ticket al abrir el caso.
+     *
+     * Las sugerencias no abren chat para el usuario: se crea cuando el
+     * administrador toma el caso, y el usuario entra en solo lectura cuando
+     * recibe la primera respuesta.
      */
-    public function abrirTicket(ChatReport $report): Conversation
+    public function abrirTicket(ChatReport $report): ?Conversation
     {
+        if ($report->isSuggestion()) {
+            return null;
+        }
+
         $conversation = $this->buscar($report);
         $created = false;
 
         if ($conversation === null) {
             $conversation = Conversation::create([
-                'name' => 'Reporte Nº: '.$report->id,
+                'name' => $this->nombreTicket($report),
                 'type' => 'report',
                 'report_id' => $report->id,
                 'created_by' => $report->reporter_id,
@@ -54,15 +63,80 @@ class ReporteChat
 
     /**
      * El administrador toma el caso: entra al chat y se habilita la escritura.
+     *
+     * En una sugerencia el chat nace en solo lectura y solo con el
+     * administrador; la respuesta se envía desde la pestaña Sugerencia y el
+     * usuario se suma al recibirla.
      */
     public function gestionar(ChatReport $report, User $admin): Conversation
     {
+        if ($report->isSuggestion()) {
+            $conversation = $this->buscar($report);
+
+            if ($conversation === null) {
+                $conversation = Conversation::create([
+                    'name' => $this->nombreTicket($report),
+                    'type' => 'report',
+                    'report_id' => $report->id,
+                    'created_by' => $report->reporter_id,
+                    'is_moderated' => false,
+                    'is_read_only' => true,
+                ]);
+
+                $this->firestore->recordConversation($conversation->fresh('users'));
+            }
+
+            $this->agregarParticipante($conversation, $admin->id);
+            $this->mensajeInicial($conversation, $report);
+            $this->estado($conversation, true);
+
+            return $conversation;
+        }
+
         $conversation = $this->abrirTicket($report);
+
+        if ($conversation === null) {
+            $conversation = Conversation::create([
+                'name' => $this->nombreTicket($report),
+                'type' => 'report',
+                'report_id' => $report->id,
+                'created_by' => $report->reporter_id,
+                'is_moderated' => false,
+                'is_read_only' => false,
+            ]);
+        }
 
         $this->agregarParticipante($conversation, $admin->id);
         $this->estado($conversation, false);
 
         return $conversation;
+    }
+
+    /**
+     * Respuesta del administrador a una sugerencia.
+     *
+     * El mensaje se escribe aunque el chat esté en solo lectura (es el canal
+     * de respuesta de la pestaña Sugerencia). Al enviarlo, el usuario entra al
+     * chat en solo lectura para que pueda leer la respuesta.
+     */
+    public function responderSugerencia(ChatReport $report, User $admin, string $body): ChatMessage
+    {
+        $conversation = $this->gestionar($report, $admin);
+        $this->agregarParticipante($conversation, $report->reporter_id);
+
+        $message = $conversation->messages()->create([
+            'user_id' => $admin->id,
+            'body' => $body,
+            'type' => 'text',
+            'is_moderation' => false,
+            'delivered_at' => now(),
+        ]);
+
+        $this->firestore->recordMessage(
+            $message->load('user', 'attachments', 'conversation')
+        );
+
+        return $message;
     }
 
     /**
@@ -99,8 +173,9 @@ class ReporteChat
 
         $conversation->users()->syncWithoutDetaching([(int) $to->id]);
 
-        // Un caso en atención siempre admite escritura para el gestor.
-        if ($conversation->is_read_only) {
+        // Un caso en atención siempre admite escritura para el gestor, salvo
+        // la sugerencia: su respuesta va por la pestaña Sugerencia.
+        if (! $report->isSuggestion() && $conversation->is_read_only) {
             $conversation->forceFill(['is_read_only' => false])->save();
         }
 
@@ -134,7 +209,7 @@ class ReporteChat
 
         $message = $conversation->messages()->create([
             'user_id' => null,
-            'body' => 'Reporte Nº: '.$report->id,
+            'body' => $this->nombreTicket($report),
             'type' => 'text',
             'is_moderation' => false,
             'delivered_at' => now(),
@@ -143,6 +218,11 @@ class ReporteChat
         $this->firestore->recordMessage(
             $message->load('user', 'attachments', 'conversation')
         );
+    }
+
+    private function nombreTicket(ChatReport $report): string
+    {
+        return ($report->isSuggestion() ? 'Sugerencia Nº: ' : 'Reporte Nº: ').$report->id;
     }
 
     /**

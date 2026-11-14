@@ -8,15 +8,20 @@ use App\Models\ChatGroupAudit;
 use App\Models\ChatMessage;
 use App\Models\ChatMessageAttachment;
 use App\Models\ChatModerationRead;
+use App\Models\ChatPoll;
+use App\Models\ChatPollOption;
+use App\Models\ChatPollVote;
 use App\Models\ChatReaction;
 use App\Models\ChatReport;
 use App\Models\Conversation;
+use App\Models\Event;
 use App\Models\GroupBan;
 use App\Models\GroupSuspension;
 use App\Models\Module;
 use App\Models\User;
 use App\Services\Firestore\FirestoreService;
 use App\Services\PushNotifier;
+use App\Services\ReporteAdjuntos;
 use App\Services\ReporteAvisos;
 use App\Services\ReporteChat;
 use App\Support\ChatMentions;
@@ -61,6 +66,7 @@ class ChatController extends Controller
         private readonly PushNotifier $push,
         private readonly ReporteChat $reportes,
         private readonly ReporteAvisos $avisosReporte,
+        private readonly ReporteAdjuntos $reporteAdjuntos,
     ) {}
 
     private function ensureAccess(): void
@@ -409,7 +415,15 @@ class ChatController extends Controller
         $clearedAt = $conversation->users->firstWhere('id', $user->id)?->pivot->cleared_at;
 
         $base = function () use ($conversation, $clearedAt) {
-            $query = $conversation->messages()->with(['user', 'attachments', 'replyTo.user']);
+            $query = $conversation->messages()->with([
+                'user',
+                'attachments',
+                'replyTo.user',
+                'conversation.users',
+                'poll.options',
+                'poll.votes.user',
+                'event' => fn ($query) => $query->withCount('participants'),
+            ]);
 
             if ($clearedAt !== null) {
                 // Se incluye el mismo segundo del borrado para no ocultar mensajes nuevos.
@@ -577,6 +591,19 @@ class ChatController extends Controller
             // que la respuesta se entienda sin salir de ella.
             'reply' => $this->replyQuote($message, $clearedAt, $hideAdminBadge),
             'forwarded' => $message->isForwarded(),
+            // Encuestas y eventos: la burbuja trae todo lo necesario para
+            // pintarse y, en las encuestas, para votar.
+            'poll' => ! $deleted && $message->type === 'poll' && $message->poll !== null
+                ? $this->pollData(
+                    $message->poll,
+                    $message,
+                    $user,
+                    $message->conversation?->users->contains('id', $user->id) ?? false
+                )
+                : null,
+            'event' => ! $deleted && $message->event !== null
+                ? $this->eventData($message->event)
+                : null,
         ];
     }
 
@@ -902,6 +929,489 @@ class ChatController extends Controller
 
             return api_error('No se pudo enviar el mensaje. Intenta de nuevo.', 500);
         }
+    }
+
+    /**
+     * Crea una encuesta y la adjunta a un mensaje de la conversación.
+     *
+     * Solo en chats directos y salas de grupo: la moderación no crea
+     * encuestas. La encuesta no obliga a votar y, si nadie marca una fecha de
+     * cierre, caduca a las 24 horas.
+     */
+    public function crearEncuesta(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
+        $user = $request->user();
+
+        if (! $this->canAccess($conversation, $user)) {
+            return api_error('No tienes acceso a esta conversación.', 403);
+        }
+
+        if ($memberError = $this->ensureMember($conversation, $user)) {
+            return $memberError;
+        }
+
+        if (! in_array($conversation->type, ['direct', 'group'], true)) {
+            return api_error('Las encuestas solo están disponibles en los chats directos y en las salas de grupo.', 422);
+        }
+
+        if ($sendError = $this->ensureCanStartChat($conversation, $user)) {
+            return $sendError;
+        }
+
+        $validator = Validator::make($request->all(), [
+            'question' => ['required', 'string', 'max:300'],
+            'options' => ['required', 'array', 'min:2', 'max:10'],
+            'options.*' => ['required', 'string', 'max:120'],
+            'multiple' => ['nullable', 'boolean'],
+            'hide_voters' => ['nullable', 'boolean'],
+            'ends_at' => ['nullable', 'date', 'after:now', 'before:'.now()->addYear()->toDateTimeString()],
+        ], [
+            'question.required' => 'Escribe la pregunta de la encuesta.',
+            'question.max' => 'La pregunta no puede superar los 300 caracteres.',
+            'options.required' => 'Agrega al menos dos respuestas.',
+            'options.min' => 'La encuesta necesita al menos dos respuestas.',
+            'options.max' => 'La encuesta admite como máximo diez respuestas.',
+            'options.*.required' => 'Las respuestas no pueden estar en blanco.',
+            'options.*.max' => 'Cada respuesta puede tener hasta 120 caracteres.',
+            'ends_at.after' => 'La fecha de finalización debe ser posterior a ahora.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $data = $validator->validated();
+        $question = trim((string) $data['question']);
+        $options = [];
+
+        foreach ((array) $data['options'] as $option) {
+            $label = trim((string) $option);
+
+            if ($label === '') {
+                return api_error('Las respuestas no pueden estar en blanco.', 422);
+            }
+
+            $options[] = $label;
+        }
+
+        // Comparación sin distinguir mayúsculas ni acentos: dos respuestas
+        // repetidas no aportan nada.
+        $normalized = array_map(fn (string $label) => mb_strtolower($label), $options);
+
+        if (count(array_unique($normalized)) !== count($options)) {
+            return api_error('Las respuestas deben ser diferentes entre sí.', 422);
+        }
+
+        if (count($options) < 2) {
+            return api_error('La encuesta necesita al menos dos respuestas.', 422);
+        }
+
+        if ($question === '') {
+            return api_error('Escribe la pregunta de la encuesta.', 422);
+        }
+
+        try {
+            $message = DB::transaction(function () use ($conversation, $user, $question, $options, $data) {
+                $message = ChatMessage::create([
+                    'conversation_id' => $conversation->id,
+                    'user_id' => $user->id,
+                    'body' => '',
+                    'is_moderation' => false,
+                    'type' => 'poll',
+                ]);
+
+                $poll = ChatPoll::create([
+                    'message_id' => $message->id,
+                    'conversation_id' => $conversation->id,
+                    'created_by' => $user->id,
+                    'question' => $question,
+                    'multiple' => (bool) ($data['multiple'] ?? false),
+                    'hide_voters' => (bool) ($data['hide_voters'] ?? false),
+                    // Sin fecha elegida la encuesta dura 24 horas.
+                    'ends_at' => ! empty($data['ends_at']) ? Carbon::parse($data['ends_at']) : now()->addDay(),
+                ]);
+
+                foreach ($options as $position => $label) {
+                    $poll->options()->create([
+                        'label' => $label,
+                        'position' => $position,
+                    ]);
+                }
+
+                return $message;
+            });
+
+            $this->afterNewMessage($conversation, $message, $user);
+
+            return api_success('Encuesta creada.', [
+                'message' => $this->createdMessagePayload($message, $user),
+            ]);
+        } catch (Throwable $exception) {
+            Log::error('Error al crear la encuesta', ['error' => $exception->getMessage()]);
+
+            return api_error('No se pudo crear la encuesta. Intenta de nuevo.', 500);
+        }
+    }
+
+    /**
+     * Registra el voto de un participante. Con selección múltiple se reemplaza
+     * la selección completa; sin ella solo se admite una respuesta.
+     */
+    public function votarEncuesta(Request $request, ChatPoll $poll): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $conversation = $poll->conversation;
+
+        if ($conversation === null) {
+            return api_error('La encuesta ya no está disponible.', 404);
+        }
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
+        $user = $request->user();
+
+        if (! $this->canAccess($conversation, $user)) {
+            return api_error('No tienes acceso a esta conversación.', 403);
+        }
+
+        if ($memberError = $this->ensureMember($conversation, $user)) {
+            return $memberError;
+        }
+
+        if (! in_array($conversation->type, ['direct', 'group'], true)) {
+            return api_error('Las encuestas solo están disponibles en los chats directos y en las salas de grupo.', 422);
+        }
+
+        if ($poll->isClosed()) {
+            return api_error('La encuesta ya está cerrada.', 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'options' => ['required', 'array', 'min:1'],
+            'options.*' => ['integer'],
+        ], [
+            'options.required' => 'Elige al menos una respuesta.',
+            'options.min' => 'Elige al menos una respuesta.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $poll->loadMissing('options');
+
+        $selected = collect((array) $validator->validated()['options'])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        $valid = $poll->options->pluck('id')->map(fn ($id) => (int) $id);
+
+        if ($selected->diff($valid)->isNotEmpty()) {
+            return api_error('Alguna de las respuestas no pertenece a la encuesta.', 422);
+        }
+
+        if (! $poll->multiple && $selected->count() !== 1) {
+            return api_error('Esta encuesta admite una sola respuesta.', 422);
+        }
+
+        try {
+            DB::transaction(function () use ($poll, $user, $selected) {
+                ChatPollVote::query()
+                    ->where('poll_id', $poll->id)
+                    ->where('user_id', $user->id)
+                    ->delete();
+
+                foreach ($selected as $optionId) {
+                    ChatPollVote::create([
+                        'poll_id' => $poll->id,
+                        'option_id' => $optionId,
+                        'user_id' => $user->id,
+                    ]);
+                }
+            });
+
+            return api_success('Voto registrado.', [
+                'poll' => $this->pollData(
+                    $poll->fresh(['options', 'votes.user']),
+                    $poll->message,
+                    $user,
+                    true
+                ),
+            ]);
+        } catch (Throwable $exception) {
+            Log::error('Error al votar en la encuesta', ['error' => $exception->getMessage()]);
+
+            return api_error('No se pudo registrar el voto. Intenta de nuevo.', 500);
+        }
+    }
+
+    /**
+     * Adjunta un evento del sistema a un mensaje de la conversación.
+     *
+     * Sirve cualquier evento existente, sin importar su etapa o estado.
+     */
+    public function adjuntarEvento(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if ($readOnly = $this->ensureWritable($conversation)) {
+            return $readOnly;
+        }
+
+        $user = $request->user();
+
+        if (! $this->canAccess($conversation, $user)) {
+            return api_error('No tienes acceso a esta conversación.', 403);
+        }
+
+        if ($memberError = $this->ensureMember($conversation, $user)) {
+            return $memberError;
+        }
+
+        if (! in_array($conversation->type, ['direct', 'group'], true)) {
+            return api_error('Los eventos solo se pueden adjuntar en los chats directos y en las salas de grupo.', 422);
+        }
+
+        if ($sendError = $this->ensureCanStartChat($conversation, $user)) {
+            return $sendError;
+        }
+
+        $validator = Validator::make($request->all(), [
+            'event_id' => ['required', 'integer', 'exists:events,id'],
+        ], [
+            'event_id.required' => 'Elige el evento que quieres adjuntar.',
+            'event_id.exists' => 'El evento ya no está disponible.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $event = Event::query()->find((int) $validator->validated()['event_id']);
+
+        if ($event === null) {
+            return api_error('El evento ya no está disponible.', 422);
+        }
+
+        try {
+            $message = ChatMessage::create([
+                'conversation_id' => $conversation->id,
+                'user_id' => $user->id,
+                'body' => '',
+                'is_moderation' => false,
+                'type' => 'event',
+                'event_id' => $event->id,
+            ]);
+
+            $this->afterNewMessage($conversation, $message, $user);
+
+            return api_success('Evento adjuntado.', [
+                'message' => $this->createdMessagePayload($message, $user),
+            ]);
+        } catch (Throwable $exception) {
+            Log::error('Error al adjuntar el evento', ['error' => $exception->getMessage()]);
+
+            return api_error('No se pudo adjuntar el evento. Intenta de nuevo.', 500);
+        }
+    }
+
+    /**
+     * Eventos que se pueden adjuntar desde el chat: todos los creados, en
+     * cualquier etapa (borrador, inscripción, sorteo, cerrado...).
+     */
+    public function eventosDisponibles(): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $events = Event::query()
+            ->withCount('participants')
+            ->orderByDesc('year')
+            ->get()
+            ->map(fn (Event $event) => $this->eventData($event))
+            ->values();
+
+        return api_success('Eventos disponibles.', ['events' => $events]);
+    }
+
+    /**
+     * Ficha de un evento para la burbuja del chat, disponible para todos los
+     * usuarios del chat (también administradores).
+     */
+    public function fichaEvento(Event $event): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $event->loadCount('participants');
+
+        return api_success('Ficha del evento.', ['event' => $this->eventData($event)]);
+    }
+
+    /**
+     * Comprobaciones comunes al abrir un tema nuevo (encuesta o evento):
+     * bloqueos y suspensiones del grupo.
+     */
+    private function ensureCanStartChat(Conversation $conversation, User $user): ?JsonResponse
+    {
+        if ($conversation->type === 'direct') {
+            $other = $conversation->users->firstWhere('id', '!=', $user->id);
+
+            if ($other !== null && ChatBlock::existsBetween($user->id, $other->id)) {
+                return api_error('No puedes enviar mensajes a este usuario.', 403);
+            }
+        }
+
+        if ($conversation->type === 'group') {
+            $suspension = GroupSuspension::query()
+                ->where('conversation_id', $conversation->id)
+                ->where('user_id', $user->id)
+                ->where('until', '>', now())
+                ->first();
+
+            if ($suspension !== null) {
+                return api_error(
+                    'Estás suspendido en este grupo hasta el '.$suspension->until->format('d/m/Y H:i').'.',
+                    403
+                );
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Efectos comunes después de crear un mensaje desde una acción del chat
+     * (encuesta o evento): marcar leído, avisar a Firestore y notificar.
+     */
+    private function afterNewMessage(Conversation $conversation, ChatMessage $message, User $user): void
+    {
+        $conversation->touch();
+
+        if ($conversation->users->contains('id', $user->id)) {
+            $conversation->users()->updateExistingPivot($user->id, ['last_read_at' => now()]);
+        }
+
+        $message->load(['user', 'attachments', 'conversation.users', 'poll.options', 'poll.votes.user', 'event']);
+
+        $this->firestore->recordMessage($message);
+        $this->firestore->recordConversationActivity(
+            $conversation,
+            $message,
+            $message->is_moderation ? 'Moderación' : $user->name
+        );
+
+        $this->notifyConversation($conversation, $message, $user);
+    }
+
+    /**
+     * Datos del mensaje recién creado, con el mismo formato que el resto del
+     * historial para que el cliente lo pinte sin recargar.
+     */
+    private function createdMessagePayload(ChatMessage $message, User $user): array
+    {
+        $message->loadMissing(['user', 'attachments', 'conversation.users', 'poll.options', 'poll.votes.user', 'event']);
+
+        $others = $message->conversation->users->where('id', '!=', $user->id);
+
+        return $this->messageData(
+            $message,
+            $user,
+            $others,
+            [],
+            [],
+            $this->canDeleteContent($message, $user, $message->conversation)
+        );
+    }
+
+    /**
+     * Datos de una encuesta: opciones, votos, porcentajes, votantes y si el
+     * usuario puede votar todavía.
+     */
+    private function pollData(ChatPoll $poll, ?ChatMessage $message, User $user, bool $isParticipant): array
+    {
+        $poll->loadMissing(['options', 'votes.user']);
+
+        $closed = $poll->isClosed();
+        $votes = $poll->votes;
+        $byOption = $votes->groupBy('option_id');
+        $totalVoters = $votes->pluck('user_id')->unique()->count();
+        $myVotes = $votes->where('user_id', $user->id)->pluck('option_id')->map(fn ($id) => (int) $id)->values();
+
+        $conversation = $message?->conversation;
+        $readOnly = (bool) $conversation?->is_read_only;
+        $deleted = (bool) $message?->isDeleted();
+
+        $options = $poll->options->map(function (ChatPollOption $option) use ($byOption, $totalVoters, $poll, $user) {
+            $optionVotes = $byOption->get($option->id, collect());
+            $count = $optionVotes->count();
+
+            return [
+                'id' => (int) $option->id,
+                'label' => $option->label,
+                'votes' => $count,
+                'percent' => $totalVoters > 0 ? (int) round($count * 100 / $totalVoters) : 0,
+                'mine' => $optionVotes->contains(fn ($vote) => (int) $vote->user_id === (int) $user->id),
+                'voters' => $poll->hide_voters
+                    ? []
+                    : $optionVotes
+                        ->map(fn ($vote) => $vote->user?->name)
+                        ->filter()
+                        ->unique()
+                        ->values()
+                        ->all(),
+            ];
+        })->values();
+
+        return [
+            'id' => (int) $poll->id,
+            'message_id' => (int) $poll->message_id,
+            'question' => $poll->question,
+            'multiple' => (bool) $poll->multiple,
+            'hide_voters' => (bool) $poll->hide_voters,
+            'closed' => $closed,
+            'ends_at' => $poll->ends_at?->toIso8601String(),
+            'ends_at_label' => $poll->ends_at?->format('d/m/Y H:i'),
+            'total_votes' => $totalVoters,
+            'options' => $options,
+            'my_votes' => $myVotes,
+            'can_vote' => $isParticipant && ! $closed && ! $deleted && ! $readOnly,
+        ];
+    }
+
+    /**
+     * Resumen de un evento para la burbuja y la ficha del chat.
+     */
+    private function eventData(Event $event): array
+    {
+        return [
+            'id' => (int) $event->id,
+            'name' => $event->name,
+            'year' => (int) $event->year,
+            // Etapa real del evento (Borrador, Inscripción, Sorteado...), no la
+            // etiqueta genérica de las tarjetas del módulo.
+            'status' => $event->isSuspended()
+                ? 'Suspendido'
+                : ($event->isPostponed() ? 'Pospuesto' : $event->status->label()),
+            'status_class' => $event->isSuspended()
+                ? 'blocked'
+                : ($event->status->isFinished() ? 'inactive' : 'active'),
+            'exchange_at' => $event->exchange_at?->format('d/m/Y'),
+            'exchange_at_iso' => $event->exchange_at?->toIso8601String(),
+            'registration_opens_at' => $event->registration_opens_at?->format('d/m/Y'),
+            'registration_closes_at' => $event->registration_closes_at?->format('d/m/Y'),
+            'dynamic_starts_at' => $event->dynamic_starts_at?->format('d/m/Y'),
+            'participants' => (int) ($event->participants_count ?? $event->participants()->count()),
+            'suspended' => $event->isSuspended(),
+        ];
     }
 
     /**
@@ -1349,7 +1859,9 @@ class ChatController extends Controller
                     && (int) $message->conversation?->created_by === (int) $user->id));
 
         // Además de marcarlo como eliminado, se limpian los datos que no deben
-        // quedar como residuo: enlaces, ubicación y referencia al adjunto.
+        // quedar como residuo: enlaces, ubicación, referencia al adjunto y el
+        // evento adjunto. El evento en sí no se borra: solo se quita la ficha
+        // de la burbuja, porque los eventos no se eliminan con un mensaje.
         $message->update([
             'deleted_at' => now(),
             'deleted_by' => $user->id,
@@ -1360,6 +1872,7 @@ class ChatController extends Controller
             'link_image' => null,
             'latitude' => null,
             'longitude' => null,
+            'event_id' => null,
         ]);
 
         $this->firestore->recordMessage($message->load('user', 'attachments', 'conversation'));
@@ -1379,12 +1892,33 @@ class ChatController extends Controller
         // galería ni ocupando espacio en el almacenamiento.
         $this->purgeMessageAttachments($message);
 
+        // La encuesta también vive dentro del mensaje: si el mensaje se elimina,
+        // la encuesta y sus votos desaparecen con él.
+        $this->purgeMessagePoll($message);
+
         // Si estaba fijado, el cintillo tampoco debe seguir apuntando a él.
         if ((int) $message->conversation?->pinned_message_id === (int) $message->id) {
             $message->conversation->forceFill(['pinned_message_id' => null])->save();
         }
 
         return $byAdmin ? 'Eliminado por un administrador' : 'Eliminado por el autor';
+    }
+
+    /**
+     * Borra la encuesta de un mensaje eliminado, junto con sus opciones y sus
+     * votos. La encuesta no existe fuera del mensaje al que está adjunta.
+     */
+    private function purgeMessagePoll(ChatMessage $message): void
+    {
+        $poll = $message->poll()->first();
+
+        if ($poll === null) {
+            return;
+        }
+
+        $poll->votes()->delete();
+        $poll->options()->delete();
+        $poll->delete();
     }
 
     /**
@@ -1473,9 +2007,16 @@ class ChatController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'reason' => ['required', 'string', 'max:1000'],
+            'reason' => ['required', 'string', 'max:2000'],
+            'links' => ['nullable', 'array', 'max:20'],
+            'links.*' => ['nullable', 'string', 'max:2000', 'url'],
+            'files' => ['nullable', 'array', 'max:10'],
+            'files.*' => ['file', 'max:51200'],
         ], [
             'reason.required' => 'Escribe el motivo del reporte.',
+            'reason.max' => 'El motivo no puede pasar de 2000 caracteres.',
+            'links.*.url' => 'Cada enlace debe ser una dirección válida.',
+            'files.*.max' => 'Cada archivo puede pesar hasta 50 MB.',
         ]);
 
         if ($validator->fails()) {
@@ -1485,17 +2026,25 @@ class ChatController extends Controller
         $reason = $validator->validated()['reason'];
 
         $report = ChatReport::create([
+            'type' => ChatReport::TYPE_MODERATION,
             'message_id' => $message->id,
             'reporter_id' => $user->id,
             'reason' => $reason,
         ]);
+
+        $this->reporteAdjuntos->guardarArchivos($report, $request->file('files', []));
+        $this->reporteAdjuntos->guardarEnlaces($report, $request->input('links', []));
+        $this->reporteAdjuntos->generarEvidencia($report);
 
         $this->firestore->recordReport($report);
 
         // El caso abre su chat (en solo lectura y solo para el beneficiario) y
         // se le avisa con correo y push. La administración recibe el push.
         $conversation = $this->reportes->abrirTicket($report);
-        $this->avisosReporte->abierto($report, $conversation);
+
+        if ($conversation !== null) {
+            $this->avisosReporte->abierto($report, $conversation);
+        }
 
         $sender = $message->user?->name ?? 'Sistema';
 
@@ -1610,6 +2159,8 @@ class ChatController extends Controller
             'pdf' => 'Envió un PDF.',
             'contact' => 'Envió un contacto.',
             'location' => 'Compartió una ubicación.',
+            'poll' => 'Creó una encuesta: '.($message->poll?->question ?? ''),
+            'event' => 'Adjuntó el evento '.($message->event?->name ?? ''),
             default => 'Envió un archivo.',
         };
     }
@@ -2313,25 +2864,56 @@ class ChatController extends Controller
 
         $lastMessageId = $conversation->messages()->latest('id')->value('id');
         $conversationName = $conversation->name ?: ($conversation->isGroup() ? 'un grupo' : 'una conversación');
-        $reason = 'Reporte de la conversación: '.$conversationName;
+        $defaultReason = 'Reporte de la conversación: '.$conversationName;
+
+        $validator = Validator::make($request->all(), [
+            'reason' => ['nullable', 'string', 'max:2000'],
+            'links' => ['nullable', 'array', 'max:20'],
+            'links.*' => ['nullable', 'string', 'max:2000', 'url'],
+            'files' => ['nullable', 'array', 'max:10'],
+            'files.*' => ['file', 'max:51200'],
+        ], [
+            'links.*.url' => 'Cada enlace debe ser una dirección válida.',
+            'files.*.max' => 'Cada archivo puede pesar hasta 50 MB.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $reason = trim((string) ($validator->validated()['reason'] ?? ''));
+
+        if ($reason === '') {
+            $reason = $defaultReason;
+        }
 
         // También se registra cuando la conversación aún no tiene mensajes: el
         // ticket debe existir para que después se le abra su chat.
         $report = ChatReport::query()->firstOrCreate(
             ['message_id' => $lastMessageId, 'reporter_id' => $user->id],
-            ['reason' => $reason]
+            [
+                'type' => ChatReport::TYPE_MODERATION,
+                'reason' => $reason,
+            ]
         );
 
         if (! $report->wasRecentlyCreated) {
             return api_success('Este reporte ya estaba registrado.');
         }
 
+        $this->reporteAdjuntos->guardarArchivos($report, $request->file('files', []));
+        $this->reporteAdjuntos->guardarEnlaces($report, $request->input('links', []));
+        $this->reporteAdjuntos->generarEvidencia($report);
+
         $this->firestore->recordReport($report);
 
         // El caso abre su chat (solo lectura, solo el beneficiario) y se le
         // avisa por correo y push.
-        $conversation = $this->reportes->abrirTicket($report);
-        $this->avisosReporte->abierto($report, $conversation);
+        $ticketConversation = $this->reportes->abrirTicket($report);
+
+        if ($ticketConversation !== null) {
+            $this->avisosReporte->abierto($report, $ticketConversation);
+        }
 
         $this->push->sendToAdmins(
             'chat.report',
@@ -2910,7 +3492,14 @@ class ChatController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'reason' => ['nullable', 'string', 'max:500'],
+            'reason' => ['nullable', 'string', 'max:2000'],
+            'links' => ['nullable', 'array', 'max:20'],
+            'links.*' => ['nullable', 'string', 'max:2000', 'url'],
+            'files' => ['nullable', 'array', 'max:10'],
+            'files.*' => ['file', 'max:51200'],
+        ], [
+            'links.*.url' => 'Cada enlace debe ser una dirección válida.',
+            'files.*.max' => 'Cada archivo puede pesar hasta 50 MB.',
         ]);
 
         if ($validator->fails()) {
@@ -2927,19 +3516,29 @@ class ChatController extends Controller
 
         $report = ChatReport::query()->firstOrCreate(
             ['message_id' => $lastMessageId, 'reporter_id' => $current->id],
-            ['reason' => $reason]
+            [
+                'type' => ChatReport::TYPE_MODERATION,
+                'reason' => $reason,
+            ]
         );
 
         if (! $report->wasRecentlyCreated) {
             return api_success('Este reporte ya estaba registrado.');
         }
 
+        $this->reporteAdjuntos->guardarArchivos($report, $request->file('files', []));
+        $this->reporteAdjuntos->guardarEnlaces($report, $request->input('links', []));
+        $this->reporteAdjuntos->generarEvidencia($report);
+
         $this->firestore->recordReport($report);
 
         // El caso abre su chat (solo lectura, solo el beneficiario) y se le
         // avisa por correo y push.
-        $conversation = $this->reportes->abrirTicket($report);
-        $this->avisosReporte->abierto($report, $conversation);
+        $ticketConversation = $this->reportes->abrirTicket($report);
+
+        if ($ticketConversation !== null) {
+            $this->avisosReporte->abierto($report, $ticketConversation);
+        }
 
         $this->push->sendToAdmins(
             'chat.report',
@@ -3163,7 +3762,11 @@ class ChatController extends Controller
         $body = trim(strip_tags((string) $message->body));
 
         if ($body === '') {
-            $body = $message->attachment_name ?: 'Mensaje adjunto';
+            $body = match ($message->type) {
+                'poll' => 'Encuesta: '.($message->poll?->question ?? ''),
+                'event' => 'Evento: '.($message->event?->name ?? ''),
+                default => $message->attachment_name ?: 'Mensaje adjunto',
+            };
         }
 
         return [

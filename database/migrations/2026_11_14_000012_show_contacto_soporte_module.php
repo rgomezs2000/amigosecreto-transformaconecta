@@ -50,7 +50,7 @@ return new class extends Migration
         ]);
 
         $profiles = Profile::query()
-            ->whereIn('slug', ['administrador', 'usuario'])
+            ->whereIn('slug', ['usuario'])
             ->get();
 
         foreach ($profiles as $profile) {

@@ -213,7 +213,7 @@ class ReportesChatTest extends TestCase
         $this->assertSame('Ana', $row['reporter_raw']);
         $this->assertSame('Insultos', $row['reason_full']);
         $this->assertNull($row['ticket_chat_url']);
-        $this->assertStringNotContainsString('Chat del ticket', $row['actions']);
+        $this->assertStringNotContainsString('Abrir el chat del caso', $row['actions']);
 
         $this->actingAs($otroAdmin)
             ->getJson('/chat/'.$conversation->id.'/mensajes')
@@ -246,7 +246,7 @@ class ReportesChatTest extends TestCase
             ->json('data.0');
 
         $this->assertSame($conversation->id, $row['ticket_chat_id']);
-        $this->assertStringContainsString('Chat del ticket', $row['actions']);
+        $this->assertStringContainsString('Abrir el chat del caso', $row['actions']);
 
         $this->actingAs($luis)
             ->getJson('/chat/'.$conversation->id.'/mensajes')
