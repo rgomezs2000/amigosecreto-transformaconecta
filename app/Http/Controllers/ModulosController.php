@@ -28,6 +28,45 @@ class ModulosController extends Controller
         }
     }
 
+    /**
+     * Iconos sugeridos en el formulario. La base de datos acepta cualquier
+     * clase de Font Awesome; esta lista solo sirve de atajo.
+     *
+     * @var array<int, string>
+     */
+    private const ICON_SUGGESTIONS = [
+        'fa-house',
+        'fa-users',
+        'fa-user',
+        'fa-user-shield',
+        'fa-users-gear',
+        'fa-key',
+        'fa-lock',
+        'fa-cubes',
+        'fa-table-cells',
+        'fa-tags',
+        'fa-list',
+        'fa-calendar-days',
+        'fa-handshake',
+        'fa-user-secret',
+        'fa-gift',
+        'fa-bell',
+        'fa-bell-slash',
+        'fa-comments',
+        'fa-envelope',
+        'fa-id-card',
+        'fa-chart-simple',
+        'fa-shield-halved',
+        'fa-arrows-rotate',
+        'fa-lightbulb',
+        'fa-star',
+        'fa-heart',
+        'fa-trophy',
+        'fa-circle-info',
+        'fa-gear',
+        'fa-right-from-bracket',
+    ];
+
     public function index(): View
     {
         $this->ensureAccess();
@@ -37,6 +76,7 @@ class ModulosController extends Controller
                 ->orderBy('sort_order')
                 ->orderBy('name')
                 ->get(),
+            'iconSuggestions' => self::ICON_SUGGESTIONS,
         ]);
     }
 
@@ -65,7 +105,7 @@ class ModulosController extends Controller
         $direction = $request->input('order.0.dir') === 'desc' ? 'desc' : 'asc';
 
         $column = match ($columnIndex) {
-            4 => 'slug',
+            5 => 'slug',
             default => 'name',
         };
 
@@ -80,14 +120,33 @@ class ModulosController extends Controller
 
         $modules = $query->get();
 
-        $data = $modules->map(fn (Module $module) => [
-            'check' => '<input type="checkbox" class="form-check-input module-checkbox" value="' . $module->id . '" aria-label="Seleccionar módulo ' . e($module->name) . '">',
-            'id' => $module->id,
-            'name' => e($module->name),
-            'category' => e($module->category?->name ?? '—'),
-            'slug' => $module->slug !== '' ? e($module->slug) : '—',
-            'actions' => view('modulos.partials.actions', ['module' => $module])->render(),
-        ]);
+        $data = $modules->map(function (Module $module) {
+            // Inicio, Login y Salir son del sistema: se listan, pero no se
+            // pueden seleccionar, modificar ni eliminar.
+            $readOnly = $module->isReadOnly();
+
+            $name = e($module->name);
+
+            if ($readOnly) {
+                $name .= ' <span class="badge perfil-badge module-readonly-badge">'
+                    . '<i class="fa-solid fa-lock" aria-hidden="true"></i> Solo lectura</span>';
+            }
+
+            return [
+                'check' => $readOnly
+                    ? '<span class="module-readonly" title="Módulo del sistema: solo lectura">'
+                        . '<i class="fa-solid fa-lock" aria-hidden="true"></i>'
+                        . '<span class="visually-hidden">Solo lectura</span></span>'
+                    : '<input type="checkbox" class="form-check-input module-checkbox" value="' . $module->id . '" aria-label="Seleccionar módulo ' . e($module->name) . '">',
+                'id' => $module->id,
+                'name' => $name,
+                'category' => e($module->category?->name ?? '—'),
+                'icon' => '<span class="module-icon-cell"><i class="fa-solid ' . e($module->icon) . '" aria-hidden="true"></i><code>' . e($module->icon) . '</code></span>',
+                'slug' => $module->slug !== '' ? e($module->slug) : '—',
+                'actions' => view('modulos.partials.actions', ['module' => $module])->render(),
+                'read_only' => $readOnly,
+            ];
+        });
 
         return response()->json([
             'draw' => $draw,
@@ -104,6 +163,7 @@ class ModulosController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:80'],
             'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'icon' => ['nullable', 'string', 'max:60', 'regex:/^fa-[a-z0-9]+(?:-[a-z0-9]+)*$/'],
             'slug' => [
                 'required', 'string', 'max:80',
                 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/',
@@ -113,6 +173,7 @@ class ModulosController extends Controller
             'name.required' => 'El nombre del módulo es obligatorio.',
             'category_id.required' => 'La categoría es obligatoria.',
             'category_id.exists' => 'La categoría seleccionada no existe.',
+            'icon.regex' => 'El icono debe ser una clase de Font Awesome, por ejemplo fa-house.',
             'slug.required' => 'El slug es obligatorio.',
             'slug.regex' => 'El slug solo admite minúsculas, números y guiones.',
             'slug.unique' => 'Ese slug ya está en uso.',
@@ -132,7 +193,7 @@ class ModulosController extends Controller
                 'slug' => $slug,
                 'category_id' => (int) $request->input('category_id'),
                 'group' => Category::query()->find((int) $request->input('category_id'))?->name,
-                'icon' => 'fa-cube',
+                'icon' => Module::normalizeIcon($request->input('icon')),
                 'order' => (int) Module::query()->max('order') + 1,
                 'is_active' => true,
             ]);
@@ -153,6 +214,10 @@ class ModulosController extends Controller
     {
         $this->ensureAccess();
 
+        if ($module->isReadOnly()) {
+            return api_error($this->readOnlyMessage($module), 403);
+        }
+
         return api_success('Módulo encontrado.', [
             'module' => $this->moduleData($module),
         ]);
@@ -171,6 +236,10 @@ class ModulosController extends Controller
     {
         $this->ensureAccess();
 
+        if ($module->isReadOnly()) {
+            return api_error($this->readOnlyMessage($module), 403);
+        }
+
         $isInicio = $module->slug === '';
 
         $slugRules = $isInicio
@@ -180,11 +249,13 @@ class ModulosController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:80'],
             'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'icon' => ['nullable', 'string', 'max:60', 'regex:/^fa-[a-z0-9]+(?:-[a-z0-9]+)*$/'],
             'slug' => $slugRules,
         ], [
             'name.required' => 'El nombre del módulo es obligatorio.',
             'category_id.required' => 'La categoría es obligatoria.',
             'category_id.exists' => 'La categoría seleccionada no existe.',
+            'icon.regex' => 'El icono debe ser una clase de Font Awesome, por ejemplo fa-house.',
             'slug.required' => 'El slug es obligatorio.',
             'slug.regex' => 'El slug solo admite minúsculas, números y guiones.',
             'slug.unique' => 'Ese slug ya está en uso.',
@@ -204,6 +275,7 @@ class ModulosController extends Controller
                 'slug' => $isInicio ? '' : Str::slug($request->input('slug')),
                 'category_id' => $category->id,
                 'group' => $category->name,
+                'icon' => Module::normalizeIcon($request->input('icon')),
             ]);
 
             $request->session()->flash('modulos_status', 'Módulo modificado correctamente.');
@@ -229,9 +301,11 @@ class ModulosController extends Controller
             $blocker = $module->deletionBlocker();
 
             if ($blocker !== null) {
-                $message = $blocker === 'access'
-                    ? 'No se puede eliminar: el módulo tiene accesos de roles o usuarios. Revócalos en la Matriz de perfiles antes de eliminarlo.'
-                    : 'No se puede eliminar: el módulo tiene permisos asociados. Quita esos permisos antes de eliminarlo.';
+                $message = match ($blocker) {
+                    'system' => 'No se puede eliminar: «Inicio», «Login» y «Salir» son módulos del sistema y solo se pueden consultar.',
+                    'access' => 'No se puede eliminar: el módulo tiene accesos de roles o usuarios. Revócalos en la Matriz de perfiles antes de eliminarlo.',
+                    default => 'No se puede eliminar: el módulo tiene permisos asociados. Quita esos permisos antes de eliminarlo.',
+                };
 
                 return api_error($message, 409, ['blocked_by' => $blocker]);
             }
@@ -298,7 +372,7 @@ class ModulosController extends Controller
 
         if ($deleted === []) {
             return api_error(
-                'No se pudo eliminar: los módulos seleccionados tienen accesos o permisos asociados.',
+                'No se pudo eliminar: los módulos seleccionados son del sistema o tienen accesos o permisos asociados.',
                 409,
                 ['blocked' => $blocked]
             );
@@ -307,8 +381,14 @@ class ModulosController extends Controller
         $message = count($deleted) . ' módulo(s) eliminado(s).';
 
         if ($blocked !== []) {
+            $reasonLabels = [
+                'system' => 'sistema',
+                'access' => 'accesos',
+                'permissions' => 'permisos',
+            ];
+
             $reasons = array_map(
-                fn (array $item) => $item['name'] . ' (' . ($item['reason'] === 'access' ? 'accesos' : 'permisos') . ')',
+                fn (array $item) => $item['name'] . ' (' . ($reasonLabels[$item['reason']] ?? $item['reason']) . ')',
                 $blocked
             );
 
@@ -325,7 +405,15 @@ class ModulosController extends Controller
     }
 
     /**
-     * @return array{id:int,name:string,slug:string,category_id:int,category_name:string,category_slug:?string,url:string,permissions_count:int,access_count:int}
+     * Mensaje común de los módulos del sistema: solo se pueden consultar.
+     */
+    private function readOnlyMessage(Module $module): string
+    {
+        return '«' . $module->name . '» es un módulo del sistema: solo se puede consultar.';
+    }
+
+    /**
+     * @return array{id:int,name:string,slug:string,icon:string,category_id:int,category_name:string,category_slug:?string,url:string,permissions_count:int,access_count:int}
      */
     private function moduleData(Module $module): array
     {
@@ -333,6 +421,7 @@ class ModulosController extends Controller
             'id' => $module->id,
             'name' => $module->name,
             'slug' => $module->slug,
+            'icon' => $module->icon,
             'category_id' => $module->category_id,
             'category_name' => $module->category?->name,
             'category_slug' => $module->category?->slug,

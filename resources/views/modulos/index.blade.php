@@ -68,6 +68,7 @@
                         <th scope="col" class="roles-id">Id</th>
                         <th scope="col" class="roles-name">Nombre</th>
                         <th scope="col" class="roles-name">Categoría</th>
+                        <th scope="col" class="roles-icon">Icono</th>
                         <th scope="col" class="roles-id">Slug</th>
                         <th scope="col" class="roles-actions">Acciones</th>
                     </tr>
@@ -79,6 +80,7 @@
                         <th scope="col" class="roles-id">Id</th>
                         <th scope="col" class="roles-name">Nombre</th>
                         <th scope="col" class="roles-name">Categoría</th>
+                        <th scope="col" class="roles-icon">Icono</th>
                         <th scope="col" class="roles-id">Slug</th>
                         <th scope="col" class="roles-actions">Acciones</th>
                     </tr>
@@ -97,7 +99,7 @@
          data-url-index="{{ module_url('modulos') }}"
          hidden></div>
 
-    <x-app-modal id="modal-module-form" title="Nuevo módulo">
+    <x-app-modal id="modal-module-form" title="Nuevo módulo" :scrollable="true">
         <x-slot:body>
             <form id="form-module" action="{{ route('modulos.crear') }}" method="post" novalidate>
                 @csrf
@@ -121,6 +123,30 @@
                         @endforeach
                     </select>
                     <p class="field-message" id="modulos-category-error" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="field">
+                    <label for="modulos-icon" class="form-label">Icono</label>
+                    <div class="icon-field">
+                        <span class="icon-field__preview" aria-hidden="true">
+                            <i class="fa-solid fa-cube" id="modulos-icon-preview"></i>
+                        </span>
+                        <input type="text" class="form-control" id="modulos-icon" name="icon"
+                               maxlength="60" autocomplete="off" placeholder="ejemplo: fa-house">
+                    </div>
+                    <p class="form-text">
+                        Clase de Font Awesome (estilo solid). Si se deja vacío se usa
+                        <code>fa-cube</code>.
+                    </p>
+                    <div class="icon-palette" role="group" aria-label="Iconos sugeridos">
+                        @foreach ($iconSuggestions as $icon)
+                            <button type="button" class="icon-palette__item" data-icon="{{ $icon }}"
+                                    title="{{ $icon }}" aria-label="Usar el icono {{ $icon }}">
+                                <i class="fa-solid {{ $icon }}" aria-hidden="true"></i>
+                            </button>
+                        @endforeach
+                    </div>
+                    <p class="field-message" id="modulos-icon-error" role="status" aria-live="polite"></p>
                 </div>
 
                 <div class="field">
@@ -157,6 +183,13 @@
                 <div class="perfil-data__item">
                     <dt>Categoría</dt>
                     <dd id="view-module-category"></dd>
+                </div>
+                <div class="perfil-data__item">
+                    <dt>Icono</dt>
+                    <dd class="module-icon-view">
+                        <i class="fa-solid fa-cube" id="view-module-icon" aria-hidden="true"></i>
+                        <code id="view-module-icon-class"></code>
+                    </dd>
                 </div>
                 <div class="perfil-data__item">
                     <dt>Slug</dt>

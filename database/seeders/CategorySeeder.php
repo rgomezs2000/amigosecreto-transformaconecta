@@ -17,8 +17,10 @@ class CategorySeeder extends Seeder
             ['name' => 'Amigo secreto', 'slug' => 'amigo-secreto', 'sort_order' => 5],
             ['name' => 'Administración', 'slug' => 'administracion', 'sort_order' => 6],
             ['name' => 'Mensajes', 'slug' => 'mensajes', 'sort_order' => 7],
-            ['name' => 'Notificaciones', 'slug' => 'notificaciones', 'sort_order' => 8],
-            ['name' => 'Sesión', 'slug' => null, 'sort_order' => 9],
+            // Ayuda va antes de Notificaciones y Sesión en el menú.
+            ['name' => 'Ayuda', 'slug' => 'ayuda', 'sort_order' => 8],
+            ['name' => 'Notificaciones', 'slug' => 'notificaciones', 'sort_order' => 9],
+            ['name' => 'Sesión', 'slug' => null, 'sort_order' => 10],
         ];
 
         foreach ($categories as $category) {

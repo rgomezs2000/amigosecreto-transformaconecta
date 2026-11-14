@@ -48,10 +48,11 @@ class ModeracionController extends Controller
             'usuarios' => ChatBlock::query()->count(),
             'grupos' => GroupBan::query()->count(),
             // Administradores para los filtros «Gestionado por» y «Remitido a».
+            // El username acompaña al nombre dentro del combobox de búsqueda.
             'admins' => User::query()
                 ->where('role', UserRole::Admin)
                 ->orderBy('name')
-                ->get(['id', 'name']),
+                ->get(['id', 'name', 'username']),
         ]);
     }
 

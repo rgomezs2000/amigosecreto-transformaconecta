@@ -54,75 +54,79 @@
                 </div>
             </section>
 
-            <section class="matriz-card roles-search-card" aria-label="Búsqueda de reportes">
+            <section class="matriz-card roles-search-card moderacion-search-card" aria-label="Búsqueda de reportes">
                 <div class="roles-search">
                     <label for="moderacion-search" class="form-label">Buscar reporte</label>
                     <input type="search" class="form-control" id="moderacion-search"
                            placeholder="Motivo, persona o mensaje..." autocomplete="off">
                 </div>
 
-                <div class="moderacion-filter" id="moderacion-report-filter">
-                    <label for="moderacion-filter-type" class="form-label">Filtrar por</label>
-                    <select class="form-select" id="moderacion-filter-type">
-                        <option value="all">Todos los reportes</option>
-                        <option value="date">Por fecha</option>
-                        <option value="status">Estado</option>
-                        <option value="manager">Gestionado por</option>
-                        <option value="referred">Remitido a</option>
-                    </select>
-
-                    <div class="moderacion-filter__panel" id="moderacion-filter-date" hidden>
-                        <label class="moderacion-filter__field">
-                            <span>Desde</span>
-                            <input type="datetime-local" class="form-control" id="moderacion-filter-from">
-                        </label>
-                        <label class="moderacion-filter__field">
-                            <span>Hasta</span>
-                            <input type="datetime-local" class="form-control" id="moderacion-filter-to">
-                        </label>
+                {{-- Mismo diseño de filtros que Usuarios: «Filtrar por» y el
+                     campo del filtro elegido en la misma línea. --}}
+                <div class="matriz-filter-card">
+                    <div class="matriz-filter">
+                        <label for="moderacion-filter-type" class="form-label">Filtrar por</label>
+                        <select class="form-select" id="moderacion-filter-type">
+                            <option value="all">Todos los reportes</option>
+                            <option value="date">Por fecha</option>
+                            <option value="status">Estado</option>
+                            <option value="manager">Gestionado por</option>
+                            <option value="referred">Remitido a</option>
+                        </select>
                     </div>
 
-                    <div class="moderacion-filter__panel" id="moderacion-filter-status-panel" hidden>
-                        <label class="moderacion-filter__field">
-                            <span>Estado</span>
-                            <select class="form-select" id="moderacion-filter-status">
-                                <option value="pendiente">Por atender</option>
-                                <option value="atendiendo">Atendiendo</option>
-                                <option value="cerrado">Cerrado</option>
-                            </select>
-                        </label>
+                    <div class="matriz-filter d-none" id="moderacion-filter-from-wrap">
+                        <label for="moderacion-filter-from" class="form-label">Desde</label>
+                        <input type="datetime-local" class="form-control" id="moderacion-filter-from">
                     </div>
 
-                    <div class="moderacion-filter__panel" id="moderacion-filter-manager-panel" hidden>
-                        <label class="moderacion-filter__field">
-                            <span>Gestionado por</span>
-                            <select class="form-select" id="moderacion-filter-manager">
-                                <option value="">Todos los administradores</option>
-                                @foreach ($admins as $admin)
-                                    <option value="{{ $admin->id }}">{{ $admin->name }}</option>
-                                @endforeach
-                            </select>
-                        </label>
+                    <div class="matriz-filter d-none" id="moderacion-filter-to-wrap">
+                        <label for="moderacion-filter-to" class="form-label">Hasta</label>
+                        <input type="datetime-local" class="form-control" id="moderacion-filter-to">
                     </div>
 
-                    <div class="moderacion-filter__panel" id="moderacion-filter-referred-panel" hidden>
-                        <label class="moderacion-filter__field">
-                            <span>Remitido a</span>
-                            <select class="form-select" id="moderacion-filter-referred">
-                                <option value="">Todos los administradores</option>
-                                @foreach ($admins as $admin)
-                                    <option value="{{ $admin->id }}">{{ $admin->name }}</option>
-                                @endforeach
-                            </select>
-                        </label>
+                    <div class="matriz-filter d-none" id="moderacion-filter-status-wrap">
+                        <label for="moderacion-filter-status" class="form-label">Estado</label>
+                        <select class="form-select" id="moderacion-filter-status">
+                            <option value="pendiente">Por atender</option>
+                            <option value="atendiendo">Atendiendo</option>
+                            <option value="cerrado">Cerrado</option>
+                        </select>
                     </div>
-                </div>
 
-                <div class="roles-actions">
-                    <button type="button" class="btn btn-outline-secondary" id="moderacion-clear">
-                        <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                        <span>Limpiar</span>
-                    </button>
+                    {{-- «Gestionado por»: al activarse el filtro, el select se
+                         convierte en un select2 (CDN) con buscador por nombre
+                         o usuario, con el mismo diseño de los campos. --}}
+                    <div class="matriz-filter d-none" id="moderacion-filter-manager-wrap">
+                        <label for="moderacion-filter-manager" class="form-label">Gestionado por</label>
+                        <select class="form-select" id="moderacion-filter-manager">
+                            <option value="">Todos los administradores</option>
+                            @foreach ($admins as $admin)
+                                <option value="{{ $admin->id }}" data-username="{{ $admin->username }}">
+                                    {{ $admin->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div class="matriz-filter d-none" id="moderacion-filter-referred-wrap">
+                        <label for="moderacion-filter-referred" class="form-label">Remitido a</label>
+                        <select class="form-select" id="moderacion-filter-referred">
+                            <option value="">Todos los administradores</option>
+                            @foreach ($admins as $admin)
+                                <option value="{{ $admin->id }}" data-username="{{ $admin->username }}">
+                                    {{ $admin->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div class="matriz-filter matriz-filter__action">
+                        <button type="button" class="btn btn-outline-secondary" id="moderacion-clear">
+                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                            <span>Limpiar</span>
+                        </button>
+                    </div>
                 </div>
             </section>
 
@@ -161,36 +165,38 @@
                 </div>
             </section>
 
-            <section class="matriz-card roles-search-card" aria-label="Búsqueda de usuarios">
+            <section class="matriz-card roles-search-card moderacion-search-card" aria-label="Búsqueda de usuarios">
                 <div class="roles-search">
                     <label for="moderacion-usuarios-search" class="form-label">Buscar usuario</label>
                     <input type="search" class="form-control" id="moderacion-usuarios-search"
                            placeholder="Nombre, usuario o correo..." autocomplete="off">
                 </div>
 
-                <div class="moderacion-filter" id="moderacion-usuarios-filter">
-                    <label for="moderacion-usuarios-filter-type" class="form-label">Filtrar por</label>
-                    <select class="form-select" id="moderacion-usuarios-filter-type">
-                        <option value="all">Todos los usuarios</option>
-                        <option value="role">Por rol</option>
-                    </select>
-
-                    <div class="moderacion-filter__panel" id="moderacion-usuarios-filter-role" hidden>
-                        <label class="moderacion-filter__field">
-                            <span>Rol</span>
-                            <select class="form-select" id="moderacion-usuarios-role">
-                                <option value="admin">Administrador</option>
-                                <option value="participant">Participante</option>
-                            </select>
-                        </label>
+                {{-- Igual que Usuarios: «Filtrar por» y el filtro elegido en la
+                     misma línea. El rol es una lista simple, sin buscador. --}}
+                <div class="matriz-filter-card">
+                    <div class="matriz-filter">
+                        <label for="moderacion-usuarios-filter-type" class="form-label">Filtrar por</label>
+                        <select class="form-select" id="moderacion-usuarios-filter-type">
+                            <option value="all">Todos los usuarios</option>
+                            <option value="role">Por rol</option>
+                        </select>
                     </div>
-                </div>
 
-                <div class="roles-actions">
-                    <button type="button" class="btn btn-outline-secondary" id="moderacion-usuarios-clear">
-                        <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                        <span>Limpiar</span>
-                    </button>
+                    <div class="matriz-filter d-none" id="moderacion-usuarios-filter-role-wrap">
+                        <label for="moderacion-usuarios-role" class="form-label">Rol</label>
+                        <select class="form-select" id="moderacion-usuarios-role">
+                            <option value="admin">Administrador</option>
+                            <option value="participant">Participante</option>
+                        </select>
+                    </div>
+
+                    <div class="matriz-filter matriz-filter__action">
+                        <button type="button" class="btn btn-outline-secondary" id="moderacion-usuarios-clear">
+                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                            <span>Limpiar</span>
+                        </button>
+                    </div>
                 </div>
             </section>
 
@@ -489,11 +495,16 @@
 
 @push('head')
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+    {{-- Select2 (buscador dentro de los selects de administradores) por CDN,
+         como el resto de librerías del proyecto. --}}
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css">
 @endpush
 
 @push('vendor')
     <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 @endpush
 
 @push('scripts')

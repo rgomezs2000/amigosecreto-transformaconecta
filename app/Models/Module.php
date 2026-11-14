@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -12,6 +13,12 @@ use Illuminate\Support\Str;
 
 class Module extends Model
 {
+    /**
+     * Icono por defecto: se usa cuando el módulo no tiene uno asignado, para
+     * que menús, perfiles y el inicio nunca queden sin icono.
+     */
+    public const DEFAULT_ICON = 'fa-cube';
+
     protected $fillable = [
         'code',
         'name',
@@ -37,6 +44,29 @@ class Module extends Model
     public function getRouteKeyName(): string
     {
         return 'slug';
+    }
+
+    /**
+     * Icono del módulo: clase de Font Awesome guardada en la base de datos
+     * (por ejemplo «fa-house»). El menú, el inicio y la matriz de perfiles lo
+     * leen de aquí, así que al cambiarlo cambia en todas partes.
+     */
+    protected function icon(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value) => filled($value) ? $value : self::DEFAULT_ICON,
+            set: fn (?string $value) => filled($value) ? trim((string) $value) : self::DEFAULT_ICON,
+        );
+    }
+
+    /**
+     * Normaliza una clase de icono recibida del formulario.
+     */
+    public static function normalizeIcon(?string $icon): string
+    {
+        $icon = mb_strtolower(trim((string) $icon));
+
+        return $icon !== '' ? $icon : self::DEFAULT_ICON;
     }
 
     /**
@@ -152,6 +182,24 @@ class Module extends Model
         $categorySlug = $this->category?->slug;
 
         return trim(($categorySlug ? $categorySlug.'/' : '').$this->slug, '/');
+    }
+
+    /**
+     * Códigos de los módulos del sistema: sostienen rutas propias de la
+     * aplicación (inicio, login y salir), por eso son de solo lectura.
+     *
+     * @var array<int, string>
+     */
+    public const SYSTEM_CODES = ['inicio', 'login', 'logout'];
+
+    /**
+     * Módulo del sistema: se ve en el listado, pero no se modifica ni se
+     * elimina. Inicio, además, no tiene slug porque vive en la raíz.
+     */
+    public function isReadOnly(): bool
+    {
+        return blank($this->slug)
+            || in_array(static::canonicalCode($this->code), self::SYSTEM_CODES, true);
     }
 
     /**
@@ -322,11 +370,16 @@ class Module extends Model
     }
 
     /**
+     * "system"       → módulo del sistema (Inicio, Login, Salir): solo lectura.
      * "access"       → tiene accesos de perfiles/usuarios (matriz).
      * "permissions"  → tiene permisos asociados.
      */
     public function deletionBlocker(): ?string
     {
+        if ($this->isReadOnly()) {
+            return 'system';
+        }
+
         if ($this->profilePermissions()->exists()) {
             return 'access';
         }

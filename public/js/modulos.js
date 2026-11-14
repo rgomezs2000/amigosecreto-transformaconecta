@@ -27,11 +27,17 @@
         var formModal = formModalElement ? window.bootstrap.Modal.getOrCreateInstance(formModalElement) : null;
         var $name = $('#modulos-name');
         var $category = $('#modulos-category');
+        var $icon = $('#modulos-icon');
+        var $iconPreview = $('#modulos-icon-preview');
         var $slug = $('#modulos-slug');
         var $ruta = $('#modulos-ruta');
         var $nameError = $('#modulos-name-error');
         var $categoryError = $('#modulos-category-error');
+        var $iconError = $('#modulos-icon-error');
         var $slugError = $('#modulos-slug-error');
+
+        var DEFAULT_ICON = 'fa-cube';
+        var ICON_PATTERN = /^fa-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
         if (formModalElement) {
             formModalElement.addEventListener('shown.bs.modal', function () {
@@ -54,6 +60,34 @@
         function selectedCategorySlug() {
             return $category.find('option:selected').data('slug') || '';
         }
+
+        // Vista previa del icono: muestra la clase escrita o la de por defecto.
+        function updateIconPreview() {
+            var icon = $.trim($icon.val());
+
+            $iconPreview.attr('class', 'fa-solid ' + (icon || DEFAULT_ICON));
+        }
+
+        $icon.on('input', function () {
+            var clean = this.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+
+            if (clean !== this.value) {
+                this.value = clean;
+            }
+
+            updateIconPreview();
+            $iconError.text('').removeAttr('data-kind');
+        });
+
+        // Paleta de iconos sugeridos: rellena el campo con la clase elegida.
+        $('#modal-module-form').on('click', '.icon-palette__item', function () {
+            $icon.val($(this).data('icon'));
+            updateIconPreview();
+            $iconError.text('').removeAttr('data-kind');
+            $icon.trigger('focus');
+        });
+
+        updateIconPreview();
 
         function updateRuta() {
             var categorySlug = selectedCategorySlug();
@@ -150,11 +184,12 @@
                 { data: 'id', className: 'roles-id' },
                 { data: 'name', className: 'roles-name' },
                 { data: 'category', orderable: false, className: 'roles-name' },
+                { data: 'icon', orderable: false, searchable: false, className: 'roles-icon' },
                 { data: 'slug', className: 'roles-id' },
                 { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
             ],
             columnDefs: [
-                { orderable: false, targets: [0, 1, 3, 5] }
+                { orderable: false, targets: [0, 1, 3, 4, 6] }
             ],
             order: [[2, 'asc']],
             pageLength: 10,
@@ -225,6 +260,7 @@
         function clearErrors() {
             $nameError.text('').removeAttr('data-kind');
             $categoryError.text('').removeAttr('data-kind');
+            $iconError.text('').removeAttr('data-kind');
             $slugError.text('').removeAttr('data-kind');
         }
 
@@ -233,8 +269,10 @@
             $('#modal-module-form-title').text(module ? 'Modificar módulo' : 'Nuevo módulo');
             $name.val(module ? module.name : '');
             $category.val(module ? module.category_id : '');
+            $icon.val(module ? module.icon || DEFAULT_ICON : DEFAULT_ICON);
             $slug.val(module ? module.slug : '');
             clearErrors();
+            updateIconPreview();
             updateRuta();
 
             if (formModal) {
@@ -255,6 +293,7 @@
             var id = $('#modulos-form-id').val();
             var name = $.trim($name.val());
             var categoryId = $category.val();
+            var icon = $.trim($icon.val());
             var slug = $.trim($slug.val());
             var editing = !!id;
             var isInicio = editing && slug === '';
@@ -268,6 +307,11 @@
 
             if (!categoryId) {
                 showFieldError($category, $categoryError, 'Selecciona una categoría.');
+                return;
+            }
+
+            if (icon && !ICON_PATTERN.test(icon)) {
+                showFieldError($icon, $iconError, 'Usa una clase de Font Awesome, por ejemplo fa-house.');
                 return;
             }
 
@@ -285,6 +329,7 @@
                         _token: token,
                         name: name,
                         category_id: categoryId,
+                        icon: icon,
                         slug: slug
                     }
                 }).done(function (response) {
@@ -298,6 +343,9 @@
                         }
                         if (response.errors.category_id) {
                             showFieldError($category, $categoryError, response.errors.category_id[0]);
+                        }
+                        if (response.errors.icon) {
+                            showFieldError($icon, $iconError, response.errors.icon[0]);
                         }
                         if (response.errors.slug) {
                             showFieldError($slug, $slugError, response.errors.slug[0]);
@@ -334,6 +382,11 @@
                     $('#view-module-id').text(module.id);
                     $('#view-module-name').text(module.name);
                     $('#view-module-category').text(module.category_name || '—');
+
+                    var icon = module.icon || DEFAULT_ICON;
+                    $('#view-module-icon').attr('class', 'fa-solid ' + icon);
+                    $('#view-module-icon-class').text(icon);
+
                     $('#view-module-slug').text(module.slug || '—');
                     $('#view-module-permissions').text(module.permissions_count);
                     $('#view-module-access').text(module.access_count);

@@ -26,6 +26,8 @@ class DatabaseSeeder extends Seeder
             AdminUserSeeder::class,
             // Después del administrador: le concede los módulos exclusivos.
             SuperAdminAccessSeeder::class,
+            // Contenido estático del centro de ayuda (Acerca de, Guía y FAQ).
+            HelpContentSeeder::class,
         ]);
     }
 }

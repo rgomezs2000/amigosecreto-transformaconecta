@@ -39,6 +39,12 @@ class AccessSeeder extends Seeder
             'restablecer-dinamica' => ['view'],
             'chat' => ['view'],
 
+            // Centro de ayuda: los tres módulos activos son para todos.
+            'acerca-de' => ['view'],
+            'ayuda' => ['view'],
+            'faq' => ['view'],
+            'contacto-soporte' => ['view'],
+
             'asignar-amigo' => ['assign'],
             'ver-tu-amigo' => ['view'],
             'obsequios' => ['gifts'],
@@ -95,6 +101,10 @@ class AccessSeeder extends Seeder
             'lista-de-deseos',
             'usuarios-obsequiados',
             'pistas',
+            'acerca-de',
+            'ayuda',
+            'faq',
+            'contacto-soporte',
             'login',
             'logout',
         ];
@@ -109,6 +119,10 @@ class AccessSeeder extends Seeder
             'intercambio-de-pista',
             'gran-revelacion',
             'notificaciones',
+            'acerca-de',
+            'ayuda',
+            'faq',
+            'contacto-soporte',
             'login',
             'logout',
         ];

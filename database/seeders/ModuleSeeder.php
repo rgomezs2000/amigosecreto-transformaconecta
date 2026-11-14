@@ -49,6 +49,15 @@ class ModuleSeeder extends Seeder
             ['code' => 'obsequios', 'name' => 'Obsequios', 'slug' => 'obsequios', 'group' => 'Amigo secreto', 'icon' => 'fa-gift', 'order' => 110],
             ['code' => 'notificaciones', 'name' => 'Notificaciones', 'slug' => 'notificaciones', 'group' => 'Notificaciones', 'icon' => 'fa-bell', 'order' => 100],
 
+            // Centro de ayuda: contenido estático guardado en help_articles.
+            // La URL de la guía es /ayuda/guia para no repetir la categoría.
+            ['code' => 'acerca-de', 'name' => 'Acerca de', 'slug' => 'acerca-de', 'group' => 'Ayuda', 'icon' => 'fa-circle-info', 'order' => 10],
+            ['code' => 'ayuda', 'name' => 'Ayuda', 'slug' => 'guia', 'group' => 'Ayuda', 'icon' => 'fa-book-open', 'order' => 20],
+            ['code' => 'faq', 'name' => 'FAQ', 'slug' => 'faq', 'group' => 'Ayuda', 'icon' => 'fa-circle-question', 'order' => 30],
+            // Visible desde el menú; su pantalla sigue sin lógica y muestra el
+            // marcador de posición hasta que se conecte el controlador.
+            ['code' => 'contacto-soporte', 'name' => 'Contacto y soporte', 'slug' => 'contacto-soporte', 'group' => 'Ayuda', 'icon' => 'fa-headset', 'order' => 40],
+
             // Administradores: reportes y gestión del amigo secreto.
             ['code' => 'usuarios-obsequiados', 'name' => 'Usuarios obsequiados', 'slug' => 'usuarios-obsequiados', 'group' => 'Amigo secreto', 'icon' => 'fa-gift', 'order' => 150],
             // Monitoreo de las pistas que se emiten a cada amigo secreto.

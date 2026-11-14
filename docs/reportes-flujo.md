@@ -59,8 +59,9 @@ conversación y acciones.
 - **Remitido a**: último administrador al que se remitió el caso; «—» si nunca
   se remitió.
 
-En **Filtrar por** hay ahora dos criterios más, cada uno con su combobox de
-administradores:
+En **Filtrar por** hay ahora dos criterios más, cada uno con su select2 de
+administradores (se escribe para buscar por nombre o usuario dentro de la lista;
+la librería se carga por CDN, como el resto del frontend):
 
 - **Gestionado por**: deja los casos que ese administrador tomó originalmente.
 - **Remitido a**: deja los casos remitidos a ese administrador (último destino).

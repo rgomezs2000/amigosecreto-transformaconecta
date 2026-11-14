@@ -432,10 +432,39 @@ class ReportesRemisionTest extends TestCase
             ->assertOk()
             ->assertSee('Gestionado por')
             ->assertSee('Remitido a')
+            // Los filtros son selects que se convierten en select2 al abrirse.
             ->assertSee('id="moderacion-filter-manager"', false)
             ->assertSee('id="moderacion-filter-referred"', false)
             ->assertSee('id="moderacion-detail-manager"', false)
             ->assertSee('id="moderacion-detail-referred"', false);
+    }
+
+    public function test_los_filtros_de_administradores_usan_select2_por_cdn(): void
+    {
+        [$adminA] = $this->escenario();
+
+        $this->actingAs($adminA)
+            ->get(module_url('moderacion'))
+            ->assertOk()
+            ->assertSee('select2@4.1.0-rc.0/dist/css/select2.min.css', false)
+            ->assertSee('select2@4.1.0-rc.0/dist/js/select2.min.js', false)
+            ->assertSee('select2-bootstrap-5-theme', false);
+    }
+
+    public function test_los_filtros_usan_el_mismo_diseño_que_usuarios(): void
+    {
+        [$adminA] = $this->escenario();
+
+        $html = $this->actingAs($adminA)
+            ->get(module_url('moderacion'))
+            ->assertOk()
+            ->assertSee('matriz-filter-card', false)
+            ->getContent();
+
+        // El rol de Bloqueos es una lista simple: no lleva buscador.
+        $this->assertStringContainsString('id="moderacion-usuarios-role"', $html);
+        $this->assertStringNotContainsString('moderacion-usuarios-role-search', $html);
+        $this->assertStringNotContainsString('moderacion-filter__panel', $html);
     }
 
     public function test_la_pantalla_tiene_el_modal_de_remision(): void

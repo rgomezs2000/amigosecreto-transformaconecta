@@ -11,6 +11,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 class GoogleAuthController extends Controller
@@ -18,12 +19,21 @@ class GoogleAuthController extends Controller
     /**
      * Inicia el flujo OAuth de Google.
      */
-    public function googleLogin(Client $client): RedirectResponse
+    public function googleLogin(Request $request, Client $client): RedirectResponse
     {
         try {
             if (! $this->isConfigured()) {
                 return redirect()->route('login', ['google' => 'not_configured']);
             }
+
+            // Obliga a elegir/validar la cuenta de Google en cada inicio. Se
+            // configura en el cliente para que no agregue approval_prompt,
+            // que es incompatible con prompt.
+            $state = Str::random(40);
+            $request->session()->put('google.oauth_state', $state);
+
+            $client->setPrompt('select_account');
+            $client->setState($state);
 
             return redirect()->away($client->createAuthUrl());
         } catch (Throwable $exception) {
@@ -43,6 +53,14 @@ class GoogleAuthController extends Controller
         try {
             if (! $request->filled('code')) {
                 return $this->result($request, 'cancelled');
+            }
+
+            $expectedState = $request->session()->pull('google.oauth_state');
+            $receivedState = (string) $request->query('state', '');
+
+            if (! is_string($expectedState) || $expectedState === ''
+                || ! hash_equals($expectedState, $receivedState)) {
+                return $this->result($request, 'error');
             }
 
             $client->authenticate($request->query('code'));

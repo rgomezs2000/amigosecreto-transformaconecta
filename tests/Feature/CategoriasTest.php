@@ -111,10 +111,10 @@ class CategoriasTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/categorias/datos?' . $baseQuery)
+            ->getJson('/categorias/datos?'.$baseQuery)
             ->assertOk()
-            ->assertJsonPath('recordsTotal', 5)
-            ->assertJsonPath('recordsFiltered', 5)
+            ->assertJsonPath('recordsTotal', 6)
+            ->assertJsonPath('recordsFiltered', 6)
             ->assertJsonPath('data.0.name', 'Administración');
 
         $filteredQuery = http_build_query([
@@ -126,7 +126,7 @@ class CategoriasTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/categorias/datos?' . $filteredQuery)
+            ->getJson('/categorias/datos?'.$filteredQuery)
             ->assertOk()
             ->assertJsonPath('recordsFiltered', 1)
             ->assertJsonPath('data.0.name', 'Usuarios');
@@ -174,12 +174,12 @@ class CategoriasTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/categorias/' . $category->id)
+            ->getJson('/categorias/'.$category->id)
             ->assertOk()
             ->assertJsonPath('category.name', 'General');
 
         $this->actingAs($admin)
-            ->getJson('/categorias/' . $category->id . '/ver')
+            ->getJson('/categorias/'.$category->id.'/ver')
             ->assertOk()
             ->assertJsonPath('category.name', 'General')
             ->assertJsonPath('category.modules_count', 0);
@@ -197,7 +197,7 @@ class CategoriasTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->putJson('/categorias/' . $category->id, ['name' => 'General actualizada'])
+            ->putJson('/categorias/'.$category->id, ['name' => 'General actualizada'])
             ->assertOk()
             ->assertJson(['success' => true]);
 
@@ -225,7 +225,7 @@ class CategoriasTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->deleteJson('/categorias/' . $category->id)
+            ->deleteJson('/categorias/'.$category->id)
             ->assertStatus(409)
             ->assertJson(['success' => false, 'blocked_by' => 'modules']);
 
@@ -244,7 +244,7 @@ class CategoriasTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->deleteJson('/categorias/' . $category->id)
+            ->deleteJson('/categorias/'.$category->id)
             ->assertOk()
             ->assertJson(['success' => true]);
 

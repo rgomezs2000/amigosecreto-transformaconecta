@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Http\Controllers\AyudaController;
 use App\Http\Controllers\CategoriasController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DinamicaController;
@@ -54,6 +55,10 @@ final class ModulePages
         'ver-tu-amigo' => ['controller' => VerTuAmigoController::class, 'action' => 'index'],
         'participantes' => ['controller' => ParticipantesController::class, 'action' => 'index'],
         'usuarios-asociados' => ['controller' => UsuariosAsociadosController::class, 'action' => 'index'],
+        // Centro de ayuda: las tres pantallas son estáticas y leen la base.
+        'acerca-de' => ['controller' => AyudaController::class, 'action' => 'acercaDe'],
+        'ayuda' => ['controller' => AyudaController::class, 'action' => 'guia'],
+        'faq' => ['controller' => AyudaController::class, 'action' => 'faq'],
     ];
 
     /**

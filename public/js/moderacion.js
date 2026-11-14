@@ -96,6 +96,27 @@
             return $('<div>').text(value == null ? '' : value).html();
         }
 
+        /**
+         * Datos de la fila a la que pertenece un botón de la tabla.
+         *
+         * En móvil, phablet y tablet DataTables Responsive oculta columnas y
+         * pinta los botones dentro de una fila hija (`tr.child`); hay que subir
+         * a la fila real para poder leer sus datos.
+         */
+        function rowDataFor(table, $element) {
+            var $row = $element.closest('tr');
+
+            if (!$row.length) {
+                return null;
+            }
+
+            if ($row.hasClass('child') || $row.hasClass('dtrgrow')) {
+                $row = $row.prev('tr');
+            }
+
+            return table.row($row).data() || null;
+        }
+
         function reportFilterData() {
             return {
                 filter_type: $('#moderacion-filter-type').val() || 'all',
@@ -107,13 +128,204 @@
             };
         }
 
+        /* ------------------------------------------------------------------
+           Filtros de administrador con Select2
+
+           El <select> sigue siendo el valor del filtro (lo lee
+           reportFilterData). Select2 le agrega el buscador por nombre o
+           @usuario y se inicializa al mostrar el filtro, no antes: así mide
+           bien su ancho y no se carga en las otras pestañas.
+           ------------------------------------------------------------------ */
+
+        function select2FilterOptions() {
+            return {
+                theme: 'bootstrap-5',
+                width: '100%',
+                language: {
+                    noResults: function () {
+                        return 'Sin coincidencias';
+                    },
+                    searching: function () {
+                        return 'Buscando...';
+                    }
+                },
+                // Además del nombre, busca dentro del usuario de la cuenta.
+                matcher: function (params, data) {
+                    var term = $.trim(params.term || '').toLowerCase();
+
+                    if (term === '') {
+                        return data;
+                    }
+
+                    var username = $(data.element).attr('data-username') || '';
+                    var haystack = (data.text + ' ' + username).toLowerCase();
+
+                    return haystack.indexOf(term) === -1 ? null : data;
+                },
+                templateResult: function (data) {
+                    if (!data.id) {
+                        return data.text;
+                    }
+
+                    var $option = $('<span class="moderacion-select2-option">')
+                        .append($('<span>').text(data.text));
+                    var username = $(data.element).attr('data-username');
+
+                    if (username) {
+                        $option.append($('<small>').text('@' + username));
+                    }
+
+                    return $option;
+                }
+            };
+        }
+
+        function isSelect2Ready($select) {
+            return $select.length > 0 && $.fn.select2 !== undefined
+                && $select.hasClass('select2-hidden-accessible');
+        }
+
+        function activateFilterSelect2(selector) {
+            var $select = $(selector);
+
+            if (!$select.length || $.fn.select2 === undefined) {
+                return;
+            }
+
+            if ($select.hasClass('select2-hidden-accessible')) {
+                return;
+            }
+
+            $select.select2(select2FilterOptions());
+        }
+
+        function closeFilterSelect2(selector) {
+            var $select = $(selector);
+
+            if (isSelect2Ready($select)) {
+                $select.select2('close');
+            }
+        }
+
+        // Deja el select en "todos" sin disparar la recarga del listado.
+        function resetFilterSelect2(selector) {
+            var $select = $(selector);
+
+            if (!$select.length) {
+                return;
+            }
+
+            $select.val('');
+
+            if (isSelect2Ready($select)) {
+                $select.trigger('change.select2');
+            }
+        }
+
+        /* Select2 elige la dirección del desplegable al abrirlo y la conserva:
+           si el combo se abrió cerca del borde inferior queda hacia arriba
+           aunque después se desplace la página y ya haya espacio abajo. Aquí
+           se recoloca en cada desplazamiento, siempre abajo si cabe y arriba
+           solo cuando no hay otra opción. */
+        var repositionTimer = null;
+
+        // En diferido: Select2 también recoloca en su propio manejador de scroll
+        // y su decisión no debe pisar esta corrección. Un temporizador de 0 ms
+        // se ejecuta después de esos manejadores y antes de pintar.
+        function runAfterScrollHandlers(callback) {
+            return window.setTimeout(callback, 0);
+        }
+
+        function placeFilterDropdown(id) {
+            var $select = $('#' + id);
+            var results = document.getElementById('select2-' + id + '-results');
+
+            if (!results || !isSelect2Ready($select)) {
+                return;
+            }
+
+            var $control = $select.closest('.matriz-filter').find('.select2-container');
+            var $panel = $(results).closest('.select2-dropdown');
+
+            if (!$control.hasClass('select2-container--open') || !$panel.length) {
+                return;
+            }
+
+            var rect = $control[0].getBoundingClientRect();
+            var panelRect = $panel[0].getBoundingClientRect();
+            var height = panelRect.height;
+            var roomBelow = window.innerHeight - rect.bottom;
+            var roomAbove = rect.top;
+            var above = roomBelow < height && roomAbove > roomBelow;
+            var delta = Math.round((above ? rect.top - height : rect.bottom) - panelRect.top);
+
+            // Solo se corrige la diferencia: el desplegable de Select2 se cuelga
+            // del body y su posición real no siempre está en coordenadas del
+            // documento, así que moverlo por diferencia evita suponerlo.
+            if (delta !== 0) {
+                $panel.parent().css('top', '+=' + delta + 'px');
+            }
+
+            $control.toggleClass('select2-container--above', above)
+                .toggleClass('select2-container--below', !above);
+            $panel.toggleClass('select2-dropdown--above', above)
+                .toggleClass('select2-dropdown--below', !above);
+        }
+
+        function placeOpenFilterDropdowns() {
+            placeFilterDropdown('moderacion-filter-manager');
+            placeFilterDropdown('moderacion-filter-referred');
+        }
+
+        function scheduleFilterReposition() {
+            if (repositionTimer !== null) {
+                return;
+            }
+
+            // En diferido, después de que Select2 haga su propio reajuste:
+            // su decisión no debe pisar esta.
+            repositionTimer = runAfterScrollHandlers(function () {
+                repositionTimer = null;
+                placeOpenFilterDropdowns();
+            });
+        }
+
+        function watchFilterDropdowns() {
+            if ($.fn.select2 === undefined) {
+                return;
+            }
+
+            $('#moderacion-filter-manager, #moderacion-filter-referred').on('select2:open', function () {
+                runAfterScrollHandlers(placeOpenFilterDropdowns);
+            });
+
+            $(window).on('scroll.filterSelect2 resize.filterSelect2', scheduleFilterReposition);
+        }
+
+        watchFilterDropdowns();
+
         function toggleReportFilter() {
             var type = $('#moderacion-filter-type').val() || 'all';
+            var manager = type === 'manager';
+            var referred = type === 'referred';
 
-            $('#moderacion-filter-date').prop('hidden', type !== 'date');
-            $('#moderacion-filter-status-panel').prop('hidden', type !== 'status');
-            $('#moderacion-filter-manager-panel').prop('hidden', type !== 'manager');
-            $('#moderacion-filter-referred-panel').prop('hidden', type !== 'referred');
+            $('#moderacion-filter-from-wrap, #moderacion-filter-to-wrap')
+                .toggleClass('d-none', type !== 'date');
+            $('#moderacion-filter-status-wrap').toggleClass('d-none', type !== 'status');
+            $('#moderacion-filter-manager-wrap').toggleClass('d-none', !manager);
+            $('#moderacion-filter-referred-wrap').toggleClass('d-none', !referred);
+
+            if (manager) {
+                activateFilterSelect2('#moderacion-filter-manager');
+            } else {
+                closeFilterSelect2('#moderacion-filter-manager');
+            }
+
+            if (referred) {
+                activateFilterSelect2('#moderacion-filter-referred');
+            } else {
+                closeFilterSelect2('#moderacion-filter-referred');
+            }
         }
 
         var reportesTable = $('#moderacion-table').DataTable({
@@ -176,8 +388,8 @@
             $('#moderacion-filter-from').val('');
             $('#moderacion-filter-to').val('');
             $('#moderacion-filter-status').val('pendiente');
-            $('#moderacion-filter-manager').val('');
-            $('#moderacion-filter-referred').val('');
+            resetFilterSelect2('#moderacion-filter-manager');
+            resetFilterSelect2('#moderacion-filter-referred');
             toggleReportFilter();
             reportesTable.search('').ajax.reload(null, true);
         });
@@ -198,7 +410,7 @@
         toggleReportFilter();
 
         $('#moderacion-table').on('click', '.moderacion-detail', function () {
-            var row = reportesTable.row($(this).closest('tr')).data();
+            var row = rowDataFor(reportesTable, $(this));
 
             if (!row) {
                 return;
@@ -1236,8 +1448,8 @@
         }
 
         function toggleUsuariosFilter() {
-            $('#moderacion-usuarios-filter-role').prop(
-                'hidden',
+            $('#moderacion-usuarios-filter-role-wrap').toggleClass(
+                'd-none',
                 ($('#moderacion-usuarios-filter-type').val() || 'all') !== 'role'
             );
         }

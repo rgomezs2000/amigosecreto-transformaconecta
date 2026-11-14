@@ -76,6 +76,8 @@ class ModulosTest extends TestCase
             ->assertSee('Buscar módulo')
             ->assertSee('Nuevo módulo')
             ->assertSee('Eliminar módulos')
+            ->assertSee('Icono')
+            ->assertSee('modulos-icon', false)
             ->assertSee('modulos-table', false);
     }
 
@@ -223,6 +225,59 @@ class ModulosTest extends TestCase
         $this->assertSame('/maestros/reportes', parse_url($module->url(), PHP_URL_PATH));
     }
 
+    public function test_crear_modulo_guarda_el_icono_elegido(): void
+    {
+        $admin = $this->adminWithModulosModule();
+
+        $category = Category::query()->where('name', 'Maestros')->firstOrFail();
+
+        $this->actingAs($admin)
+            ->postJson('/modulos', [
+                'name' => 'Reportes',
+                'category_id' => $category->id,
+                'slug' => 'reportes',
+                'icon' => 'fa-chart-simple',
+            ])
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseHas('modules', [
+            'slug' => 'reportes',
+            'icon' => 'fa-chart-simple',
+        ]);
+
+        // Sin icono se usa el de por defecto, nunca una columna vacía.
+        $this->actingAs($admin)
+            ->postJson('/modulos', [
+                'name' => 'Ajustes',
+                'category_id' => $category->id,
+                'slug' => 'ajustes',
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseHas('modules', [
+            'slug' => 'ajustes',
+            'icon' => Module::DEFAULT_ICON,
+        ]);
+    }
+
+    public function test_crear_modulo_rechaza_un_icono_invalido(): void
+    {
+        $admin = $this->adminWithModulosModule();
+
+        $category = Category::query()->where('name', 'Maestros')->firstOrFail();
+
+        $this->actingAs($admin)
+            ->postJson('/modulos', [
+                'name' => 'Reportes',
+                'category_id' => $category->id,
+                'slug' => 'reportes',
+                'icon' => 'icono roto',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['icon']);
+    }
+
     public function test_crear_modulo_valida_campos_y_slug_unico(): void
     {
         $admin = $this->adminWithModulosModule();
@@ -300,6 +355,80 @@ class ModulosTest extends TestCase
 
         $this->assertSame('Reportes avanzados', $module->fresh()->name);
         $this->assertSame('reportes-avanzados', $module->fresh()->slug);
+    }
+
+    public function test_modificar_modulo_actualiza_el_icono(): void
+    {
+        $admin = $this->adminWithModulosModule();
+
+        $category = Category::query()->where('name', 'Maestros')->firstOrFail();
+
+        $module = Module::create([
+            'name' => 'Reportes',
+            'slug' => 'reportes',
+            'category_id' => $category->id,
+            'group' => 'Maestros',
+            'icon' => 'fa-cube',
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->putJson('/modulos/'.$module->id, [
+                'name' => 'Reportes',
+                'category_id' => $category->id,
+                'slug' => 'reportes',
+                'icon' => 'fa-chart-simple',
+            ])
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->assertSame('fa-chart-simple', $module->fresh()->icon);
+
+        // Si se deja vacío vuelve al icono por defecto.
+        $this->actingAs($admin)
+            ->putJson('/modulos/'.$module->id, [
+                'name' => 'Reportes',
+                'category_id' => $category->id,
+                'slug' => 'reportes',
+                'icon' => '',
+            ])
+            ->assertOk();
+
+        $this->assertSame(Module::DEFAULT_ICON, $module->fresh()->icon);
+    }
+
+    public function test_datos_devuelve_el_icono_de_cada_modulo(): void
+    {
+        $admin = $this->adminWithModulosModule();
+
+        $category = Category::query()->where('name', 'Maestros')->firstOrFail();
+
+        Module::create([
+            'name' => 'Reportes',
+            'slug' => 'reportes',
+            'category_id' => $category->id,
+            'group' => 'Maestros',
+            'icon' => 'fa-chart-simple',
+            'is_active' => true,
+        ]);
+
+        $query = http_build_query([
+            'draw' => 1,
+            'start' => 0,
+            'length' => 10,
+            'search' => ['value' => 'report'],
+            'order' => [['column' => 2, 'dir' => 'asc']],
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/modulos/datos?'.$query)
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Reportes');
+
+        $icon = (string) $response->json('data.0.icon');
+
+        $this->assertStringContainsString('fa-solid fa-chart-simple', $icon);
+        $this->assertStringContainsString('fa-chart-simple', $icon);
     }
 
     public function test_no_elimina_modulo_con_accesos(): void
@@ -417,6 +546,140 @@ class ModulosTest extends TestCase
 
         $this->assertDatabaseMissing('modules', ['id' => $libre->id]);
         $this->assertDatabaseHas('modules', ['id' => $usado->id]);
+    }
+
+    /**
+     * Crea los módulos del sistema tal como quedan en una instalación real:
+     * Inicio (sin slug), Login y Salir.
+     *
+     * @return array{inicio: Module, login: Module, logout: Module}
+     */
+    private function systemModules(): array
+    {
+        $category = Category::query()->where('name', 'Maestros')->firstOrFail();
+
+        $make = fn (string $name, string $slug, string $icon) => Module::create([
+            'name' => $name,
+            'slug' => $slug,
+            'category_id' => $category->id,
+            'group' => $category->name,
+            'icon' => $icon,
+            'is_active' => true,
+        ]);
+
+        return [
+            'inicio' => $make('Inicio', '', 'fa-house'),
+            'login' => $make('Login', 'login', 'fa-right-to-bracket'),
+            'logout' => $make('Salir', 'logout', 'fa-right-from-bracket'),
+        ];
+    }
+
+    public function test_inicio_login_y_salir_son_de_solo_lectura(): void
+    {
+        $admin = $this->adminWithModulosModule();
+        $modules = $this->systemModules();
+
+        $this->assertSame(
+            ['inicio', 'login', 'logout'],
+            array_map(fn (Module $module) => $module->code, array_values($modules))
+        );
+
+        foreach ($modules as $module) {
+            $this->assertTrue($module->isReadOnly(), $module->name.' debe ser de solo lectura');
+            $this->assertSame('system', $module->deletionBlocker());
+
+            $this->actingAs($admin)
+                ->getJson('/modulos/'.$module->id)
+                ->assertStatus(403);
+
+            $this->actingAs($admin)
+                ->putJson('/modulos/'.$module->id, [
+                    'name' => 'Otro nombre',
+                    'category_id' => $module->category_id,
+                    'slug' => 'otro-slug',
+                ])
+                ->assertStatus(403);
+
+            $this->actingAs($admin)
+                ->deleteJson('/modulos/'.$module->id)
+                ->assertStatus(409)
+                ->assertJson(['success' => false, 'blocked_by' => 'system']);
+
+            $this->assertDatabaseHas('modules', ['id' => $module->id, 'name' => $module->name]);
+        }
+
+        // Se siguen pudiendo consultar.
+        $this->actingAs($admin)
+            ->getJson('/modulos/'.$modules['inicio']->id.'/ver')
+            ->assertOk()
+            ->assertJsonPath('module.name', 'Inicio');
+    }
+
+    public function test_datos_marca_los_modulos_del_sistema_como_solo_lectura(): void
+    {
+        $admin = $this->adminWithModulosModule();
+        $inicio = $this->systemModules()['inicio'];
+
+        $category = Category::query()->where('name', 'Maestros')->firstOrFail();
+
+        Module::create([
+            'name' => 'Reportes',
+            'slug' => 'reportes',
+            'category_id' => $category->id,
+            'group' => 'Maestros',
+            'is_active' => true,
+        ]);
+
+        $query = http_build_query([
+            'draw' => 1,
+            'start' => 0,
+            'length' => 50,
+            'search' => ['value' => ''],
+            'order' => [['column' => 2, 'dir' => 'asc']],
+        ]);
+
+        $filas = collect($this->actingAs($admin)
+            ->getJson('/modulos/datos?'.$query)
+            ->assertOk()
+            ->json('data'))->keyBy('id');
+
+        $reportes = Module::query()->where('slug', 'reportes')->firstOrFail();
+
+        $this->assertTrue($filas[$inicio->id]['read_only']);
+        $this->assertStringContainsString('Solo lectura', $filas[$inicio->id]['name']);
+        $this->assertStringContainsString('fa-lock', $filas[$inicio->id]['check']);
+        $this->assertStringNotContainsString('module-checkbox', $filas[$inicio->id]['check']);
+        $this->assertStringNotContainsString('btn-module-delete', $filas[$inicio->id]['actions']);
+        $this->assertStringNotContainsString('btn-module-edit', $filas[$inicio->id]['actions']);
+        $this->assertStringContainsString('btn-module-view', $filas[$inicio->id]['actions']);
+
+        $this->assertFalse($filas[$reportes->id]['read_only']);
+        $this->assertStringContainsString('module-checkbox', $filas[$reportes->id]['check']);
+        $this->assertStringContainsString('btn-module-delete', $filas[$reportes->id]['actions']);
+    }
+
+    public function test_eliminar_varios_informa_los_modulos_del_sistema(): void
+    {
+        $admin = $this->adminWithModulosModule();
+        $inicio = $this->systemModules()['inicio'];
+
+        $category = Category::query()->where('name', 'Maestros')->firstOrFail();
+
+        $libre = Module::create([
+            'name' => 'Libre',
+            'slug' => 'libre',
+            'category_id' => $category->id,
+            'group' => 'Maestros',
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->postJson('/modulos/eliminar-varios', ['ids' => [$libre->id, $inicio->id]])
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseMissing('modules', ['id' => $libre->id]);
+        $this->assertDatabaseHas('modules', ['id' => $inicio->id]);
     }
 
     public function test_la_ruta_del_modulo_usa_categoria_y_slug(): void
