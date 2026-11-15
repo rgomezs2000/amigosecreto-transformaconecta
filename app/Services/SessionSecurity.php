@@ -104,4 +104,46 @@ class SessionSecurity
     {
         $kick->forceFill(['consumed_at' => now()])->save();
     }
+
+    /**
+     * Elimina las sesiones que dejaron de enviar latido.
+     *
+     * @return array{deleted: int, cleared: int}
+     */
+    public static function cleanupOrphans(?int $minutes = null, ?string $exceptSessionId = null): array
+    {
+        $minutes = max(1, $minutes ?? (int) config('session.orphan_minutes', 1));
+
+        if (config('session.driver') !== 'database'
+            || ! Schema::hasTable('sessions')
+            || ! Schema::hasColumn('users', 'active_session_id')) {
+            return ['deleted' => 0, 'cleared' => 0];
+        }
+
+        $cutoff = now()->subMinutes($minutes)->timestamp;
+
+        $query = DB::table('sessions')->where('last_activity', '<', $cutoff);
+
+        if ($exceptSessionId !== null && $exceptSessionId !== '') {
+            $query->where('id', '!=', $exceptSessionId);
+        }
+
+        $deleted = $query->delete();
+
+        $cleared = User::query()
+            ->whereNotNull('active_session_id')
+            ->whereNotIn('active_session_id', DB::table('sessions')->select('id'))
+            ->update(['active_session_id' => null]);
+
+        if (Schema::hasTable('session_kicks')) {
+            SessionKick::query()
+                ->where(function ($query) {
+                    $query->whereNotNull('consumed_at')
+                        ->orWhere('created_at', '<', now()->subDay());
+                })
+                ->delete();
+        }
+
+        return ['deleted' => $deleted, 'cleared' => $cleared];
+    }
 }

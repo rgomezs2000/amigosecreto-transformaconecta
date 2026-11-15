@@ -34,6 +34,19 @@ return [
 
     'lifetime' => (int) env('SESSION_LIFETIME', 120),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Minutos para considerar huérfana una sesión
+    |--------------------------------------------------------------------------
+    |
+    | Las páginas autenticadas envían un latido cada 10 segundos. Si el
+    | navegador se cierra o el dispositivo se apaga, deja de llegar y la
+    | sesión se elimina con la limpieza programada.
+    |
+    */
+
+    'orphan_minutes' => (int) env('SESSION_ORPHAN_MINUTES', 1),
+
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 
     /*
