@@ -134,6 +134,49 @@ class ChatTest extends TestCase
             ->assertOk();
     }
 
+    public function test_el_globo_de_una_reaccion_lista_a_quienes_reaccionaron(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+        $maria = $this->userWithChat('María', UserRole::Participant);
+        $pedro = $this->userWithChat('Pedro', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $messages = [];
+
+        for ($index = 1; $index <= 4; $index++) {
+            $messages[$index] = ChatMessage::create([
+                'conversation_id' => $conversation->id,
+                'user_id' => $ana->id,
+                'body' => 'Mensaje '.$index,
+            ]);
+        }
+
+        $voters = [$ana, $luis, $maria, $pedro];
+
+        for ($index = 1; $index <= 4; $index++) {
+            for ($position = 0; $position < $index; $position++) {
+                ChatReaction::create([
+                    'message_id' => $messages[$index]->id,
+                    'user_id' => $voters[$position]->id,
+                    'emoji' => '👍',
+                ]);
+            }
+        }
+
+        $response = $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
+            ->assertOk();
+
+        $response->assertJsonPath('messages.0.reactions.0.tooltip', 'Ana ha reaccionado con: 👍');
+        $response->assertJsonPath('messages.1.reactions.0.tooltip', 'Ana y Luis han reaccionado con: 👍');
+        $response->assertJsonPath('messages.2.reactions.0.tooltip', 'Ana, Luis y María han reaccionado con: 👍');
+        $response->assertJsonPath('messages.3.reactions.0.tooltip', 'Ana, Luis, María y 1 más han reaccionado con: 👍');
+        $response->assertJsonPath('messages.3.reactions.0.count', 4);
+        $response->assertJsonPath('messages.3.reactions.0.names', ['Ana', 'Luis', 'María']);
+    }
     public function test_editar_eliminar_y_reaccionar(): void
     {
         $admin = $this->userWithChat('Admin', UserRole::Admin);
@@ -168,12 +211,29 @@ class ChatTest extends TestCase
 
         $this->assertSame(2, $message->reactions()->count());
 
+        // Reaccionar con otro emoji agrega una reacción nueva, no reemplaza.
         $this->actingAs($ana)
             ->postJson('/chat/mensajes/'.$message->id.'/reaccionar', ['emoji' => '❤️'])
-            ->assertOk();
+            ->assertOk()
+            ->assertJsonPath('removed', false);
+
+        $this->assertSame(3, $message->reactions()->count());
+        $this->assertSame(
+            ['👍', '❤️'],
+            $message->reactions()->where('user_id', $ana->id)->orderBy('id')->pluck('emoji')->all()
+        );
+
+        // Volver a pulsar el mismo emoji quita esa reacción.
+        $this->actingAs($ana)
+            ->postJson('/chat/mensajes/'.$message->id.'/reaccionar', ['emoji' => '👍'])
+            ->assertOk()
+            ->assertJsonPath('removed', true);
 
         $this->assertSame(2, $message->reactions()->count());
-        $this->assertSame('❤️', $message->reactions()->where('user_id', $ana->id)->value('emoji'));
+        $this->assertSame(
+            ['❤️'],
+            $message->reactions()->where('user_id', $ana->id)->pluck('emoji')->all()
+        );
 
         $this->actingAs($admin)
             ->postJson('/chat/mensajes/'.$message->id.'/eliminar')

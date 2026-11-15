@@ -328,6 +328,9 @@
             </div>
         </div>
 
+        {{-- Globo con quiénes reaccionaron a un mensaje. --}}
+        <div class="chat-reaction-tooltip" id="chat-reaction-tooltip" role="tooltip" hidden></div>
+
         {{-- Acciones del contenido de la galería (imágenes, documentos, audios y enlaces). --}}
         <div class="chat-context-menu chat-content-menu" id="chat-content-menu" hidden>
             <button type="button" class="chat-context-item" data-content-action="copy-image">Copiar imagen</button>
@@ -520,9 +523,9 @@
                     La evidencia del mensaje se adjunta automáticamente. Puedes sumar imágenes,
                     videos, audios o documentos.
                 </p>
-                <input type="file" id="chat-report-files" multiple hidden>
             </div>
-            <ul class="chat-report-file-list" id="chat-report-file-list"></ul>
+            <input type="file" id="chat-report-files" multiple hidden>
+            <div class="chat-upload-grid" id="chat-report-file-list"></div>
         </div>
 
         <p class="field-message" id="chat-report-error" role="status" aria-live="polite"></p>
@@ -622,5 +625,6 @@
 </x-app-modal>
 
 @push('scripts')
+    <script src="{{ asset('js/chat-emojis.js') }}?v={{ filemtime(public_path('js/chat-emojis.js')) }}"></script>
     <script src="{{ asset('js/chat.js') }}?v={{ filemtime(public_path('js/chat.js')) }}"></script>
 @endpush

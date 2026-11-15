@@ -705,19 +705,60 @@ class ChatController extends Controller
             ->get()
             ->groupBy('message_id');
 
+        // Nombres de quienes reaccionaron, para el globo de ayuda.
+        $voters = ChatReaction::query()
+            ->whereIn('message_id', $ids)
+            ->with('user:id,name')
+            ->orderBy('id')
+            ->get()
+            ->groupBy(fn (ChatReaction $reaction) => $reaction->message_id.'|'.$reaction->emoji);
+
         $summary = [];
 
         foreach ($totals->groupBy('message_id') as $messageId => $rows) {
             $myEmojis = $mine->has($messageId) ? $mine->get($messageId)->pluck('emoji')->all() : [];
 
-            $summary[(int) $messageId] = $rows->map(fn ($row) => [
-                'emoji' => $row->emoji,
-                'count' => (int) $row->total,
-                'mine' => in_array($row->emoji, $myEmojis, true),
-            ])->values()->all();
+            $summary[(int) $messageId] = $rows->map(function ($row) use ($myEmojis, $voters, $messageId) {
+                $names = $voters->get($messageId.'|'.$row->emoji, collect())
+                    ->map(fn (ChatReaction $reaction) => $reaction->user?->name)
+                    ->filter()
+                    ->values()
+                    ->take(3)
+                    ->all();
+
+                return [
+                    'emoji' => $row->emoji,
+                    'count' => (int) $row->total,
+                    'mine' => in_array($row->emoji, $myEmojis, true),
+                    'names' => $names,
+                    'tooltip' => $this->reactionTooltip($names, $row->emoji, (int) $row->total),
+                ];
+            })->values()->all();
         }
 
         return $summary;
+    }
+
+    /**
+     * Texto del globo de una reacción: quiénes reaccionaron y con qué emoji.
+     *
+     * @param  array<int, string>  $names
+     */
+    private function reactionTooltip(array $names, string $emoji, int $total): string
+    {
+        if ($total <= 1 || count($names) === 1) {
+            return ($names[0] ?? 'Alguien').' ha reaccionado con: '.$emoji;
+        }
+
+        if ($total > 3) {
+            $who = $names[0].', '.$names[1].', '.$names[2].' y '.($total - 3).' más';
+        } elseif (count($names) === 2) {
+            $who = $names[0].' y '.$names[1];
+        } else {
+            $who = $names[0].', '.$names[1].' y '.$names[2];
+        }
+
+        return $who.' han reaccionado con: '.$emoji;
     }
 
     /**
@@ -1978,14 +2019,35 @@ class ChatController extends Controller
             return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
         }
 
-        $message->reactions()->where('user_id', $user->id)->where('emoji', $validator->validated()['emoji'])->delete();
+        $emoji = $validator->validated()['emoji'];
 
-        $message->reactions()->updateOrCreate(
-            ['user_id' => $user->id],
-            ['emoji' => $validator->validated()['emoji']]
-        );
+        // Cada usuario puede dejar varias reacciones distintas. Si vuelve a
+        // pulsar la misma, se quita (alterna).
+        $existing = $message->reactions()
+            ->where('user_id', $user->id)
+            ->where('emoji', $emoji)
+            ->first();
 
-        return api_success('Reacción guardada.');
+        if ($existing !== null) {
+            $existing->delete();
+            $removed = true;
+        } else {
+            $message->reactions()->create([
+                'user_id' => $user->id,
+                'emoji' => $emoji,
+            ]);
+
+            $removed = false;
+        }
+
+        // Se devuelve el estado actualizado de las reacciones del mensaje para
+        // que la burbuja se pinte al instante, sin esperar al sondeo.
+        $summary = $this->reactionSummary(collect([$message]), $user);
+
+        return api_success($removed ? 'Reacción quitada.' : 'Reacción guardada.', [
+            'removed' => $removed,
+            'reactions' => $summary[(int) $message->id] ?? [],
+        ]);
     }
 
     public function reportar(Request $request, ChatMessage $message): JsonResponse

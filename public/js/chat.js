@@ -6,12 +6,16 @@
 (function ($) {
     'use strict';
 
-    var EMOJIS = {
+    // Emojis completos y clasificados: viven en chat-emojis.js para no cargar
+    // este archivo con cientos de caracteres.
+    var EMOJIS = window.CHAT_EMOJIS || {
         'Caras': ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '😊', '🙂', '😉', '😍', '😘', '😎', '🤔', '😐', '😴', '😢', '😭', '😡', '🥳'],
         'Gestos': ['👍', '👎', '👏', '🙌', '🤝', '🙏', '💪', '👌', '✌️', '🤞', '👋', '🫶'],
         'Objetos': ['🎁', '🎉', '🎈', '🔥', '⭐', '❤️', '💚', '💙', '💜', '🧡', '💛', '✨', '💫', '🎊'],
         'Comida': ['☕', '🍫', '🍰', '🍕', '🍎', '🍓', '🍪', '🧁']
     };
+
+    var EMOJI_ICONS = window.CHAT_EMOJI_ICONS || {};
 
     $(function () {
         var $widget = $('#chat-widget');
@@ -37,6 +41,17 @@
         var token = $widget.attr('data-csrf');
         var pendingOpenId = null;
         var pendingFromUrl = false;
+
+        // El chat consulta por GET constantemente: sin esto el navegador puede
+        // servir una respuesta vieja (reacciones, votos o mensajes que no se
+        // actualizan hasta la siguiente acción).
+        $.ajaxPrefilter(function (options) {
+            var method = (options.type || 'GET').toUpperCase();
+
+            if (method === 'GET' && String(options.url || '').indexOf('/chat') !== -1) {
+                options.cache = false;
+            }
+        });
 
         try {
             var requestedConversation = new window.URLSearchParams(window.location.search).get('conversacion');
@@ -429,6 +444,18 @@
                 '</div>';
         }
 
+        /**
+         * Botón de reacción con el globo de quiénes reaccionaron.
+         */
+        function reactionChipHtml(reaction) {
+            var tooltip = reaction.tooltip || '';
+
+            return '<button type="button" class="chat-reaction' + (reaction.mine ? ' is-mine' : '') +
+                '" data-reaction="' + escape(reaction.emoji) + '"' +
+                (tooltip ? ' data-tooltip="' + escape(tooltip) + '"' : '') + '>' +
+                escape(reaction.emoji) + ' ' + reaction.count + '</button>';
+        }
+
         function messageHtml(message) {
             var attachment = '';
             var pollCard = pollHtml(message.poll, message.id);
@@ -510,11 +537,7 @@
                     '" target="_blank" rel="noopener"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Ver ubicación</a>';
             }
 
-            var reactions = (message.reactions || []).map(function (reaction) {
-                return '<button type="button" class="chat-reaction' + (reaction.mine ? ' is-mine' : '') +
-                    '" data-reaction="' + escape(reaction.emoji) + '">' +
-                    escape(reaction.emoji) + ' ' + reaction.count + '</button>';
-            }).join('');
+            var reactions = (message.reactions || []).map(reactionChipHtml).join('');
 
             var check = '';
             var linkCard = '';
@@ -820,12 +843,9 @@
             }
 
             // Reacciones: se toca solo su contenedor.
+
             if (JSON.stringify(before.reactions) !== JSON.stringify(message.reactions)) {
-                var reactions = (message.reactions || []).map(function (reaction) {
-                    return '<button type="button" class="chat-reaction' + (reaction.mine ? ' is-mine' : '') +
-                        '" data-reaction="' + escape(reaction.emoji) + '">' +
-                        escape(reaction.emoji) + ' ' + reaction.count + '</button>';
-                }).join('');
+                var reactions = (message.reactions || []).map(reactionChipHtml).join('');
                 var $reactions = $node.children('.chat-message__reactions');
 
                 if (reactions) {
@@ -851,6 +871,7 @@
         }
 
         function renderMessages() {
+
             var html = '';
             var messages = lastData.messages || [];
 
@@ -917,6 +938,7 @@
         // Aplica una respuesta incremental: añade lo nuevo y actualiza en su
         // sitio lo que cambió, sin tocar el resto de la conversación.
         function patchMessages(response) {
+
             var $box = $('#chat-messages');
 
             if (!$box.children('.chat-message').length) {
@@ -972,6 +994,148 @@
 
         // Refresca solo las burbujas indicadas (tras editar, borrar o reaccionar)
         // sin pedir el historial ni repintar el resto de la conversación.
+
+        function reactionsFromDom(messageId) {
+            var list = [];
+
+            $('#chat-messages .chat-message[data-message-id="' + messageId + '"] .chat-reaction').each(function () {
+                var parts = String($(this).text() || '').trim().split(/\s+/);
+                var count = parseInt(parts[parts.length - 1], 10);
+
+                list.push({
+                    emoji: $(this).attr('data-reaction'),
+                    count: isNaN(count) ? 1 : count,
+                    mine: $(this).hasClass('is-mine')
+                });
+            });
+
+            return list;
+        }
+
+        /**
+         * Aplica el cambio en pantalla antes de que responda el servidor: el
+         * usuario ve la reacción al instante y luego se confirma.
+         */
+        function optimisticReaction(messageId, emoji) {
+            var list = reactionsFromDom(messageId);
+            var found = null;
+
+            list.forEach(function (reaction) {
+                if (reaction.emoji === emoji) {
+                    found = reaction;
+                }
+            });
+
+            if (found === null) {
+                list.push({ emoji: emoji, count: 1, mine: true });
+            } else if (found.mine) {
+                found.count -= 1;
+
+                if (found.count <= 0) {
+                    list = list.filter(function (reaction) { return reaction !== found; });
+                } else {
+                    found.mine = false;
+                }
+            } else {
+                found.count += 1;
+                found.mine = true;
+            }
+
+            paintReactions(messageId, list);
+
+            return list;
+        }
+
+        // Cola por mensaje: las reacciones se envían de una en una para que
+        // ninguna respuesta vieja borre una reacción recién agregada.
+        var reactionQueue = {};
+        var reactionSending = {};
+
+        function queueReaction(messageId, emoji) {
+            reactionQueue[messageId] = reactionQueue[messageId] || [];
+            reactionQueue[messageId].push(emoji);
+
+            // Se pinta al instante lo que el usuario acaba de pulsar.
+            optimisticReaction(messageId, emoji);
+
+            if (reactionSending[messageId]) {
+                return;
+            }
+
+            sendNextReaction(messageId);
+        }
+
+        function sendNextReaction(messageId) {
+            var queue = reactionQueue[messageId] || [];
+            var emoji = queue.shift();
+
+            if (!emoji) {
+                reactionSending[messageId] = false;
+                return;
+            }
+
+            reactionSending[messageId] = true;
+
+            post(chatBase + '/mensajes/' + messageId + '/reaccionar', { emoji: emoji })
+                .done(function (response) {
+                    // Si quedan reacciones en cola, la última respuesta es la
+                    // que pinta el estado completo; así no se pierde ninguna.
+                    if ((reactionQueue[messageId] || []).length) {
+                        return;
+                    }
+
+                    paintReactions(messageId, (response && response.reactions) || []);
+                })
+                .fail(function (xhr) {
+                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo reaccionar.');
+                    refreshMessages([messageId]);
+                })
+                .always(function () {
+                    sendNextReaction(messageId);
+                });
+        }
+
+        /**
+         * Pinta las reacciones de un mensaje con el estado que devuelve el
+         * servidor, sin esperar al sondeo.
+         */
+        function paintReactions(messageId, reactions) {
+            var $node = $('#chat-messages .chat-message[data-message-id="' + messageId + '"]');
+
+            if (!$node.length) {
+                return;
+            }
+
+            lastLocalMutationAt = Date.now();
+
+
+            var html = (reactions || []).map(reactionChipHtml).join('');
+
+            var $box = $node.children('.chat-message__reactions');
+
+            if (html) {
+                if ($box.length) {
+                    $box.html(html);
+                } else {
+                    $node.append('<div class="chat-message__reactions">' + html + '</div>');
+                }
+            } else if ($box.length) {
+                $box.remove();
+            }
+
+
+            // El estado guardado para comparar también queda al día.
+            if (paintedMessages[messageId]) {
+                try {
+                    var stored = JSON.parse(paintedMessages[messageId]);
+                    stored.reactions = reactions || [];
+                    paintedMessages[messageId] = JSON.stringify(stored);
+                } catch (error) {
+                    // Sin caché previa: no hay nada que sincronizar.
+                }
+            }
+        }
+
         function refreshMessages(ids) {
             var list = (ids || []).filter(function (id) {
                 return parseInt(id, 10) > 0;
@@ -981,8 +1145,13 @@
                 return;
             }
 
-            $.getJSON(chatBase + '/' + currentId + '/mensajes', { ids: list })
+            // Este refresco viene de un cambio propio: invalida los sondeos que
+            // ya estaban en camino.
+            lastLocalMutationAt = Date.now();
+
+            $.getJSON(chatBase + '/' + currentId + '/mensajes', { ids: list, _ts: Date.now() })
                 .done(function (response) {
+
                     (response.recent || []).forEach(updateMessageNode);
                 });
         }
@@ -1001,17 +1170,32 @@
                 return;
             }
 
+            // Poco después de un cambio propio no se sondea: así ninguna
+            // respuesta vieja pisa la reacción o el voto recién pintados.
+            if (Date.now() - lastLocalMutationAt < 2500) {
+                return;
+            }
+
             var conversationId = currentId;
             var painted = paintedLastId > 0 && $('#chat-messages .chat-message').length > 0;
-            var data = painted ? { after_id: paintedLastId } : {};
+            var data = painted ? { after_id: paintedLastId, _ts: Date.now() } : { _ts: Date.now() };
 
             messageRequestPending = true;
+
+            var requestedAt = Date.now();
 
             $.getJSON(chatBase + '/' + conversationId + '/mensajes', data)
                 .done(function (response) {
                     messageFailures = 0;
 
                     if (conversationId !== currentId) {
+                        return;
+                    }
+
+                    // Respuesta anterior al último cambio propio: se descarta
+                    // para no revertir la reacción o el voto recién aplicado.
+                    if (requestedAt < lastLocalMutationAt) {
+
                         return;
                     }
 
@@ -1096,6 +1280,11 @@
         }
 
         var lastSyncAt = 0;
+
+        // Momento del último cambio hecho por el propio usuario (reacción, voto,
+        // edición...). Las respuestas de sondeo que salieron antes se descartan:
+        // si no, una respuesta vieja podía pisar el cambio recién hecho.
+        var lastLocalMutationAt = 0;
 
         // Sincronización inmediata al volver a la pestaña, al recuperar la red o
         // al enfocar la ventana: el usuario no espera al siguiente sondeo.
@@ -1493,6 +1682,9 @@
             var rows = {};
             var wanted = [];
 
+            // Ya hay conversaciones: el aviso de «sin conversaciones» sobra.
+            $list.children('.chat-hint').remove();
+
             list.forEach(function (item) {
                 var key = String(item.id);
                 var signature = JSON.stringify(item);
@@ -1590,7 +1782,7 @@
         }
 
         function refresh() {
-            return $.getJSON(resumenUrl)
+            return $.getJSON(resumenUrl, { _ts: Date.now() })
                 .done(function (response) {
                     summaryFailures = 0;
 
@@ -1841,15 +2033,64 @@
             placeMenu($menu, event);
         }
 
+        /**
+         * Coloca un menú flotante junto a su botón: alineado a la izquierda del
+         * botón y por encima de él; si no cabe, debajo. Siempre dentro de la
+         * ventana.
+         */
+        function positionFloatingMenu($menu, anchor) {
+            if (!anchor) {
+                return;
+            }
+
+            var element = anchor.jquery ? anchor[0] : anchor;
+            var rect = element.getBoundingClientRect();
+            var width = $menu.outerWidth();
+            var height = $menu.outerHeight();
+            var margin = 8;
+            var left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
+            var top = rect.top - height - 6;
+
+            if (top < margin) {
+                top = Math.min(rect.bottom + 6, window.innerHeight - height - margin);
+            }
+
+            $menu.css({
+                left: left + 'px',
+                top: Math.max(margin, top) + 'px'
+            });
+        }
+
         function buildEmojiPalette(mode) {
-            var html = Object.keys(EMOJIS).map(function (category) {
-                return '<p class="chat-emoji__category">' + escape(category) + '</p>' +
-                    '<div class="chat-emoji__grid">' + EMOJIS[category].map(function (emoji) {
-                        return '<button type="button" class="chat-emoji" data-emoji="' + emoji + '">' + emoji + '</button>';
-                    }).join('') + '</div>';
+            var categories = Object.keys(EMOJIS);
+            var bar = categories.map(function (category) {
+                var icon = EMOJI_ICONS[category] || (EMOJIS[category][0] || '🙂');
+
+                return '<button type="button" class="chat-emoji__type" data-emoji-jump="' + escape(category) + '"' +
+                    ' title="' + escape(category) + '" aria-label="' + escape(category) + '">' + icon + '</button>';
             }).join('');
 
-            $('#chat-emoji-palette').data('mode', mode).html(html).prop('hidden', false);
+            var sections = categories.map(function (category) {
+                return '<section class="chat-emoji__section" data-emoji-section="' + escape(category) + '">' +
+                    '<p class="chat-emoji__category">' + escape(category) + '</p>' +
+                    '<div class="chat-emoji__grid">' + EMOJIS[category].map(function (emoji) {
+                        return '<button type="button" class="chat-emoji" data-emoji="' + emoji + '">' + emoji + '</button>';
+                    }).join('') + '</div></section>';
+            }).join('');
+
+            var $palette = $('#chat-emoji-palette')
+                .data('mode', mode)
+                .html('<div class="chat-emoji__bar" role="tablist" aria-label="Tipos de emoji">' + bar + '</div>' +
+                    '<div class="chat-emoji__body">' + sections + '</div>')
+                .prop('hidden', false);
+
+            var anchor = mode && mode.type === 'reaction'
+                ? $('.chat-message[data-message-id="' + mode.messageId + '"]')
+                : $('#chat-emoji-toggle');
+
+            positionFloatingMenu($palette, anchor);
+            $palette.find('.chat-emoji__type').first().addClass('is-active');
+            $palette.find('.chat-emoji__body').scrollTop(0);
         }
 
         $('#chat-toggle').on('click', function () {
@@ -2487,19 +2728,55 @@
             }
         });
 
+        function hideReactionTooltip() {
+            $('#chat-reaction-tooltip').prop('hidden', true);
+        }
+
+        function showReactionTooltip(button) {
+            var text = $(button).attr('data-tooltip');
+
+            if (!text) {
+                return;
+            }
+
+            var $tip = $('#chat-reaction-tooltip').text(text).prop('hidden', false);
+            var rect = button.getBoundingClientRect();
+            var width = $tip.outerWidth();
+            var height = $tip.outerHeight();
+            var margin = 8;
+            var left = Math.max(margin, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - margin));
+            var top = rect.top - height - 6;
+
+            if (top < margin) {
+                top = Math.min(rect.bottom + 6, window.innerHeight - height - margin);
+            }
+
+            $tip.css({ left: left + 'px', top: Math.max(margin, top) + 'px' });
+        }
+
+        $(document).on('mouseenter focusin', '.chat-reaction', function () {
+            showReactionTooltip(this);
+        });
+
+        $(document).on('mouseleave focusout', '.chat-reaction', hideReactionTooltip);
+
+        document.addEventListener('scroll', hideReactionTooltip, true);
+
+        $(document).on('click', '.chat-reaction', hideReactionTooltip);
+
         $(document).on('click', '.chat-reaction', function (event) {
             event.stopPropagation();
 
             var $button = $(this);
             var $message = $button.closest('.chat-message');
+            var messageId = $message.data('message-id');
+            var emoji = $button.data('reaction');
 
-            post(chatBase + '/mensajes/' + $message.data('message-id') + '/reaccionar', {
-                emoji: $button.data('reaction')
-            }).done(function () {
-                refreshMessages([$message.data('message-id')]);
-            }).fail(function (xhr) {
-                alertDialog((xhr.responseJSON || {}).message || 'No se pudo reaccionar.');
-            });
+            if (!messageId) {
+                return;
+            }
+
+            queueReaction(messageId, emoji);
         });
 
         $('#chat-emoji-palette').on('click', '.chat-emoji', function (event) {
@@ -2509,14 +2786,8 @@
             var mode = $('#chat-emoji-palette').data('mode') || {};
 
             if (mode.type === 'reaction') {
-                post(chatBase + '/mensajes/' + mode.messageId + '/reaccionar', { emoji: emoji })
-                    .done(function () {
-                        $('#chat-emoji-palette').prop('hidden', true);
-                        refreshMessages([mode.messageId]);
-                    })
-                    .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo reaccionar.');
-                    });
+                $('#chat-emoji-palette').prop('hidden', true);
+                queueReaction(mode.messageId, emoji);
             } else {
                 var $input = $('#chat-input');
                 insertEmoji(emoji);
@@ -2526,7 +2797,37 @@
 
         $('#chat-emoji-toggle').on('click', function (event) {
             event.stopPropagation();
+
+            var $palette = $('#chat-emoji-palette');
+            var mode = $palette.data('mode') || {};
+
+            // El mismo botón abre y cierra la paleta de escritura.
+            if (! $palette.prop('hidden') && mode.type === 'input') {
+                $palette.prop('hidden', true);
+                return;
+            }
+
             buildEmojiPalette({ type: 'input' });
+        });
+
+        $('#chat-emoji-palette').on('click', '[data-emoji-jump]', function (event) {
+            event.stopPropagation();
+
+            var $palette = $('#chat-emoji-palette');
+            var $body = $palette.find('.chat-emoji__body');
+            var category = $(this).attr('data-emoji-jump');
+            var $section = $body.find('[data-emoji-section="' + category + '"]');
+
+            if ($section.length && $body.length) {
+                $body.scrollTop(
+                    $body.scrollTop()
+                    + $section[0].getBoundingClientRect().top
+                    - $body[0].getBoundingClientRect().top
+                );
+            }
+
+            $(this).parent().find('.chat-emoji__type').removeClass('is-active');
+            $(this).addClass('is-active');
         });
 
         $('#chat-file').on('change', function () {
@@ -2724,27 +3025,85 @@
             return size + ' B';
         }
 
+        /**
+         * Tipo de archivo para la vista previa: imagen, video, audio, PDF,
+         * comprimido o documento genérico.
+         */
+        function uploadKind(file) {
+            var type = String((file && file.type) || '').toLowerCase();
+            var name = String((file && file.name) || '').toLowerCase();
+
+            if (type.indexOf('image/') === 0) {
+                return 'image';
+            }
+
+            if (type.indexOf('video/') === 0) {
+                return 'video';
+            }
+
+            if (type.indexOf('audio/') === 0) {
+                return 'audio';
+            }
+
+            if (type === 'application/pdf' || /\.pdf$/.test(name)) {
+                return 'pdf';
+            }
+
+            if (/\.(zip|rar|7z|tar|gz|tgz|bz2|xz)$/.test(name) || /zip|rar|7z|tar|gzip/.test(type)) {
+                return 'archive';
+            }
+
+            return 'file';
+        }
+
+        /**
+         * Vista previa de un archivo todavía sin enviar: miniatura, nombre
+         * abajo y una X para quitarlo. Se usa en la bandeja del chat y en el
+         * modal de reportar.
+         */
+        function uploadTile(file, index, mode) {
+            var kind = uploadKind(file);
+            var name = escape(file.name || 'Archivo');
+            var url = (kind === 'image' || kind === 'video' || kind === 'audio')
+                ? URL.createObjectURL(file)
+                : '';
+            var preview;
+
+            if (kind === 'image') {
+                preview = '<img src="' + url + '" alt="">';
+            } else if (kind === 'video') {
+                preview = '<video src="' + url + '" muted preload="metadata"></video>' +
+                    '<span class="chat-upload__play" aria-hidden="true"><i class="fa-solid fa-play"></i></span>';
+            } else if (kind === 'audio') {
+                preview = '<i class="fa-solid fa-microphone-lines chat-upload__icon" aria-hidden="true"></i>';
+            } else if (kind === 'pdf') {
+                preview = '<i class="fa-solid fa-file-pdf chat-upload__icon" aria-hidden="true"></i>';
+            } else if (kind === 'archive') {
+                preview = '<i class="fa-solid fa-file-zipper chat-upload__icon" aria-hidden="true"></i>';
+            } else {
+                preview = '<i class="fa-solid ' + fileIcon(file.name) + ' chat-upload__icon" aria-hidden="true"></i>';
+            }
+
+            return '<div class="chat-upload chat-upload--' + kind + '" data-upload-index="' + index + '">' +
+                '<button type="button" class="chat-upload__preview' + (mode === 'tray' ? ' chat-tray__item' : '') + '"' +
+                ' data-index="' + index + '" aria-label="Ver ' + name + '">' + preview + '</button>' +
+                '<button type="button" class="chat-upload__remove" data-remove-index="' + index + '"' +
+                ' aria-label="Quitar ' + name + '" title="Quitar">' +
+                '<i class="fa-solid fa-xmark" aria-hidden="true"></i></button>' +
+                '<span class="chat-upload__name" title="' + name + '">' + name + '</span>' +
+                '</div>';
+        }
+
         function renderReportFiles() {
             var $list = $('#chat-report-file-list').empty();
 
-            reportFiles.forEach(function (file, index) {
-                var icon = file.type.indexOf('image/') === 0
-                    ? 'fa-image'
-                    : (file.type.indexOf('video/') === 0
-                        ? 'fa-video'
-                        : (file.type.indexOf('audio/') === 0 ? 'fa-headphones' : 'fa-file-lines'));
+            if (!reportFiles.length) {
+                return;
+            }
 
-                $list.append(
-                    '<li class="chat-report-file">' +
-                    '<i class="fa-solid ' + icon + '" aria-hidden="true"></i>' +
-                    '<span class="chat-report-file__name">' + escape(file.name) + '</span>' +
-                    '<span class="chat-report-file__size">' + formatFileSize(file.size) + '</span>' +
-                    '<button type="button" class="chat-report-file__remove" data-index="' + index +
-                    '" aria-label="Quitar ' + escape(file.name) + '">' +
-                    '<i class="fa-solid fa-xmark" aria-hidden="true"></i></button>' +
-                    '</li>'
-                );
-            });
+            $list.html(reportFiles.map(function (file, index) {
+                return uploadTile(file, index, 'report');
+            }).join(''));
         }
 
         function addReportFiles(fileList) {
@@ -2806,7 +3165,12 @@
             }
         }
 
-        $('#chat-report-dropzone').on('click', function () {
+        $('#chat-report-dropzone').on('click', function (event) {
+            if ($(event.target).is('input')) {
+                return;
+            }
+
+            event.preventDefault();
             $('#chat-report-files').trigger('click');
         }).on('keydown', function (event) {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -2824,13 +3188,16 @@
             addReportFiles(event.originalEvent.dataTransfer.files);
         });
 
-        $('#chat-report-files').on('change', function () {
+        // El clic del propio selector no debe volver a disparar el del recuadro.
+        $('#chat-report-files').on('click', function (event) {
+            event.stopPropagation();
+        }).on('change', function () {
             addReportFiles(this.files);
             this.value = '';
         });
 
-        $('#chat-report-file-list').on('click', '.chat-report-file__remove', function () {
-            reportFiles.splice(parseInt($(this).attr('data-index'), 10), 1);
+        $('#chat-report-file-list').on('click', '.chat-upload__remove', function () {
+            reportFiles.splice(parseInt($(this).attr('data-remove-index'), 10), 1);
             renderReportFiles();
         });
 
@@ -3359,16 +3726,7 @@
             }
 
             $('#chat-tray-items').html(pendingFiles.map(function (file, index) {
-                var url = URL.createObjectURL(file);
-                var preview = file.type.startsWith('image/')
-                    ? '<img src="' + url + '" alt="">'
-                    : (file.type.startsWith('video/')
-                        ? '<video src="' + url + '"></video>'
-                        : (file.type.startsWith('audio/')
-                            ? '<i class="fa-solid fa-microphone"></i>'
-                            : '<i class="fa-solid ' + fileIcon(file.name) + '"></i>'));
-
-                return '<button type="button" class="chat-tray__item" data-index="' + index + '">' + preview + '</button>';
+                return uploadTile(file, index, 'tray');
             }).join(''));
 
             $tray.prop('hidden', false);
@@ -3543,12 +3901,25 @@
             openCarousel(trayCarouselItems(), index);
         });
 
+        $('#chat-tray-items').on('click', '.chat-upload__remove', function (event) {
+            event.stopPropagation();
+
+            var index = parseInt($(this).attr('data-remove-index'), 10);
+
+            if (isNaN(index) || index < 0 || index >= pendingFiles.length) {
+                return;
+            }
+
+            pendingFiles.splice(index, 1);
+            renderTray();
+        });
+
         $('#chat-tray-clear').on('click', clearTray);
 
         $(document).on('keydown', function (event) {
             if (event.key === 'Escape') {
                 clearTray();
-                $('#chat-text-menu').prop('hidden', true);
+                $('#chat-text-menu, #chat-emoji-palette, #chat-attach-menu').prop('hidden', true);
             }
         });
 
@@ -3685,13 +4056,17 @@
             $('#chat-lightbox-stage .chat-carousel__arrow').remove();
             $('.chat-lightbox__footer .chat-carousel__thumbs').remove();
 
-            if (carousel.items.length < 2) {
+            // Un único elemento también muestra su miniatura y sus flechas
+            // (bloqueadas); con varios, se bloquean en los extremos.
+            if (!carousel.items.length) {
                 return;
             }
 
             $('#chat-lightbox-stage').append(
-                '<button type="button" class="chat-carousel__arrow chat-carousel__arrow--prev" aria-label="Anterior">&#8249;</button>' +
-                '<button type="button" class="chat-carousel__arrow chat-carousel__arrow--next" aria-label="Siguiente">&#8250;</button>'
+                '<button type="button" class="chat-carousel__arrow chat-carousel__arrow--prev" aria-label="Anterior"' +
+                (carousel.index <= 0 ? ' disabled' : '') + '>&#8249;</button>' +
+                '<button type="button" class="chat-carousel__arrow chat-carousel__arrow--next" aria-label="Siguiente"' +
+                (carousel.index >= carousel.items.length - 1 ? ' disabled' : '') + '>&#8250;</button>'
             );
 
             $('.chat-lightbox__footer').append(
@@ -3711,7 +4086,9 @@
                 return;
             }
 
-            carousel.index = (index + carousel.items.length) % carousel.items.length;
+            // Sin vueltas: al llegar a un extremo la flecha correspondiente
+            // queda bloqueada.
+            carousel.index = Math.max(0, Math.min(parseInt(index, 10) || 0, carousel.items.length - 1));
             singleLightbox = null;
             hideLightboxMenu();
             paintLightboxItem();
@@ -4218,13 +4595,27 @@
 
         $('#chat-attach').on('click', function (event) {
             event.stopPropagation();
+
+            var $menu = $('#chat-attach-menu');
+
+            // El mismo botón abre y cierra el menú.
+            if (! $menu.prop('hidden')) {
+                $menu.prop('hidden', true);
+                return;
+            }
+
             refreshAttachExtras();
-            $('#chat-attach-menu').prop('hidden', false);
+            $menu.prop('hidden', false);
+            positionFloatingMenu($menu, this);
         });
 
         $(document).on('click', function (event) {
             if (!$(event.target).closest('#chat-attach-menu, #chat-attach').length) {
                 $('#chat-attach-menu').prop('hidden', true);
+            }
+
+            if (!$(event.target).closest('#chat-emoji-palette, #chat-emoji-toggle, #chat-context-menu').length) {
+                $('#chat-emoji-palette').prop('hidden', true);
             }
         });
 
@@ -5244,16 +5635,28 @@
         $('#chat-gallery-panel').on('click', '.gallery-item', function () {
             if ($(this).closest('.chat-gallery-grid').length) {
                 var isAudio = $(this).hasClass('chat-gallery-audio');
+
+                // El audio se abre de uno en uno; las fotos y los videos van
+                // al carrusel de la galería.
+                if (isAudio) {
+                    openLightbox(
+                        'audio',
+                        $(this).data('src'),
+                        $(this).data('name'),
+                        $(this).data('content') || {}
+                    );
+
+                    return;
+                }
+
                 var list = galleryItems
                     .filter(function (item) {
-                        return isAudio
-                            ? item.kind === 'audio'
-                            : (item.kind === 'image' || item.kind === 'video');
+                        return item.kind === 'image' || item.kind === 'video';
                     })
                     .map(function (item) {
                         return {
                             url: item.url,
-                            type: isAudio ? 'audio' : item.kind,
+                            type: item.kind,
                             kind: item.kind,
                             name: item.name,
                             message_id: item.message_id || null,
@@ -5619,7 +6022,7 @@
                 return;
             }
 
-            $.getJSON(contadorUrl).done(function (response) {
+            $.getJSON(contadorUrl, { _ts: Date.now() }).done(function (response) {
                 lastUnread = response.unread || 0;
                 setBadge(lastUnread);
                 renderModerationCount(response.moderation || 0);
@@ -5880,6 +6283,35 @@
 
         refresh();
         setBadge(0);
+
+        // Si el archivo ya no está en el disco, la vista previa no debe quedar
+        // como una imagen rota: se muestra un icono y, en el visor, un aviso.
+        document.addEventListener('error', function (event) {
+            var target = event.target;
+
+            if (!target || target.tagName !== 'IMG') {
+                return;
+            }
+
+            if (target.closest('#chat-lightbox-stage')) {
+                var $stage = $('#chat-lightbox-stage');
+                $stage.html('<p class="chat-hint chat-lightbox__missing">El archivo ya no está disponible.</p>');
+                return;
+            }
+
+            if (!target.closest('.chat-gallery-thumb, .chat-gallery-row, .chat-media, .chat-profile__media-grid')) {
+                return;
+            }
+
+            target.classList.add('is-broken');
+
+            if (!target.nextElementSibling || !target.nextElementSibling.classList.contains('chat-media__fallback')) {
+                var fallback = document.createElement('span');
+                fallback.className = 'chat-media__fallback';
+                fallback.innerHTML = '<i class="fa-regular fa-image" aria-hidden="true"></i>';
+                target.insertAdjacentElement('afterend', fallback);
+            }
+        }, true);
 
         /* ------------------------------------------------------------------
            Encuestas y eventos adjuntos (solo en chats directos y grupos)
@@ -6217,7 +6649,10 @@
 
                 $body.html('<dl class="perfil-data chat-event-sheet__data">' +
                     rows.map(function (row) {
-                        return '<div><dt>' + escape(row[0]) + '</dt><dd>' + escape(row[1]) + '</dd></div>';
+                        return '<div class="perfil-data__item">' +
+                            '<dt>' + escape(row[0]) + '</dt>' +
+                            '<dd>' + escape(row[1]) + '</dd>' +
+                            '</div>';
                     }).join('') +
                     '</dl>');
             }).fail(function (xhr) {

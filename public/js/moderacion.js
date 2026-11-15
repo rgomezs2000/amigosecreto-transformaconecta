@@ -96,9 +96,10 @@
         var detailType = '';
         var detailCanReply = false;
         var currentMedia = [];
+        var currentAudios = [];
         var currentReportRow = null;
-        var attachmentTables = {};
         var lightboxItems = [];
+        var lightboxCarousel = false;
         var lightboxIndex = 0;
 
         function escapeText(value) {
@@ -440,89 +441,113 @@
         var lightboxElement = document.getElementById('modal-moderacion-lightbox');
         var lightboxModal = lightboxElement ? window.bootstrap.Modal.getOrCreateInstance(lightboxElement) : null;
 
-        function attachmentLanguage() {
-            return {
-                emptyTable: 'Sin archivos en esta sección.',
-                info: 'Mostrando _START_ a _END_ de _TOTAL_',
-                infoEmpty: 'Sin archivos',
-                infoFiltered: '(filtrado de _MAX_)',
-                lengthMenu: 'Mostrar _MENU_',
-                loadingRecords: 'Cargando...',
-                processing: 'Procesando...',
-                search: 'Buscar:',
-                zeroRecords: 'No se encontraron archivos',
-                paginate: {
-                    first: 'Primera',
-                    last: 'Última',
-                    next: 'Siguiente',
-                    previous: 'Anterior'
-                }
-            };
+        function emptyGallery(message) {
+            return '<p class="chat-hint ficha-gallery__empty">' + escapeText(message) + '</p>';
         }
 
-        function makeAttachmentTable(selector, columns) {
-            var $table = $(selector);
+        function metaFor(item) {
+            return [item.date || '', item.size_label || ''].filter(Boolean).join(' · ');
+        }
 
-            if (!$table.length || !$.fn.DataTable) {
-                return null;
+        // --- Fotos y videos: cuadrícula con miniaturas, igual que la galería del chat.
+        function renderMediaGallery(items) {
+            var $grid = $('#moderacion-attachments-media');
+
+            if (!items.length) {
+                $grid.html(emptyGallery('No hay fotos ni videos en este caso.'));
+                return;
             }
 
-            return $table.DataTable({
-                data: [],
-                columns: columns,
-                autoWidth: false,
-                scrollX: true,
-                pageLength: 5,
-                lengthMenu: [[5, 10, 25], [5, 10, 25]],
-                order: [],
-                searching: true,
-                dom: 'lrtip',
-                language: attachmentLanguage()
-            });
+            $grid.html(items.map(function (item, index) {
+                var url = escapeText(item.url || '');
+                var name = escapeText(item.name || 'Archivo');
+                var video = item.kind === 'video';
+
+                return '<button type="button" class="ficha-gallery__tile ficha-gallery__media" data-media-index="' +
+                    index + '" title="' + name + '" aria-label="Abrir ' + name + '">' +
+                    (video
+                        ? '<video src="' + url + '" muted preload="metadata"></video>' +
+                            '<span class="ficha-gallery__play" aria-hidden="true"><i class="fa-solid fa-play"></i></span>'
+                        : '<img src="' + url + '" alt="" loading="lazy">') +
+                    (item.is_evidence ? '<span class="ficha-gallery__badge">Evidencia</span>' : '') +
+                    '<span class="ficha-gallery__name">' + name + '</span>' +
+                    '</button>';
+            }).join(''));
         }
 
-        attachmentTables.media = makeAttachmentTable('#moderacion-attachments-media-table', [
-            { data: 'preview', orderable: false, className: 'moderacion-attachment-preview' },
-            { data: 'name' },
-            { data: 'date' },
-            { data: 'size_label' },
-            { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
-        ]);
+        // --- Audios: tarjetas amarillas con icono negro; se abren de una en una.
+        function renderAudioGallery(items) {
+            var $grid = $('#moderacion-attachments-audios');
 
-        attachmentTables.audios = makeAttachmentTable('#moderacion-attachments-audios-table', [
-            { data: 'name' },
-            { data: 'date' },
-            { data: 'size_label' },
-            { data: 'audio', orderable: false, searchable: false },
-            { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
-        ]);
+            if (!items.length) {
+                $grid.html(emptyGallery('No hay audios en este caso.'));
+                return;
+            }
 
-        attachmentTables.documents = makeAttachmentTable('#moderacion-attachments-documents-table', [
-            { data: 'name' },
-            { data: 'date' },
-            { data: 'size_label' },
-            { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
-        ]);
+            $grid.html(items.map(function (item, index) {
+                var name = escapeText(item.name || 'Audio');
 
-        attachmentTables.links = makeAttachmentTable('#moderacion-attachments-links-table', [
-            { data: 'url_html' },
-            { data: 'date' },
-            { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
-        ]);
-
-        function adjustAttachmentTables() {
-            Object.keys(attachmentTables).forEach(function (key) {
-                if (attachmentTables[key]) {
-                    attachmentTables[key].columns.adjust();
-                }
-            });
+                return '<button type="button" class="ficha-gallery__tile ficha-gallery__audio" data-audio-index="' +
+                    index + '" title="' + name + '" aria-label="Escuchar ' + name + '">' +
+                    '<span class="ficha-gallery__audio-icon"><i class="fa-solid fa-microphone-lines" aria-hidden="true"></i></span>' +
+                    '<span class="ficha-gallery__audio-meta">' + escapeText(metaFor(item) || 'Audio') + '</span>' +
+                    '<span class="ficha-gallery__name">' + name + '</span>' +
+                    '</button>';
+            }).join(''));
         }
 
-        $('#modal-moderacion-detail').on('shown.bs.modal', adjustAttachmentTables);
+        // --- Documentos: lista con icono, nombre y acciones.
+        function renderDocumentGallery(items) {
+            var $list = $('#moderacion-attachments-documents');
 
-        $('.moderacion-attachment-tabs').on('shown.bs.tab', 'button[data-bs-toggle="tab"]', function () {
-            window.setTimeout(adjustAttachmentTables, 0);
-        });
+            if (!items.length) {
+                $list.html(emptyGallery('No hay documentos en este caso.'));
+                return;
+            }
+
+            $list.html(items.map(function (item) {
+                var url = escapeText(item.url || '');
+                var name = escapeText(item.name || 'Documento');
+
+                return '<div class="ficha-gallery__row">' +
+                    '<span class="ficha-gallery__row-icon"><i class="fa-regular fa-file-lines" aria-hidden="true"></i></span>' +
+                    '<span class="ficha-gallery__row-main">' +
+                    '<a class="ficha-gallery__row-name" href="' + url + '" target="_blank" rel="noopener" download>' + name + '</a>' +
+                    '<span class="ficha-gallery__row-meta">' + escapeText(metaFor(item) || 'Documento') + '</span>' +
+                    '</span>' +
+                    '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" download title="Descargar" aria-label="Descargar ' + name + '">' +
+                    '<i class="fa-solid fa-download" aria-hidden="true"></i></a>' +
+                    '</div>';
+            }).join(''));
+        }
+
+        // --- Enlaces: tarjetas como las del chat.
+        function renderLinkGallery(items) {
+            var $list = $('#moderacion-attachments-links');
+
+            if (!items.length) {
+                $list.html(emptyGallery('No hay enlaces en este caso.'));
+                return;
+            }
+
+            $list.html(items.map(function (item) {
+                var url = escapeText(item.url || '');
+                var label = escapeText(item.title || item.url || 'Enlace');
+
+                return '<div class="ficha-gallery__link">' +
+                    '<span class="ficha-gallery__link-icon"><i class="fa-solid fa-link" aria-hidden="true"></i></span>' +
+                    '<span class="ficha-gallery__row-main">' +
+                    '<a class="ficha-gallery__row-name" href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + '</a>' +
+                    '<span class="ficha-gallery__row-meta">' + url + (item.date ? ' · ' + escapeText(item.date) : '') + '</span>' +
+                    '</span>' +
+                    '<div class="ficha-gallery__link-actions">' +
+                    '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" target="_blank" rel="noopener noreferrer" title="Abrir" aria-label="Abrir enlace">' +
+                    '<i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>' +
+                    '<button type="button" class="btn btn-sm btn-outline-secondary moderacion-copy-link" data-url="' + url + '" title="Copiar enlace" aria-label="Copiar enlace">' +
+                    '<i class="fa-regular fa-copy" aria-hidden="true"></i></button>' +
+                    '</div></div>';
+            }).join(''));
+        }
 
         function renderReportFields(row) {
             detailType = row.type || 'moderacion';
@@ -607,7 +632,6 @@
             renderReportFields(row);
             resetAttachmentTables();
             resetSuggestion(row);
-            setTimeout(adjustAttachmentTables, 0);
 
             if (modal) {
                 modal.show();
@@ -618,12 +642,11 @@
 
         function resetAttachmentTables() {
             currentMedia = [];
+            currentAudios = [];
 
-            Object.keys(attachmentTables).forEach(function (key) {
-                if (attachmentTables[key]) {
-                    attachmentTables[key].clear().draw();
-                }
-            });
+            $('#moderacion-attachments-media, #moderacion-attachments-audios, ' +
+                '#moderacion-attachments-documents, #moderacion-attachments-links')
+                .html(emptyGallery('Cargando adjuntos...'));
         }
 
         function loadReportDetail(id) {
@@ -643,69 +666,11 @@
                     renderReportFields(report);
                     renderAttachments(data.attachments || {}, data.links || []);
                     renderSuggestion(report, data.suggestion_messages || []);
-                    adjustAttachmentTables();
                 })
                 .fail(function () {
                     // La ficha de datos ya está visible; si falla la carga de
-                    // adjuntos, las tablas quedan vacías y la página sigue usable.
+                    // adjuntos, las secciones quedan vacías y la página sigue usable.
                 });
-        }
-
-        function mediaRow(item, index) {
-            var url = escapeText(item.url || '');
-            var name = escapeText(item.name || 'Archivo');
-            var isVideo = item.kind === 'video';
-            var isEvidence = item.is_evidence === true;
-            var preview = (isVideo
-                ? '<video src="' + url + '" muted preload="metadata"></video>'
-                : '<img src="' + url + '" alt="">') +
-                (isEvidence ? '<span class="moderacion-attachment-evidence">Evidencia</span>' : '');
-
-            return {
-                preview: '<button type="button" class="moderacion-attachment-open" data-media-index="' + index + '" aria-label="Abrir ' + name + '">' + preview + '</button>',
-                name: name,
-                date: escapeText(item.date || '—'),
-                size_label: escapeText(item.size_label || '—'),
-                actions: '<button type="button" class="btn btn-sm btn-outline-secondary moderacion-attachment-open" data-media-index="' + index + '" title="Abrir" aria-label="Abrir ' + name + '"><i class="fa-solid fa-expand" aria-hidden="true"></i></button>' +
-                    '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" download title="Descargar" aria-label="Descargar ' + name + '"><i class="fa-solid fa-download" aria-hidden="true"></i></a>'
-            };
-        }
-
-        function audioRow(item) {
-            var url = escapeText(item.url || '');
-            var name = escapeText(item.name || 'Audio');
-
-            return {
-                name: name,
-                date: escapeText(item.date || '—'),
-                size_label: escapeText(item.size_label || '—'),
-                audio: '<audio controls preload="none" src="' + url + '"></audio>',
-                actions: '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" download title="Descargar" aria-label="Descargar ' + name + '"><i class="fa-solid fa-download" aria-hidden="true"></i></a>'
-            };
-        }
-
-        function documentRow(item) {
-            var url = escapeText(item.url || '');
-            var name = escapeText(item.name || 'Documento');
-
-            return {
-                name: '<i class="fa-regular fa-file-lines moderacion-attachment-icon" aria-hidden="true"></i> ' + name,
-                date: escapeText(item.date || '—'),
-                size_label: escapeText(item.size_label || '—'),
-                actions: '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" title="Descargar" aria-label="Descargar ' + name + '"><i class="fa-solid fa-download" aria-hidden="true"></i></a>'
-            };
-        }
-
-        function linkRow(item) {
-            var url = escapeText(item.url || '');
-            var label = escapeText(item.url || '');
-
-            return {
-                url_html: '<a class="moderacion-attachment-link" href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + '</a>',
-                date: escapeText(item.date || '—'),
-                actions: '<a class="btn btn-sm btn-outline-secondary" href="' + url + '" target="_blank" rel="noopener noreferrer" title="Abrir" aria-label="Abrir enlace"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>' +
-                    '<button type="button" class="btn btn-sm btn-outline-secondary moderacion-copy-link" data-url="' + url + '" title="Copiar enlace" aria-label="Copiar enlace"><i class="fa-regular fa-copy" aria-hidden="true"></i></button>'
-            };
         }
 
         function renderAttachments(attachments, links) {
@@ -714,22 +679,12 @@
             var documents = attachments.documents || [];
 
             currentMedia = media;
+            currentAudios = audios;
 
-            if (attachmentTables.media) {
-                attachmentTables.media.clear().rows.add(media.map(mediaRow)).draw();
-            }
-
-            if (attachmentTables.audios) {
-                attachmentTables.audios.clear().rows.add(audios.map(audioRow)).draw();
-            }
-
-            if (attachmentTables.documents) {
-                attachmentTables.documents.clear().rows.add(documents.map(documentRow)).draw();
-            }
-
-            if (attachmentTables.links) {
-                attachmentTables.links.clear().rows.add((links || []).map(linkRow)).draw();
-            }
+            renderMediaGallery(media);
+            renderAudioGallery(audios);
+            renderDocumentGallery(documents);
+            renderLinkGallery(links || []);
         }
 
         function resetSuggestion(row) {
@@ -768,7 +723,26 @@
             }
 
             lightboxItems = currentMedia;
+            lightboxCarousel = true;
             lightboxIndex = Math.max(0, Math.min(parseInt(index, 10) || 0, lightboxItems.length - 1));
+            paintLightbox();
+
+            if (lightboxModal) {
+                lightboxModal.show();
+            }
+        }
+
+        // El audio se abre de uno en uno, no en carrusel.
+        function openAudioLightbox(index) {
+            if (!currentAudios.length) {
+                return;
+            }
+
+            var position = Math.max(0, Math.min(parseInt(index, 10) || 0, currentAudios.length - 1));
+
+            lightboxItems = [currentAudios[position]];
+            lightboxCarousel = false;
+            lightboxIndex = 0;
             paintLightbox();
 
             if (lightboxModal) {
@@ -788,17 +762,34 @@
 
             if (item.kind === 'video') {
                 $stage.append($('<video controls></video>').attr('src', url));
+            } else if (item.kind === 'audio') {
+                $stage.append(
+                    '<div class="moderacion-lightbox__audio">' +
+                    '<i class="fa-solid fa-microphone-lines" aria-hidden="true"></i>' +
+                    '<audio controls preload="metadata" src="' + escapeText(url) + '"></audio>' +
+                    '</div>'
+                );
             } else {
                 $stage.append($('<img alt="">').attr({ src: url, alt: item.name || '' }));
             }
 
             $('#modal-moderacion-lightbox-title').text(item.name || 'Vista previa');
             $('#moderacion-lightbox-download').attr('href', url).attr('download', item.name || 'archivo');
-            $('#moderacion-lightbox-prev, #moderacion-lightbox-next').prop('hidden', lightboxItems.length < 2);
+
+            // Con un solo elemento el carrusel se ve, pero las flechas quedan
+            // bloqueadas; con varios, se bloquean en los extremos.
+            var showControls = lightboxCarousel && lightboxItems.length >= 1;
+
+            $('#moderacion-lightbox-prev')
+                .prop('hidden', !showControls)
+                .prop('disabled', lightboxIndex <= 0);
+            $('#moderacion-lightbox-next')
+                .prop('hidden', !showControls)
+                .prop('disabled', lightboxIndex >= lightboxItems.length - 1);
 
             var $thumbs = $('#moderacion-lightbox-thumbs').empty();
 
-            if (lightboxItems.length > 1) {
+            if (showControls) {
                 lightboxItems.forEach(function (entry, index) {
                     var thumb = entry.kind === 'video'
                         ? '<video src="' + escapeText(entry.url || '') + '" muted></video>'
@@ -815,20 +806,20 @@
         }
 
         $('#moderacion-lightbox-prev').on('click', function () {
-            if (!lightboxItems.length) {
+            if (!lightboxItems.length || lightboxIndex <= 0) {
                 return;
             }
 
-            lightboxIndex = (lightboxIndex - 1 + lightboxItems.length) % lightboxItems.length;
+            lightboxIndex -= 1;
             paintLightbox();
         });
 
         $('#moderacion-lightbox-next').on('click', function () {
-            if (!lightboxItems.length) {
+            if (!lightboxItems.length || lightboxIndex >= lightboxItems.length - 1) {
                 return;
             }
 
-            lightboxIndex = (lightboxIndex + 1) % lightboxItems.length;
+            lightboxIndex += 1;
             paintLightbox();
         });
 
@@ -837,8 +828,12 @@
             paintLightbox();
         });
 
-        $('#moderacion-detail-pane-adjuntos').on('click', '.moderacion-attachment-open', function () {
+        $('#moderacion-detail-pane-adjuntos').on('click', '.ficha-gallery__media, .moderacion-attachment-open', function () {
             openMediaLightbox($(this).attr('data-media-index'));
+        });
+
+        $('#moderacion-detail-pane-adjuntos').on('click', '.ficha-gallery__audio', function () {
+            openAudioLightbox($(this).attr('data-audio-index'));
         });
 
         $('#moderacion-detail-pane-adjuntos').on('click', '.moderacion-copy-link', function () {

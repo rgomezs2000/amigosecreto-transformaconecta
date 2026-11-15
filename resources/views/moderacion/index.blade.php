@@ -292,7 +292,7 @@
 
     <x-app-modal id="modal-moderacion-detail" title="Detalle del caso" size="xl" scrollable>
         <x-slot:body>
-            <ul class="nav nav-tabs moderacion-detail-tabs" role="tablist">
+            <ul class="nav nav-tabs ficha-tabs moderacion-detail-tabs" role="tablist">
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="moderacion-detail-tab-detalles"
                             data-bs-toggle="tab" data-bs-target="#moderacion-detail-pane-detalles"
@@ -406,7 +406,7 @@
 
                 <div class="tab-pane fade" id="moderacion-detail-pane-adjuntos"
                      role="tabpanel" aria-labelledby="moderacion-detail-tab-adjuntos" tabindex="0">
-                    <ul class="nav nav-pills moderacion-attachment-tabs" role="tablist">
+                    <ul class="nav nav-tabs ficha-tabs moderacion-attachment-tabs" role="tablist">
                         <li class="nav-item" role="presentation">
                             <button class="nav-link active" id="moderacion-attachments-tab-media"
                                     data-bs-toggle="tab" data-bs-target="#moderacion-attachments-pane-media"
@@ -444,67 +444,22 @@
                     <div class="tab-content moderacion-attachment-content">
                         <div class="tab-pane fade show active" id="moderacion-attachments-pane-media"
                              role="tabpanel" aria-labelledby="moderacion-attachments-tab-media" tabindex="0">
-                            <table id="moderacion-attachments-media-table"
-                                   class="table table-striped align-middle w-100 moderacion-attachments-table">
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Vista previa</th>
-                                        <th scope="col">Archivo</th>
-                                        <th scope="col">Fecha</th>
-                                        <th scope="col">Tamaño</th>
-                                        <th scope="col" class="roles-actions">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
+                            <div class="ficha-gallery ficha-gallery--media" id="moderacion-attachments-media"></div>
                         </div>
 
                         <div class="tab-pane fade" id="moderacion-attachments-pane-audios"
                              role="tabpanel" aria-labelledby="moderacion-attachments-tab-audios" tabindex="0">
-                            <table id="moderacion-attachments-audios-table"
-                                   class="table table-striped align-middle w-100 moderacion-attachments-table">
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Archivo</th>
-                                        <th scope="col">Fecha</th>
-                                        <th scope="col">Tamaño</th>
-                                        <th scope="col">Audio</th>
-                                        <th scope="col" class="roles-actions">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
+                            <div class="ficha-gallery ficha-gallery--audio" id="moderacion-attachments-audios"></div>
                         </div>
 
                         <div class="tab-pane fade" id="moderacion-attachments-pane-documents"
                              role="tabpanel" aria-labelledby="moderacion-attachments-tab-documents" tabindex="0">
-                            <table id="moderacion-attachments-documents-table"
-                                   class="table table-striped align-middle w-100 moderacion-attachments-table">
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Documento</th>
-                                        <th scope="col">Fecha</th>
-                                        <th scope="col">Tamaño</th>
-                                        <th scope="col" class="roles-actions">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
+                            <div class="ficha-gallery ficha-gallery--list" id="moderacion-attachments-documents"></div>
                         </div>
 
                         <div class="tab-pane fade" id="moderacion-attachments-pane-links"
                              role="tabpanel" aria-labelledby="moderacion-attachments-tab-links" tabindex="0">
-                            <table id="moderacion-attachments-links-table"
-                                   class="table table-striped align-middle w-100 moderacion-attachments-table">
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Enlace</th>
-                                        <th scope="col">Fecha</th>
-                                        <th scope="col" class="roles-actions">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
+                            <div class="ficha-gallery ficha-gallery--links" id="moderacion-attachments-links"></div>
                         </div>
                     </div>
                 </div>
