@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\EventStatus;
 use App\Enums\UserRole;
-use App\Mail\NotificationMail;
 use App\Models\Assignment;
 use App\Models\ChatMessage;
 use App\Models\ChatReaction;
@@ -177,6 +176,7 @@ class ChatTest extends TestCase
         $response->assertJsonPath('messages.3.reactions.0.count', 4);
         $response->assertJsonPath('messages.3.reactions.0.names', ['Ana', 'Luis', 'María']);
     }
+
     public function test_editar_eliminar_y_reaccionar(): void
     {
         $admin = $this->userWithChat('Admin', UserRole::Admin);
@@ -342,7 +342,11 @@ class ChatTest extends TestCase
         $this->assertSame('report', $conversation->type);
         $this->assertTrue($conversation->is_read_only);
         $this->assertSame([$ana->id], $conversation->load('users')->users->pluck('id')->map(fn ($id) => (int) $id)->all());
-        $this->assertSame('Reporte Nº: '.$report->id, $conversation->messages()->orderBy('id')->value('body'));
+        $body = (string) $conversation->messages()->orderBy('id')->value('body');
+
+        $this->assertStringContainsString('Reporte Nº: '.$report->id, $body);
+        $this->assertStringContainsString('Lenguaje ofensivo', $body);
+        $this->assertStringContainsString('Mensaje ofensivo', $body);
 
         // El beneficiario recibe el correo de apertura; la administración, el
         // aviso push. El correo del caso para gestionar sale al tomarlo.
@@ -2374,4 +2378,3 @@ class ChatTest extends TestCase
             ->assertJsonPath('conversations.0.pinned_message.id', $message->id);
     }
 }
-

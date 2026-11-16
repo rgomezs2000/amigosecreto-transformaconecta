@@ -29,7 +29,7 @@ class ReporteAvisos
         }
 
         $ticket = $report->id;
-        $url = $this->url($report, $conversation);
+        $url = $this->urlBeneficiario($report);
         $esSugerencia = $report->isSuggestion();
 
         $this->correo(
@@ -82,9 +82,7 @@ class ReporteAvisos
 
         $conversation = $report->conversation;
         $ticket = $report->id;
-        $url = $conversation !== null
-            ? module_url('chat').'?conversacion='.$conversation->id
-            : module_url('moderacion');
+        $url = $this->urlBeneficiario($report);
 
         $this->correo(
             $beneficiary,
@@ -94,7 +92,7 @@ class ReporteAvisos
                 'Ticket: Nº '.$ticket,
                 'Respuesta: '.Str::limit(trim(strip_tags((string) $message->body)), 300),
                 'Fecha: '.now()->format('d/m/Y H:i'),
-                'Puedes leer la conversación en el chat del caso, en solo lectura.',
+                'Puedes leer la respuesta en el seguimiento del caso.',
             ],
             $url
         );
@@ -113,7 +111,7 @@ class ReporteAvisos
     /**
      * Correo del caso para el administrador que lo va a gestionar.
      */
-    public function gestion(ChatReport $report, Conversation $conversation, User $admin): void
+    public function gestion(ChatReport $report, ?Conversation $conversation, User $admin): void
     {
         $ticket = $report->id;
         $reporter = $report->reporter?->name ?? '—';
@@ -134,7 +132,7 @@ class ReporteAvisos
                 'Motivo: '.$this->motivo($report),
                 'Fecha: '.$report->created_at?->format('d/m/Y H:i') ?? now()->format('d/m/Y H:i'),
             ],
-            ['label' => 'Abrir el caso', 'url' => $this->url($report, $conversation)],
+            ['label' => 'Abrir el caso', 'url' => $this->urlAdmin($report, $conversation)],
             [
                 'recipient_name' => $admin->name,
                 'eyebrow' => 'Reporte',
@@ -144,7 +142,7 @@ class ReporteAvisos
         );
     }
 
-    public function enAtencion(ChatReport $report, Conversation $conversation, User $admin): void
+    public function enAtencion(ChatReport $report, ?Conversation $conversation, User $admin): void
     {
         $beneficiary = $report->reporter;
 
@@ -154,7 +152,8 @@ class ReporteAvisos
 
         $ticket = $report->id;
         $esSugerencia = $report->isSuggestion();
-        $url = $this->url($report, $conversation);
+        $esRegistro = $report->isUserRegistration();
+        $url = $this->urlBeneficiario($report);
 
         $this->correo(
             $beneficiary,
@@ -167,7 +166,9 @@ class ReporteAvisos
                 'Fecha: '.now()->format('d/m/Y H:i'),
                 $esSugerencia
                     ? 'Cuando la administración responda, podrás leer la respuesta.'
-                    : 'El chat del caso ya está habilitado para que puedas responder.',
+                    : ($esRegistro
+                        ? 'La solicitud de registro está siendo evaluada por la administración.'
+                        : 'El chat del caso ya está habilitado para que puedas responder.'),
             ],
             $url
         );
@@ -178,7 +179,9 @@ class ReporteAvisos
             'Caso Nº '.$ticket.' en atención',
             $esSugerencia
                 ? 'El administrador '.$admin->name.' tomó tu sugerencia.'
-                : 'El administrador '.$admin->name.' tomó tu caso y abrió el chat.',
+                : ($esRegistro
+                    ? 'La administración está evaluando tu solicitud de registro.'
+                    : 'El administrador '.$admin->name.' tomó tu caso y abrió el chat.'),
             $this->datosPush($report, $conversation, 'atendiendo'),
             $url,
             'reporte'
@@ -191,13 +194,14 @@ class ReporteAvisos
      */
     public function remitido(
         ChatReport $report,
-        Conversation $conversation,
+        ?Conversation $conversation,
         User $from,
         User $to,
         string $observation
     ): void {
         $ticket = $report->id;
-        $url = $this->url($report, $conversation);
+        $url = $this->urlBeneficiario($report);
+        $urlAdmin = $this->urlAdmin($report, $conversation);
 
         send_mail(
             $to->email,
@@ -211,7 +215,7 @@ class ReporteAvisos
                 'Observación de la remisión: '.Str::limit($observation, 300),
                 'Fecha: '.now()->format('d/m/Y H:i'),
             ],
-            ['label' => 'Abrir el caso', 'url' => $url],
+            ['label' => 'Abrir el caso', 'url' => $urlAdmin],
             [
                 'recipient_name' => $to->name,
                 'eyebrow' => 'Reporte',
@@ -226,7 +230,7 @@ class ReporteAvisos
             'Caso Nº '.$ticket.' remitido a tu gestión',
             'El administrador '.$from->name.' te remitió el caso.',
             $this->datosPush($report, $conversation, 'remitido'),
-            $url,
+            $urlAdmin,
             'reporte'
         );
 
@@ -265,7 +269,7 @@ class ReporteAvisos
         );
     }
 
-    public function cerrado(ChatReport $report, Conversation $conversation, User $admin): void
+    public function cerrado(ChatReport $report, ?Conversation $conversation, User $admin): void
     {
         $beneficiary = $report->reporter;
 
@@ -274,7 +278,7 @@ class ReporteAvisos
         }
 
         $ticket = $report->id;
-        $url = $this->url($report, $conversation);
+        $url = $this->urlBeneficiario($report);
         $observacion = trim((string) ($report->close_observation ?? ''));
 
         $lines = [
@@ -345,12 +349,21 @@ class ReporteAvisos
         return Str::limit(trim(strip_tags((string) $report->reason)), 160);
     }
 
-    private function url(ChatReport $report, ?Conversation $conversation): string
+    private function urlAdmin(ChatReport $report, ?Conversation $conversation): string
     {
         if ($conversation !== null && ! $report->isSuggestion()) {
             return module_url('chat').'?conversacion='.$conversation->id;
         }
 
         return module_url('moderacion');
+    }
+
+    /**
+     * Enlace del beneficiario: siempre al Centro de Ayuda y Soporte del
+     * usuario, donde está la pestaña Seguimiento del caso.
+     */
+    private function urlBeneficiario(ChatReport $report): string
+    {
+        return module_url('contacto-soporte');
     }
 }

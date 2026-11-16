@@ -22,6 +22,14 @@
         </a>
     @endif
 
+    {{-- Registro de usuario: no hay chat; se formaliza el alta en Usuarios. --}}
+    @if (! empty($createUserUrl))
+        <a class="btn btn-sm btn-primary" href="{{ $createUserUrl }}"
+           title="Crear usuario" aria-label="Crear usuario desde la solicitud de registro">
+            <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+        </a>
+    @endif
+
     {{-- Soporte: ir al módulo o funcionalidad donde ocurrió el inconveniente. --}}
     @if (! empty($moduleUrl))
         <a class="btn btn-sm btn-outline-secondary" href="{{ $moduleUrl }}"

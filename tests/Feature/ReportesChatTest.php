@@ -104,7 +104,10 @@ class ReportesChatTest extends TestCase
 
         $this->assertSame([$ana->id], $members);
 
-        $this->assertSame('Reporte Nº: '.$report->id, $conversation->messages()->orderBy('id')->value('body'));
+        $body = (string) $conversation->messages()->orderBy('id')->value('body');
+
+        $this->assertStringContainsString('Reporte Nº: '.$report->id, $body);
+        $this->assertStringContainsString('Mensaje inapropiado', $body);
 
         // El beneficiario recibe el correo y el push de apertura; la
         // administración solo el push (el correo del caso sale al tomarlo).

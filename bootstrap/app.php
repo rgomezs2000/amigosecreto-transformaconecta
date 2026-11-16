@@ -7,7 +7,9 @@ use App\Http\Middleware\ShareAppShell;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -45,5 +47,22 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // 419 significa que el formulario llegó con un token viejo: la sesión
+        // que lo emitió ya no existe (por ejemplo, la pestaña del login estuvo
+        // abierta mucho tiempo). Con AJAX se responde un aviso entendible y
+        // sin la traza de la excepción; el navegador pide un token nuevo y
+        // reintenta el envío en vez de dejar al usuario atascado.
+        // Laravel entrega el 419 como HttpException, ya no como
+        // TokenMismatchException, por eso se filtra por el código de estado.
+        $exceptions->render(function (HttpExceptionInterface $exception, Request $request) {
+            if ($exception->getStatusCode() !== 419 || ! $request->expectsJson()) {
+                return null;
+            }
+
+            return api_error(
+                'La página perdió la sesión de seguridad. Se recargará para que puedas intentarlo de nuevo.',
+                419,
+                ['csrf_expired' => true]
+            );
+        });
     })->create();

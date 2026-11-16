@@ -23,6 +23,12 @@ class ChatReport extends Model
 
     public const TYPE_SUPPORT = 'soporte';
 
+    /** Solicitud pública de registro (tipo «Usuarios»). */
+    public const TYPE_USER_REGISTRATION = 'registro';
+
+    /** Solicitud de cuenta: restablecer contraseña o desbloquear. */
+    public const TYPE_ACCOUNT = 'cuenta';
+
     /**
      * Tipos válidos y su etiqueta para la interfaz.
      *
@@ -33,9 +39,44 @@ class ChatReport extends Model
         self::TYPE_SUGGESTION => 'Sugerencia',
         self::TYPE_HELP => 'Ayuda',
         self::TYPE_SUPPORT => 'Soporte',
+        self::TYPE_USER_REGISTRATION => 'Usuarios',
+        self::TYPE_ACCOUNT => 'Cuenta',
     ];
 
     protected $table = 'chat_reports';
+
+    /**
+     * Abre un caso de soporte para una cuenta bloqueada o una solicitud de
+     * acceso. Lo usa el inicio de sesión cuando se agotan los intentos.
+     */
+    public static function openAccountRequest(User $user, string $kind, string $reason): self
+    {
+        $existing = static::query()
+            ->where('type', self::TYPE_ACCOUNT)
+            ->where('status', '!=', self::STATUS_CLOSED)
+            ->where('payload->action', $kind)
+            ->where('payload->user_id', $user->id)
+            ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        return static::create([
+            'type' => self::TYPE_ACCOUNT,
+            'status' => self::STATUS_PENDING,
+            'reporter_id' => $user->id,
+            'reason' => $reason,
+            'case_message' => 'La cuenta '.$user->username.' solicita '.$kind.'. '
+                .'El acceso quedó bloqueado por intentos fallidos.',
+            'context_label' => 'Acceso',
+            'payload' => [
+                'action' => $kind,
+                'user_id' => (int) $user->id,
+                'login' => $user->username,
+            ],
+        ]);
+    }
 
     protected $fillable = [
         'type',
@@ -45,6 +86,9 @@ class ChatReport extends Model
         'message_id',
         'reporter_id',
         'reason',
+        'case_message',
+        'suggestion',
+        'payload',
         'status',
         'assigned_to',
         'taken_by',
@@ -66,6 +110,7 @@ class ChatReport extends Model
         return [
             'taken_at' => 'datetime',
             'closed_at' => 'datetime',
+            'payload' => 'array',
         ];
     }
 
@@ -137,6 +182,14 @@ class ChatReport extends Model
         return $this->hasMany(ChatReportLink::class, 'report_id')->orderBy('id');
     }
 
+    /**
+     * Valoraciones de una sugerencia (seis aspectos).
+     */
+    public function ratings(): HasMany
+    {
+        return $this->hasMany(ChatReportRating::class, 'report_id')->orderBy('id');
+    }
+
     public function isPending(): bool
     {
         return $this->status === self::STATUS_PENDING;
@@ -170,6 +223,11 @@ class ChatReport extends Model
     public function isSupport(): bool
     {
         return $this->type === self::TYPE_SUPPORT;
+    }
+
+    public function isUserRegistration(): bool
+    {
+        return $this->type === self::TYPE_USER_REGISTRATION;
     }
 
     public function statusLabel(): string

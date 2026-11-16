@@ -43,30 +43,6 @@
             });
         }
 
-        function confirmDialog(message, onConfirm) {
-            if (window.bootbox) {
-                window.bootbox.confirm({
-                    title: 'Confirmar',
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Aceptar', className: 'btn-primary' }
-                    },
-                    callback: function (ok) {
-                        if (ok) {
-                            onConfirm();
-                        }
-                    }
-                });
-                return;
-            }
-
-            if (window.confirm(message)) {
-                onConfirm();
-            }
-        }
-
         function showError(xhr) {
             var response = xhr.responseJSON || {};
             var message = response.message;
@@ -78,15 +54,7 @@
 
             message = message || 'No se pudo completar la operación.';
 
-            if (window.bootbox) {
-                window.bootbox.alert({
-                    title: 'Error',
-                    message: message,
-                    centerVertical: true
-                });
-            } else {
-                window.alert(message);
-            }
+            window.AppDialog.error(message);
         }
 
         var table = $('#usuarios-table').DataTable({
@@ -225,6 +193,9 @@
         function openForm(user) {
             $('#usuarios-form-id').val(user ? user.id : '');
             $('#modal-user-form-title').text(user ? 'Modificar usuario' : 'Nuevo usuario');
+            $('#usuarios-name, #usuarios-email, #usuarios-username').prop('readonly', false);
+            $role.prop('disabled', false);
+            $('#form-user input[name="solicitud"]').remove();
             $name.val(user ? user.name : '');
             $email.val(user ? user.email : '');
             $username.val(user ? user.username : '');
@@ -240,6 +211,31 @@
         $('#usuarios-new').on('click', function () {
             openForm(null);
         });
+
+        // Alta que viene de una solicitud de registro: datos fijos, solo se
+        // elige el rol y se formaliza el registro.
+        var $solicitud = $('#usuarios-solicitud');
+
+        if ($solicitud.length) {
+            openForm({
+                name: $solicitud.attr('data-name'),
+                email: $solicitud.attr('data-email'),
+                username: $solicitud.attr('data-username'),
+                profile_id: ''
+            });
+
+            $('#modal-user-form-title').text('Formalizar registro');
+            $('#usuarios-name, #usuarios-email, #usuarios-username').prop('readonly', true);
+            $('#form-user').append('<input type="hidden" name="solicitud" value="' + $solicitud.attr('data-id') + '">');
+
+            // El prerregistro siempre se formaliza como Usuario, nunca como
+            // administrador. El rol queda visible pero deshabilitado.
+            var usuarioProfile = $('#usuarios-role option[data-slug="usuario"]').first();
+
+            if (usuarioProfile.length) {
+                $role.val(usuarioProfile.val()).prop('disabled', true);
+            }
+        }
 
         function showFieldError($field, $error, message) {
             $error.attr('data-kind', 'error').text(message);
@@ -290,7 +286,7 @@
                 return;
             }
 
-            confirmDialog(editing ? '¿Desea modificar el usuario?' : '¿Desea crear el usuario?', function () {
+            AppDialog.confirm(editing ? '¿Desea modificar el usuario?' : '¿Desea crear el usuario?', function () {
                 $.ajax({
                     url: editing ? usuarioBase + '/' + encodeURIComponent(id) : crearUrl,
                     method: editing ? 'PUT' : 'POST',
@@ -300,7 +296,8 @@
                         name: name,
                         email: email,
                         username: username,
-                        profile_id: profileId
+                        profile_id: profileId,
+                        solicitud: $('#form-user input[name="solicitud"]').val() || ''
                     }
                 }).done(function (response) {
                     window.location.assign(response.redirect || indexUrl);
@@ -368,7 +365,7 @@
             var id = $(this).data('id');
             var name = $(this).data('name');
 
-            confirmDialog('¿Desea eliminar el usuario «' + name + '»?', function () {
+            AppDialog.confirm('¿Desea eliminar el usuario «' + name + '»?', function () {
                 $.ajax({
                     url: usuarioBase + '/' + encodeURIComponent(id),
                     method: 'DELETE',
@@ -386,7 +383,7 @@
             var id = $(this).data('id');
             var name = $(this).data('name');
 
-            confirmDialog('¿Restablecer la contraseña de «' + name + '»? Se enviará una nueva clave por correo.', function () {
+            AppDialog.confirm('¿Restablecer la contraseña de «' + name + '»? Se enviará una nueva clave por correo.', function () {
                 $.ajax({
                     url: usuarioBase + '/' + encodeURIComponent(id) + '/restablecer',
                     method: 'POST',
@@ -402,7 +399,7 @@
             var id = $(this).data('id');
             var name = $(this).data('name');
 
-            confirmDialog('¿Bloquear el usuario «' + name + '»?', function () {
+            AppDialog.confirm('¿Bloquear el usuario «' + name + '»?', function () {
                 $.ajax({
                     url: usuarioBase + '/' + encodeURIComponent(id) + '/bloquear',
                     method: 'POST',
@@ -418,7 +415,7 @@
             var id = $(this).data('id');
             var name = $(this).data('name');
 
-            confirmDialog('¿Desbloquear el usuario «' + name + '»?', function () {
+            AppDialog.confirm('¿Desbloquear el usuario «' + name + '»?', function () {
                 $.ajax({
                     url: usuarioBase + '/' + encodeURIComponent(id) + '/desbloquear',
                     method: 'POST',
@@ -471,7 +468,7 @@
                 return;
             }
 
-            confirmDialog('¿Desea eliminar ' + ids.length + ' usuario(s) seleccionado(s)?', function () {
+            AppDialog.confirm('¿Desea eliminar ' + ids.length + ' usuario(s) seleccionado(s)?', function () {
                 $.ajax({
                     url: eliminarVariosUrl,
                     method: 'POST',
@@ -487,3 +484,4 @@
         });
     });
 })(window.jQuery);
+

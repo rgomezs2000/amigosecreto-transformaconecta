@@ -30,7 +30,7 @@ class ReporteChat
      */
     public function abrirTicket(ChatReport $report): ?Conversation
     {
-        if ($report->isSuggestion()) {
+        if ($report->isSuggestion() || $report->isUserRegistration()) {
             return null;
         }
 
@@ -68,8 +68,12 @@ class ReporteChat
      * administrador; la respuesta se envía desde la pestaña Sugerencia y el
      * usuario se suma al recibirla.
      */
-    public function gestionar(ChatReport $report, User $admin): Conversation
+    public function gestionar(ChatReport $report, User $admin): ?Conversation
     {
+        if ($report->isUserRegistration()) {
+            return null;
+        }
+
         if ($report->isSuggestion()) {
             $conversation = $this->buscar($report);
 
@@ -207,9 +211,25 @@ class ReporteChat
             return;
         }
 
+        $lines = [$this->nombreTicket($report)];
+
+        if (filled($report->reason)) {
+            $lines[] = 'Motivo: '.$report->reason;
+        }
+
+        if (filled($report->case_message)) {
+            $lines[] = "Mensaje:\n".$report->case_message;
+        } elseif (filled($report->message?->body)) {
+            $lines[] = "Mensaje:\n".$report->message->body;
+        }
+
+        if ($report->isSuggestion() && filled($report->suggestion)) {
+            $lines[] = "Sugerencia:\n".$report->suggestion;
+        }
+
         $message = $conversation->messages()->create([
             'user_id' => null,
-            'body' => $this->nombreTicket($report),
+            'body' => implode("\n\n", $lines),
             'type' => 'text',
             'is_moderation' => false,
             'delivered_at' => now(),

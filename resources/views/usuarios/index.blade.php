@@ -112,6 +112,14 @@
          data-url-login-existe="{{ route('perfil.login-existe') }}"
          hidden></div>
 
+    @if (! empty($solicitud))
+        <div id="usuarios-solicitud" hidden
+             data-id="{{ $solicitud['id'] }}"
+             data-name="{{ $solicitud['name'] }}"
+             data-email="{{ $solicitud['email'] }}"
+             data-username="{{ $solicitud['username'] }}"></div>
+    @endif
+
     <x-app-modal id="modal-user-form" title="Nuevo usuario">
         <x-slot:body>
             <form id="form-user" action="{{ route('usuarios.crear') }}" method="post" novalidate>
@@ -144,7 +152,7 @@
                     <select class="form-select" id="usuarios-role" name="profile_id">
                         <option value="">Selecciona un rol</option>
                         @foreach ($profiles as $profile)
-                            <option value="{{ $profile->id }}">{{ $profile->name }}</option>
+                            <option value="{{ $profile->id }}" data-slug="{{ $profile->slug }}">{{ $profile->name }}</option>
                         @endforeach
                     </select>
                     <p class="field-message" id="usuarios-role-error" role="status" aria-live="polite"></p>

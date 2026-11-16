@@ -32,39 +32,6 @@
             }
         }
 
-        function confirmDialog(message, onConfirm) {
-            if (window.bootbox) {
-                window.bootbox.confirm({
-                    title: 'Confirmar',
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Aceptar', className: 'btn-primary' }
-                    },
-                    callback: function (ok) {
-                        if (ok) {
-                            onConfirm();
-                        }
-                    }
-                });
-                return;
-            }
-
-            if (window.confirm(message)) {
-                onConfirm();
-            }
-        }
-
-        function alertDialog(message) {
-            if (window.bootbox) {
-                window.bootbox.alert({ title: 'Aviso', message: message, centerVertical: true });
-                return;
-            }
-
-            window.alert(message);
-        }
-
         function showError(xhr) {
             var response = xhr.responseJSON || {};
             var message = response.message;
@@ -74,7 +41,7 @@
                 message = response.errors[first][0];
             }
 
-            alertDialog(message || 'No se pudo completar la operación.');
+            window.AppDialog.error(message || 'No se pudo completar la operación.');
         }
 
         function redirect(response) {
@@ -169,14 +136,14 @@
                 notes[$(this).data('user-id')] = { notes: $(this).val() };
             });
 
-            confirmDialog('¿Desea guardar el evento?', function () {
+            AppDialog.confirm('¿Desea guardar el evento?', function () {
                 post(crearUrl, {
                     name: name,
                     exchange_at: date,
                     status_reason: observations,
                     participants: notes
                 }).done(function (response) {
-                    confirmDialog('El evento se guardó. ¿Desea iniciarlo ahora?', function () {
+                    AppDialog.confirm('El evento se guardó. ¿Desea iniciarlo ahora?', function () {
                         post(participantesBase + '/' + response.event_id + '/iniciar', {})
                             .done(function (startResponse) {
                                 redirect(startResponse);
@@ -328,7 +295,7 @@
         $('#eventos-lista').on('click', '.btn-evento-iniciar', function () {
             var id = eventId(this);
 
-            confirmDialog('¿Desea iniciar el evento? Se enviará un correo a los participantes.', function () {
+            AppDialog.confirm('¿Desea iniciar el evento? Se enviará un correo a los participantes.', function () {
                 post(participantesBase + '/' + id + '/iniciar', {})
                     .done(redirect)
                     .fail(showError);
@@ -339,7 +306,7 @@
         $('#eventos-lista').on('click', '.btn-evento-reiniciar-sorteo', function () {
             var id = $(this).data('id');
 
-            confirmDialog(
+            AppDialog.confirm(
                 '¿Reiniciar el sorteo? Se borran las parejas y los chats de amigo secreto, y todos vuelven a elegir.',
                 function () {
                     post(participantesBase + '/' + id + '/sorteo/reiniciar', {})
@@ -369,7 +336,7 @@
                 return;
             }
 
-            confirmDialog('¿Desea suspender el evento?', function () {
+            AppDialog.confirm('¿Desea suspender el evento?', function () {
                 post(participantesBase + '/' + id + '/suspender', { reason: reason })
                     .done(redirect)
                     .fail(showError);
@@ -408,7 +375,7 @@
                 return;
             }
 
-            confirmDialog('¿Desea posponer el evento para esta nueva fecha?', function () {
+            AppDialog.confirm('¿Desea posponer el evento para esta nueva fecha?', function () {
                 post(participantesBase + '/' + id + '/posponer', {
                     exchange_at: date,
                     reason: reason,
@@ -437,7 +404,7 @@
                 return;
             }
 
-            confirmDialog('¿Desea cancelar el evento? Se eliminará del sistema.', function () {
+            AppDialog.confirm('¿Desea cancelar el evento? Se eliminará del sistema.', function () {
                 post(participantesBase + '/' + id + '/cancelar', { reason: reason })
                     .done(redirect)
                     .fail(showError);
@@ -542,4 +509,5 @@
         }
     });
 })(window.jQuery);
+
 

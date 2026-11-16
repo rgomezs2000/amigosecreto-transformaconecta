@@ -69,8 +69,8 @@
                         <label for="moderacion-filter-type" class="form-label">Filtrar por</label>
                         <select class="form-select" id="moderacion-filter-type">
                             <option value="all">Todos los casos</option>
-                            <option value="case_type">Tipo de caso</option>
                             <option value="date">Por fecha</option>
+                            <option value="case_type">Tipo de caso</option>
                             <option value="status">Estado</option>
                             <option value="manager">Gestionado por</option>
                             <option value="referred">Remitido a</option>
@@ -143,20 +143,24 @@
                 </div>
             </section>
 
-            <section class="roles-table-card" aria-label="Listado de reportes">
+            <section class="roles-table-card" aria-label="Listado de casos">
+                <div class="moderacion-table-toolbar">
+                    <button type="button" class="btn btn-primary" id="moderacion-nuevo-ticket">
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                        <span>Crear ticket</span>
+                    </button>
+                </div>
+
                 <table id="moderacion-table" class="table table-striped align-middle w-100 roles-table">
                     <thead>
                         <tr>
                             <th scope="col" class="roles-id">Nº Ticket</th>
                             <th scope="col" class="roles-id">Fecha</th>
-                            <th scope="col" class="roles-name">Estado</th>
+                            <th scope="col" class="roles-name">Tipo</th>
                             <th scope="col" class="roles-name">Gestionado por</th>
                             <th scope="col" class="roles-name">Remitido a</th>
-                            <th scope="col" class="roles-name">Reportado por</th>
-                            <th scope="col" class="roles-name">Autor del mensaje</th>
                             <th scope="col" class="roles-name">Motivo</th>
-                            <th scope="col" class="roles-name">Conversación</th>
-                            <th scope="col" class="roles-name">Tipo</th>
+                            <th scope="col" class="roles-name">Estado</th>
                             <th scope="col" class="roles-actions">Acciones</th>
                         </tr>
                     </thead>
@@ -287,6 +291,10 @@
          data-url-cerrar="{{ route('moderacion.reportes.cerrar', ['report' => '__ID__']) }}"
          data-url-remitir="{{ route('moderacion.reportes.remitir', ['report' => '__ID__']) }}"
          data-url-admins="{{ route('moderacion.administradores') }}"
+         data-url-restablecer="{{ route('moderacion.solicitudes.restablecer', ['report' => '__ID__']) }}"
+         data-url-desbloquear="{{ route('moderacion.solicitudes.desbloquear', ['report' => '__ID__']) }}"
+         data-url-rechazar="{{ route('moderacion.solicitudes.rechazar', ['report' => '__ID__']) }}"
+         data-url-usuarios="{{ module_url('usuarios') }}?solicitud=__ID__"
          data-csrf="{{ csrf_token() }}"
          hidden></div>
 
@@ -376,11 +384,11 @@
                             <dd id="moderacion-detail-context"></dd>
                         </div>
                         <div class="perfil-data__item perfil-data__item--wide">
-                            <dt>Motivo o sugerencia</dt>
+                            <dt>Motivo</dt>
                             <dd id="moderacion-detail-reason"></dd>
                         </div>
                         <div class="perfil-data__item perfil-data__item--wide" id="moderacion-detail-message-wrap">
-                            <dt>Mensaje reportado</dt>
+                            <dt>Mensaje</dt>
                             <dd id="moderacion-detail-message"></dd>
                         </div>
                         <div class="perfil-data__item">
@@ -470,6 +478,13 @@
                         <p class="moderacion-sugerencia__label">Sugerencia del usuario</p>
                         <p class="moderacion-sugerencia__text" id="moderacion-sugerencia-text"></p>
 
+                        <p class="moderacion-sugerencia__label">Valoración de la sugerencia</p>
+                        <div class="moderacion-sugerencia__ratings" id="moderacion-sugerencia-ratings"></div>
+                        <div class="moderacion-sugerencia__totals">
+                            <p><span>Total</span> <strong id="moderacion-sugerencia-total">—</strong></p>
+                            <p><span>Promedio</span> <strong id="moderacion-sugerencia-average">—</strong></p>
+                        </div>
+
                         <p class="moderacion-sugerencia__label">Conversación de la sugerencia</p>
                         <div class="moderacion-sugerencia__thread" id="moderacion-sugerencia-thread"></div>
 
@@ -489,6 +504,22 @@
         </x-slot:body>
 
         <x-slot:footer>
+            <button type="button" class="btn btn-primary" id="moderacion-solicitud-reset" hidden>
+                <i class="fa-solid fa-key" aria-hidden="true"></i>
+                <span>Restablecer contraseña</span>
+            </button>
+            <button type="button" class="btn btn-success" id="moderacion-solicitud-unlock" hidden>
+                <i class="fa-solid fa-lock-open" aria-hidden="true"></i>
+                <span>Desbloquear cuenta</span>
+            </button>
+            <a class="btn btn-primary" id="moderacion-solicitud-crear" href="#" hidden>
+                <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+                <span>Crear usuario</span>
+            </a>
+            <button type="button" class="btn btn-outline-danger" id="moderacion-solicitud-reject" hidden>
+                <i class="fa-solid fa-ban" aria-hidden="true"></i>
+                <span>Rechazar registro</span>
+            </button>
             <button type="button" class="btn btn-primary" id="moderacion-detail-take" hidden>
                 <i class="fa-solid fa-hand" aria-hidden="true"></i>
                 <span>Tomar caso</span>
@@ -592,6 +623,39 @@
         </x-slot:footer>
     </x-app-modal>
 
+    <x-app-modal id="modal-moderacion-nuevo-ticket" title="Crear ticket" size="xl" scrollable>
+        <x-slot:body>
+            <p class="chat-hint">
+                El ticket queda asignado a tu usuario. No se remite a otro administrador.
+            </p>
+
+            @include('contacto-soporte.partials.form', [
+                'types' => [
+                    \App\Models\ChatReport::TYPE_MODERATION => 'Moderación y contenido',
+                    \App\Models\ChatReport::TYPE_SUGGESTION => 'Sugerencia',
+                    \App\Models\ChatReport::TYPE_HELP => 'Ayuda',
+                    \App\Models\ChatReport::TYPE_SUPPORT => 'Soporte',
+                ],
+                'endpoint' => route('moderacion.crear'),
+                'mode' => 'admin',
+            ])
+        </x-slot:body>
+
+        <x-slot:footer>
+            <button type="button" class="btn btn-primary" id="reporte-crear">
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                <span>Crear ticket</span>
+            </button>
+            <button type="button" class="btn btn-outline-secondary" id="reporte-limpiar">
+                <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                <span>Limpiar</span>
+            </button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        </x-slot:footer>
+    </x-app-modal>
+
+    @include('contacto-soporte.partials.modales', ['mode' => 'admin'])
+
     <x-app-modal id="modal-moderacion-lightbox" title="Vista previa" size="xl">
         <x-slot:body>
             <div class="moderacion-lightbox">
@@ -675,5 +739,6 @@
 @endpush
 
 @push('scripts')
+    <script src="{{ asset('js/reporte-form.js') }}?v={{ filemtime(public_path('js/reporte-form.js')) }}"></script>
     <script src="{{ asset('js/moderacion.js') }}?v={{ filemtime(public_path('js/moderacion.js')) }}"></script>
 @endpush

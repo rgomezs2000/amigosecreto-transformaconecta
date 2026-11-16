@@ -23,11 +23,7 @@
 
             message = message || 'No se pudo guardar la configuración.';
 
-            if (window.bootbox) {
-                window.bootbox.alert({ title: 'Aviso', message: message, centerVertical: true });
-            } else {
-                window.alert(message);
-            }
+            window.AppDialog.error(message);
         }
 
         function post(url, data) {

@@ -62,35 +62,7 @@
 
             message = message || 'No se pudo completar la operación.';
 
-            if (window.bootbox) {
-                window.bootbox.alert({ title: 'Error', message: message, centerVertical: true });
-            } else {
-                window.alert(message);
-            }
-        }
-
-        function confirmDialog(message, onConfirm) {
-            if (window.bootbox) {
-                window.bootbox.confirm({
-                    title: 'Confirmar',
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Aceptar', className: 'btn-primary' }
-                    },
-                    callback: function (ok) {
-                        if (ok) {
-                            onConfirm();
-                        }
-                    }
-                });
-                return;
-            }
-
-            if (window.confirm(message)) {
-                onConfirm();
-            }
+            window.AppDialog.error(message);
         }
 
         function initStaging(response) {
@@ -507,7 +479,7 @@
                 };
             });
 
-            confirmDialog('¿Desea aplicar esta asignación/revocación de perfiles?', function () {
+            AppDialog.confirm('¿Desea aplicar esta asignación/revocación de perfiles?', function () {
                 $.ajax({
                     url: aplicarUrl,
                     method: 'POST',
@@ -536,3 +508,4 @@
         });
     });
 })(window.jQuery);
+

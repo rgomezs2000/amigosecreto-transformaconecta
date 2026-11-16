@@ -23,6 +23,11 @@
         }
 
         var csrf = $config.attr('data-csrf');
+        var restablecerUrl = $config.attr('data-url-restablecer') || '';
+        var desbloquearUrl = $config.attr('data-url-desbloquear') || '';
+        var rechazarUrl = $config.attr('data-url-rechazar') || '';
+        var usuariosUrl = $config.attr('data-url-usuarios') || '';
+        var detailSolicitud = null;
 
         /* ------------------------------------------------------------------
            Pestañas
@@ -354,18 +359,15 @@
             columns: [
                 { data: 'ticket', className: 'roles-id' },
                 { data: 'date' },
-                { data: 'status' },
+                { data: 'type_html' },
                 { data: 'manager' },
                 { data: 'referred_to' },
-                { data: 'reporter' },
-                { data: 'author' },
                 { data: 'reason' },
-                { data: 'conversation' },
-                { data: 'type_html' },
+                { data: 'status_html' },
                 { data: 'actions', orderable: false, searchable: false, className: 'roles-actions' }
             ],
             columnDefs: [
-                { orderable: false, targets: [8, 10] }
+                { orderable: false, targets: [7] }
             ],
             order: [[1, 'desc']],
             pageLength: 10,
@@ -423,6 +425,19 @@
             });
 
         toggleReportFilter();
+
+        $('#moderacion-nuevo-ticket').on('click', function () {
+            var element = document.getElementById('modal-moderacion-nuevo-ticket');
+
+            if (element) {
+                bootstrap.Modal.getOrCreateInstance(element).show();
+            }
+        });
+
+        document.addEventListener('reporte:creado', function () {
+            reportesTable.ajax.reload(null, false);
+            refreshModerationCounts();
+        });
 
         $('#moderacion-table').on('click', '.moderacion-detail', function () {
             var row = rowDataFor(reportesTable, $(this));
@@ -568,7 +583,7 @@
             $('#moderacion-detail-author').text(row.author_raw || row.author || '—');
             $('#moderacion-detail-conversation').text(row.conversation_raw || row.conversation || '—');
             $('#moderacion-detail-reason').text(row.reason_full || row.reason || '—');
-            $('#moderacion-detail-message').text(row.message_full || row.message || '—');
+            $('#moderacion-detail-message').text(row.report_message || row.message_full || row.message || '—');
             $('#moderacion-detail-closed-at').text(row.closed_at || '—');
             $('#moderacion-detail-closed-by').text(row.closed_by_name || '—');
             $('#moderacion-detail-close-observation').text(row.close_observation || '—');
@@ -581,11 +596,19 @@
                 $('#moderacion-detail-context').text(row.context_label || row.module_code || '—');
             }
 
-            $('#moderacion-detail-message-wrap').prop('hidden', !row.message_full);
+            $('#moderacion-detail-message-wrap').prop('hidden', !(row.report_message || row.message_full));
 
             $('#moderacion-detail-take').prop('hidden', !row.can_take);
             $('#moderacion-detail-close').prop('hidden', !row.can_close);
             $('#moderacion-detail-refer').prop('hidden', !row.can_refer);
+
+            var $createUser = $('#moderacion-solicitud-crear');
+
+            if (row.create_user_url) {
+                $createUser.attr('href', row.create_user_url).prop('hidden', false);
+            } else {
+                $createUser.prop('hidden', true).removeAttr('href');
+            }
 
             renderReferrals(row.referrals);
 
@@ -626,6 +649,66 @@
             }
         }
 
+        function enviarSolicitud(template, data) {
+            if (!detailSolicitud) {
+                return;
+            }
+
+            $.ajax({
+                url: String(template || '').replace('__ID__', detailSolicitud.id),
+                method: 'POST',
+                dataType: 'json',
+                headers: { 'X-CSRF-TOKEN': csrf },
+                data: data || {}
+            }).done(function (response) {
+                AppDialog.alert((response && response.message) || 'Listo.');
+
+                if (modal) {
+                    modal.hide();
+                }
+
+                if (reportesTable) {
+                    reportesTable.ajax.reload(null, false);
+                }
+            }).fail(function (xhr) {
+                AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo completar la gestión.');
+            });
+        }
+
+        $('#moderacion-solicitud-reset').on('click', function () {
+            if (!detailSolicitud || detailSolicitud.action !== 'reset') {
+                return;
+            }
+
+            AppDialog.confirm('¿Restablecer la contraseña y enviar las nuevas credenciales por correo?', function () {
+                enviarSolicitud(restablecerUrl, {});
+            });
+        });
+
+        $('#moderacion-solicitud-unlock').on('click', function () {
+            if (!detailSolicitud || detailSolicitud.action !== 'unlock') {
+                return;
+            }
+
+            AppDialog.confirm('¿Desbloquear la cuenta y cerrar el caso?', function () {
+                enviarSolicitud(desbloquearUrl, {});
+            });
+        });
+
+        $('#moderacion-solicitud-reject').on('click', function () {
+            if (!detailSolicitud || detailSolicitud.type !== 'registro') {
+                return;
+            }
+
+            AppDialog.prompt('Motivo del rechazo (se avisa al solicitante por correo):', function (value) {
+                if (!value) {
+                    return;
+                }
+
+                enviarSolicitud(rechazarUrl, { reason: value });
+            }, { title: 'Rechazar registro' });
+        });
+
         function openReportDetail(row) {
             detailReportId = row.id;
             currentReportRow = row;
@@ -665,7 +748,13 @@
 
                     renderReportFields(report);
                     renderAttachments(data.attachments || {}, data.links || []);
-                    renderSuggestion(report, data.suggestion_messages || []);
+                    renderSuggestion(
+                        report,
+                        data.suggestion_messages || [],
+                        data.ratings || [],
+                        data.ratings_total,
+                        data.ratings_average
+                    );
                 })
                 .fail(function () {
                     // La ficha de datos ya está visible; si falla la carga de
@@ -690,13 +779,55 @@
         function resetSuggestion(row) {
             $('#moderacion-sugerencia-text').text(row && row.reason_full ? row.reason_full : '');
             $('#moderacion-sugerencia-thread').empty();
+            $('#moderacion-sugerencia-ratings').empty();
+            $('#moderacion-sugerencia-total').text('—');
+            $('#moderacion-sugerencia-average').text('—');
             $('#moderacion-sugerencia-body').val('');
             $('#moderacion-sugerencia-error').text('').removeAttr('data-kind');
             $('#moderacion-sugerencia-form').prop('hidden', true);
         }
 
-        function renderSuggestion(report, messages) {
-            $('#moderacion-sugerencia-text').text(report.reason_full || report.reason || 'Sin texto de sugerencia.');
+        function renderSuggestionRatings(ratings, total, average) {
+            var faces = {
+                1: 'fa-face-frown',
+                2: 'fa-face-meh',
+                3: 'fa-face-meh-blank',
+                4: 'fa-face-smile',
+                5: 'fa-face-grin-stars'
+            };
+            var $box = $('#moderacion-sugerencia-ratings').empty();
+
+            if (!ratings.length) {
+                $box.html('<p class="moderacion-sugerencia__empty">Sin valoraciones registradas.</p>');
+                $('#moderacion-sugerencia-total').text('—');
+                $('#moderacion-sugerencia-average').text('—');
+                return;
+            }
+
+            ratings.forEach(function (rating) {
+                var score = parseInt(rating.score, 10) || 0;
+                var icon = faces[score] || 'fa-face-meh-blank';
+
+                $box.append(
+                    '<div class="moderacion-sugerencia__rating">' +
+                    '<span class="moderacion-sugerencia__aspect">' + escapeText(rating.aspect_label) + '</span>' +
+                    '<span class="moderacion-sugerencia__face reporte-cara--' + score + '">' +
+                    '<i class="fa-solid ' + icon + '" aria-hidden="true"></i> ' +
+                    escapeText(rating.qualitative) + '</span>' +
+                    '<strong class="moderacion-sugerencia__score">' + score + '/5</strong>' +
+                    '</div>'
+                );
+            });
+
+            $('#moderacion-sugerencia-total').text(total == null ? '—' : total);
+            $('#moderacion-sugerencia-average').text(average == null ? '—' : average);
+        }
+
+        function renderSuggestion(report, messages, ratings, total, average) {
+            $('#moderacion-sugerencia-text').text(
+                report.suggestion || report.reason_full || report.reason || 'Sin texto de sugerencia.'
+            );
+            renderSuggestionRatings(ratings || [], total, average);
 
             var $thread = $('#moderacion-sugerencia-thread').empty();
 
@@ -1155,12 +1286,8 @@
                     }));
                 }
 
-                if (response && response.message && window.bootbox) {
-                    window.bootbox.alert({
-                        title: 'Aviso',
-                        message: response.message,
-                        centerVertical: true
-                    });
+                if (response && response.message) {
+                    AppDialog.alert(response.message);
                 }
             }).fail(function (xhr) {
                 $error.attr('data-kind', 'error').text(caseError(xhr));
@@ -1206,6 +1333,19 @@
                     // La sugerencia se responde desde su pestaña: se recarga la
                     // ficha para habilitar el formulario sin cerrar el modal.
                     loadReportDetail(detailReportId);
+                    return;
+                }
+
+                var createUserUrl = response && response.report && response.report.create_user_url;
+
+                if (createUserUrl) {
+                    // Los casos de registro no tienen chat: se formaliza el alta
+                    // en Usuarios con los datos de la solicitud ya cargados.
+                    if (modal) {
+                        modal.hide();
+                    }
+
+                    window.location.assign(createUserUrl);
                     return;
                 }
 
@@ -2138,4 +2278,5 @@
         activateTab('reportes');
     });
 })(window.jQuery);
+
 

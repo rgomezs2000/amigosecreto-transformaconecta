@@ -8,11 +8,6 @@
 @section('shell-title', $module->name)
 
 @section('page')
-    <a class="module-back" href="{{ route('dashboard') }}">
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-        <span>Volver al panel</span>
-    </a>
-
     <div class="module-layout">
         <article class="module-card">
             <span class="module-icon module-icon--{{ $groupClass }}">

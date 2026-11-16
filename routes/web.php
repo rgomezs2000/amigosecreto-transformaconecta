@@ -3,6 +3,7 @@
 use App\Http\Controllers\AmigoSecretoController;
 use App\Http\Controllers\CategoriasController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\ContactoSoporteController;
 use App\Http\Controllers\DinamicaController;
 use App\Http\Controllers\EventoReinicioController;
 use App\Http\Controllers\EventosController;
@@ -24,6 +25,8 @@ use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\PermisosController;
 use App\Http\Controllers\RolesController;
 use App\Http\Controllers\SessionController;
+use App\Http\Controllers\SolicitudAdminController;
+use App\Http\Controllers\SolicitudController;
 use App\Http\Controllers\SorteoCiegoController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\UsuariosAsociadosController;
@@ -36,6 +39,19 @@ Route::get('/', [HomeController::class, 'index'])->name('home');
 
 // Pantalla de acceso.
 Route::get('/login', [LoginController::class, 'index'])->name('login');
+
+// Solicitudes públicas: prerregistro y recuperación de contraseña.
+Route::get('/solicitudes/usuario-disponible', [SolicitudController::class, 'usuarioDisponible'])
+    ->middleware('throttle:30,1')
+    ->name('solicitudes.usuario');
+
+Route::post('/solicitudes/registro', [SolicitudController::class, 'registro'])
+    ->middleware('throttle:5,1')
+    ->name('solicitudes.registro');
+
+Route::post('/solicitudes/recuperacion', [SolicitudController::class, 'recuperacion'])
+    ->middleware('throttle:5,1')
+    ->name('solicitudes.recuperacion');
 
 // Validación de usuario/correo y clave (responde JSON para el AJAX).
 Route::post('/login', [LoginController::class, 'login'])->name('login.attempt');
@@ -136,6 +152,10 @@ Route::get('/moderacion/datos', [ModeracionController::class, 'datos'])
     ->name('moderacion.datos');
 
 // Ficha completa del caso: datos, adjuntos, enlaces y sugerencia.
+Route::post('/moderacion/reportes', [ModeracionController::class, 'crear'])
+    ->middleware('auth')
+    ->name('moderacion.crear');
+
 Route::get('/moderacion/reportes/{report}/detalle', [ModeracionController::class, 'detalle'])
     ->middleware('auth')
     ->whereNumber('report')
@@ -152,6 +172,30 @@ Route::post('/moderacion/reportes/{report}/sugerencia', [ModeracionController::c
     ->middleware('auth')
     ->whereNumber('report')
     ->name('moderacion.reportes.sugerencia');
+
+// Contacto y soporte del usuario: crear casos y hacer seguimiento.
+Route::get('/contacto-soporte/datos', [ContactoSoporteController::class, 'datos'])
+    ->middleware('auth')
+    ->name('contacto-soporte.datos');
+
+Route::post('/contacto-soporte/reportes', [ContactoSoporteController::class, 'crear'])
+    ->middleware('auth')
+    ->name('contacto-soporte.crear');
+
+Route::get('/contacto-soporte/reportes/{report}/detalle', [ContactoSoporteController::class, 'detalle'])
+    ->middleware('auth')
+    ->whereNumber('report')
+    ->name('contacto-soporte.detalle');
+
+Route::post('/contacto-soporte/reportes/{report}/mensajes', [ContactoSoporteController::class, 'enviarMensaje'])
+    ->middleware('auth')
+    ->whereNumber('report')
+    ->name('contacto-soporte.mensajes');
+
+Route::get('/contacto-soporte/adjuntos/{attachment}', [ContactoSoporteController::class, 'adjunto'])
+    ->middleware('auth')
+    ->whereNumber('attachment')
+    ->name('contacto-soporte.adjuntos');
 
 Route::get('/moderacion/contadores', [ModeracionController::class, 'contadores'])
     ->middleware('auth')
@@ -200,6 +244,19 @@ Route::get('/moderacion/grupos/{conversation}/vetados', [ModeracionGruposControl
 Route::post('/moderacion/grupos/{conversation}/vetados', [ModeracionGruposController::class, 'sincronizar'])
     ->middleware('auth')
     ->name('moderacion.grupos.vetados.sincronizar');
+
+// Gestión de solicitudes de cuenta (restablecer, desbloquear) y registro.
+Route::post('/moderacion/solicitudes/{report}/restablecer', [SolicitudAdminController::class, 'restablecer'])
+    ->middleware('auth')
+    ->name('moderacion.solicitudes.restablecer');
+
+Route::post('/moderacion/solicitudes/{report}/desbloquear', [SolicitudAdminController::class, 'desbloquear'])
+    ->middleware('auth')
+    ->name('moderacion.solicitudes.desbloquear');
+
+Route::post('/moderacion/solicitudes/{report}/rechazar-registro', [SolicitudAdminController::class, 'rechazarRegistro'])
+    ->middleware('auth')
+    ->name('moderacion.solicitudes.rechazar');
 
 // Chat (buzón universal, flotante). La página la sirve el enrutador de
 // módulos; aquí quedan sus acciones.

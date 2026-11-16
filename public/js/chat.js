@@ -207,60 +207,6 @@
             }
         }
 
-        function alertDialog(message) {
-            if (window.bootbox) {
-                window.bootbox.alert({ title: 'Aviso', message: message, centerVertical: true });
-            } else {
-                window.alert(message);
-            }
-        }
-
-        function confirmDialog(message, onConfirm) {
-            if (window.bootbox) {
-                window.bootbox.confirm({
-                    title: 'Confirmar',
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Aceptar', className: 'btn-primary' }
-                    },
-                    callback: function (ok) {
-                        if (ok) {
-                            onConfirm();
-                        }
-                    }
-                });
-                return;
-            }
-
-            if (window.confirm(message)) {
-                onConfirm();
-            }
-        }
-
-        function promptDialog(title, message, onConfirm) {
-            if (window.bootbox) {
-                window.bootbox.prompt({
-                    title: title,
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Aceptar', className: 'btn-primary' }
-                    },
-                    callback: function (value) {
-                        if (value !== null) {
-                            onConfirm(value);
-                        }
-                    }
-                });
-                return;
-            }
-
-            onConfirm(window.prompt(message) || '');
-        }
-
         function request(method, url, data) {
             return $.ajax({
                 url: url,
@@ -1087,7 +1033,7 @@
                     paintReactions(messageId, (response && response.reactions) || []);
                 })
                 .fail(function (xhr) {
-                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo reaccionar.');
+                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo reaccionar.');
                     refreshMessages([messageId]);
                 })
                 .always(function () {
@@ -2132,7 +2078,7 @@
                 soundEnabled = next;
                 updateSoundButton();
             }).fail(function () {
-                alertDialog('No se pudo guardar la preferencia de sonido. Intenta de nuevo.');
+                AppDialog.alert('No se pudo guardar la preferencia de sonido. Intenta de nuevo.');
             });
         });
 
@@ -2232,7 +2178,7 @@
                     openConversation(response.conversation.id, response.conversation.title, 'Conversación directa');
                 })
                 .fail(function (xhr) {
-                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo abrir el chat.');
+                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo abrir el chat.');
                 });
         });
 
@@ -2286,7 +2232,7 @@
                     renderPinned();
                 })
                 .fail(function (xhr) {
-                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo desfijar el mensaje.');
+                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo desfijar el mensaje.');
                 });
         });
 
@@ -2322,7 +2268,7 @@
                 post(chatBase + '/' + target.id + '/silenciar', {})
                     .done(refresh)
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cambiar el silencio.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo cambiar el silencio.');
                     });
 
                 return;
@@ -2332,7 +2278,7 @@
                 post(chatBase + '/' + target.id + '/favorito', {})
                     .done(refresh)
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cambiar el favorito.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo cambiar el favorito.');
                     });
 
                 return;
@@ -2342,7 +2288,7 @@
                 post(chatBase + '/' + target.id + '/fijar', {})
                     .done(refresh)
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo fijar la conversación.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo fijar la conversación.');
                     });
 
                 return;
@@ -2352,7 +2298,7 @@
                 post(chatBase + '/' + target.id + '/leer', {})
                     .done(refresh)
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo marcar como leída.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo marcar como leída.');
                     });
 
                 return;
@@ -2362,14 +2308,14 @@
                 post(chatBase + '/' + target.id + '/no-leido', {})
                     .done(refresh)
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo marcar como no leída.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo marcar como no leída.');
                     });
 
                 return;
             }
 
             if (action === 'archive') {
-                confirmDialog(
+                AppDialog.confirm(
                     '¿Archivar esta conversación? Mientras esté archivada no aparece en la moderación.',
                     function () {
                         post(chatBase + '/' + target.id + '/archivar', {})
@@ -2381,7 +2327,7 @@
                                 refresh();
                             })
                             .fail(function (xhr) {
-                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo archivar.');
+                                AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo archivar.');
                             });
                     }
                 );
@@ -2393,14 +2339,14 @@
                 remove(chatBase + '/' + target.id + '/archivar', {})
                     .done(refresh)
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo deshacer el archivo.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo deshacer el archivo.');
                     });
 
                 return;
             }
 
             if (action === 'vaciar') {
-                confirmDialog(
+                AppDialog.confirm(
                     '¿Vaciar este chat? Se borran los mensajes, enlaces y adjuntos de tu lado.',
                     function () {
                         post(chatBase + '/' + target.id + '/vaciar', {})
@@ -2412,7 +2358,7 @@
                                 refresh();
                             })
                             .fail(function (xhr) {
-                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo vaciar el chat.');
+                                AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo vaciar el chat.');
                             });
                     }
                 );
@@ -2421,7 +2367,7 @@
             }
 
             if (action === 'clear') {
-                confirmDialog(
+                AppDialog.confirm(
                     '¿Eliminar esta conversación de tu lista? Si vuelves a abrirla, empieza vacía.',
                     function () {
                         post(chatBase + '/' + target.id + '/eliminar', {})
@@ -2433,7 +2379,7 @@
                                 refresh();
                             })
                             .fail(function (xhr) {
-                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo eliminar la conversación.');
+                                AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo eliminar la conversación.');
                             });
                     }
                 );
@@ -2442,7 +2388,7 @@
             }
 
             if (action === 'leave') {
-                confirmDialog('¿Salir de «' + escape(target.title) + '»?', function () {
+                AppDialog.confirm('¿Salir de «' + escape(target.title) + '»?', function () {
                     post(chatBase + '/' + target.id + '/salir', {})
                         .done(function () {
                             if (currentId === target.id) {
@@ -2452,7 +2398,7 @@
                             refresh();
                         })
                         .fail(function (xhr) {
-                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo salir del grupo.');
+                            AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo salir del grupo.');
                         });
                 });
 
@@ -2465,7 +2411,7 @@
             }
 
             if (action === 'delete') {
-                confirmDialog('¿Eliminar esta conversación para todos? No se puede deshacer.', function () {
+                AppDialog.confirm('¿Eliminar esta conversación para todos? No se puede deshacer.', function () {
                     remove(chatBase + '/' + target.id, {})
                         .done(function () {
                             if (currentId === target.id) {
@@ -2475,7 +2421,7 @@
                             refresh();
                         })
                         .fail(function (xhr) {
-                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo eliminar.');
+                            AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo eliminar.');
                         });
                 });
 
@@ -2491,10 +2437,10 @@
                             navigator.clipboard.writeText(url);
                         }
 
-                        alertDialog('Enlace de invitación copiado:\n' + url);
+                        AppDialog.alert('Enlace de invitación copiado:\n' + url);
                     })
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo crear la invitación.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo crear la invitación.');
                     });
 
                 return;
@@ -2510,14 +2456,14 @@
                     .done(function (response) {
                         var items = (response && response.items) || [];
 
-                        alertDialog(items.length
+                        AppDialog.alert(items.length
                             ? items.map(function (item) {
                                 return '• ' + item.name + (item.reason ? ' — ' + item.reason : '');
                             }).join('\n')
                             : 'No hay usuarios vetados en este grupo.');
                     })
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cargar la lista de vetados.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo cargar la lista de vetados.');
                     });
 
                 return;
@@ -2528,13 +2474,13 @@
             }
 
             if (action === 'block') {
-                confirmDialog(
+                AppDialog.confirm(
                     '¿Bloquear a «' + escape(target.title) + '»? No podrán enviarse mensajes entre ustedes.',
                     function () {
                         post(chatBase + '/usuarios/' + target.userId + '/bloquear', {})
                             .done(refresh)
                             .fail(function (xhr) {
-                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo bloquear al usuario.');
+                                AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo bloquear al usuario.');
                             });
                     }
                 );
@@ -2546,7 +2492,7 @@
                 remove(chatBase + '/usuarios/' + target.userId + '/bloquear', {})
                     .done(refresh)
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo desbloquear al usuario.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo desbloquear al usuario.');
                     });
             }
         });
@@ -2568,14 +2514,14 @@
                         refresh();
                     })
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cambiar el silencio.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo cambiar el silencio.');
                     });
 
                 return;
             }
 
             if (action === 'block') {
-                confirmDialog(
+                AppDialog.confirm(
                     '¿Bloquear a «' + escape(target.name) + '»? Mientras esté bloqueado no podrás abrir el chat.',
                     function () {
                         post(chatBase + '/usuarios/' + target.id + '/bloquear', {})
@@ -2587,7 +2533,7 @@
                                 refresh();
                             })
                             .fail(function (xhr) {
-                                alertDialog((xhr.responseJSON || {}).message || 'No se pudo bloquear.');
+                                AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo bloquear.');
                             });
                     }
                 );
@@ -2601,7 +2547,7 @@
                         refresh();
                     })
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo desbloquear.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo desbloquear.');
                     });
 
                 return;
@@ -2666,14 +2612,14 @@
                         renderPinned();
                     })
                     .fail(function (xhr) {
-                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo cambiar el mensaje fijado.');
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo cambiar el mensaje fijado.');
                     });
 
                 return;
             }
 
             if (action === 'edit') {
-                promptDialog('Editar mensaje', 'Escribe el nuevo texto:', function (value) {
+                AppDialog.prompt('Escribe el nuevo texto:', function (value) {
                     if (!value) {
                         return;
                     }
@@ -2684,21 +2630,21 @@
                             refresh();
                         })
                         .fail(function (xhr) {
-                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo editar.');
+                            AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo editar.');
                         });
-                });
+                }, { title: 'Editar mensaje' });
                 return;
             }
 
             if (action === 'delete') {
-                confirmDialog('¿Desea eliminar el mensaje?', function () {
+                AppDialog.confirm('¿Desea eliminar el mensaje?', function () {
                     post(chatBase + '/mensajes/' + id + '/eliminar', {})
                         .done(function () {
                             refreshMessages([id]);
                             refresh();
                         })
                         .fail(function (xhr) {
-                            alertDialog((xhr.responseJSON || {}).message || 'No se pudo eliminar.');
+                            AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo eliminar.');
                         });
                 });
                 return;
@@ -3263,7 +3209,7 @@
                 }
 
                 resetReportForm();
-                alertDialog('Reporte enviado a la administración.');
+                AppDialog.alert('Reporte enviado a la administración.');
             }).fail(function (xhr) {
                 var message = (xhr.responseJSON || {}).message || 'No se pudo enviar el reporte.';
                 $error.text(message).attr('data-kind', 'error');
@@ -3448,7 +3394,7 @@
                 }
 
                 refresh();
-                alertDialog(count > 1 ? 'Mensaje reenviado a ' + count + ' destinos.' : 'Mensaje reenviado.');
+                AppDialog.alert(count > 1 ? 'Mensaje reenviado a ' + count + ' destinos.' : 'Mensaje reenviado.');
             }).fail(function (xhr) {
                 $('#chat-forward-error').text(
                     (xhr.responseJSON || {}).message || 'No se pudo reenviar el mensaje.'
@@ -3748,13 +3694,13 @@
             var capacity = 6 - pendingFiles.length;
 
             if (capacity <= 0) {
-                alertDialog('Ya tienes 6 archivos adjuntos. Quita alguno para añadir otro.');
+                AppDialog.alert('Ya tienes 6 archivos adjuntos. Quita alguno para añadir otro.');
                 return;
             }
 
             if (list.length > capacity) {
                 list = list.slice(0, capacity);
-                alertDialog('Se adjuntaron ' + capacity + ' archivos: el máximo por mensaje es 6.');
+                AppDialog.alert('Se adjuntaron ' + capacity + ' archivos: el máximo por mensaje es 6.');
             }
 
             var currentHasMedia = pendingFiles.some(fileIsMedia);
@@ -3763,12 +3709,12 @@
             var incomingHasOther = list.some(function (file) { return !fileIsMedia(file); });
 
             if (incomingHasOther && (list.length > 1 || currentHasMedia || currentHasOther)) {
-                alertDialog('Puedes enviar varias fotos y videos juntos. Los audios, PDF y archivos van en un mensaje aparte.');
+                AppDialog.alert('Puedes enviar varias fotos y videos juntos. Los audios, PDF y archivos van en un mensaje aparte.');
                 return;
             }
 
             if (incomingHasMedia && currentHasOther) {
-                alertDialog('No puedes mezclar fotos o videos con audios o archivos en el mismo mensaje.');
+                AppDialog.alert('No puedes mezclar fotos o videos con audios o archivos en el mismo mensaje.');
                 return;
             }
 
@@ -3966,7 +3912,7 @@
 
         function sendLocation() {
             if (!navigator.geolocation) {
-                alertDialog('La ubicación no está disponible en este dispositivo.');
+                AppDialog.alert('La ubicación no está disponible en este dispositivo.');
                 return;
             }
 
@@ -3976,7 +3922,7 @@
                     longitude: position.coords.longitude
                 });
             }, function () {
-                alertDialog('No se pudo obtener la ubicación. Revisa el permiso.');
+                AppDialog.alert('No se pudo obtener la ubicación. Revisa el permiso.');
             });
         }
 
@@ -4264,14 +4210,14 @@
 
         function copyLightboxText(text, okMessage) {
             if (!navigator.clipboard || !navigator.clipboard.writeText) {
-                alertDialog('Tu navegador no permite copiar al portapapeles.');
+                AppDialog.alert('Tu navegador no permite copiar al portapapeles.');
                 return;
             }
 
             navigator.clipboard.writeText(text).then(function () {
-                alertDialog(okMessage || 'Enlace copiado.');
+                AppDialog.alert(okMessage || 'Enlace copiado.');
             }).catch(function () {
-                alertDialog('No se pudo copiar. Revisa el permiso del portapapeles.');
+                AppDialog.alert('No se pudo copiar. Revisa el permiso del portapapeles.');
             });
         }
 
@@ -4303,7 +4249,7 @@
                     return navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
                 })
                 .then(function () {
-                    alertDialog('Imagen copiada.');
+                    AppDialog.alert('Imagen copiada.');
                 })
                 .catch(function () {
                     copyLightboxText(absoluteUrl(item.url));
@@ -4493,12 +4439,12 @@
                 ? '¿Eliminar este contenido? Si es el último adjunto del mensaje, también se eliminará el mensaje.'
                 : '¿Eliminar el mensaje con este contenido?';
 
-            confirmDialog(question, function () {
+            AppDialog.confirm(question, function () {
                 post(endpoint, {}).done(function (response) {
                     hideContentMenu();
                     afterContentDeleted(item, response || {});
                 }).fail(function (xhr) {
-                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo eliminar el contenido.');
+                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo eliminar el contenido.');
                 });
             });
         }
@@ -4722,7 +4668,7 @@
 
         function startRecorder() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alertDialog('El micrófono no está disponible en este dispositivo.');
+                AppDialog.alert('El micrófono no está disponible en este dispositivo.');
                 return;
             }
 
@@ -4782,7 +4728,7 @@
 
                 drawRecorderWave(stream);
             }).catch(function () {
-                alertDialog('No diste permiso al micrófono.');
+                AppDialog.alert('No diste permiso al micrófono.');
             });
         }
 
@@ -5447,7 +5393,7 @@
                     renderGallery(selected);
                 })
                 .fail(function (xhr) {
-                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo cargar el contenido.');
+                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo cargar el contenido.');
                 });
         }
 
@@ -5472,7 +5418,7 @@
         }
 
         function profileError(xhr) {
-            alertDialog((xhr.responseJSON || {}).message || 'No se pudo completar la operación.');
+            AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo completar la operación.');
         }
 
         function handleProfileAction(action, $trigger) {
@@ -5514,7 +5460,7 @@
             }
 
             if (action === 'vaciar') {
-                confirmDialog(
+                AppDialog.confirm(
                     profileData.is_group ? '¿Vaciar esta sala de tu lado?' : '¿Vaciar este chat de tu lado?',
                     function () {
                         post(chatBase + '/' + currentId + '/vaciar', {})
@@ -5536,7 +5482,7 @@
 
                 var blocking = action === 'block';
 
-                confirmDialog(
+                AppDialog.confirm(
                     blocking ? '¿Bloquear a ' + other.name + '?' : '¿Desbloquear a ' + other.name + '?',
                     function () {
                         var blockCall = blocking
@@ -5577,7 +5523,7 @@
             }
 
             if (action === 'leave') {
-                confirmDialog('¿Salir de «' + (profileData.name || 'este grupo') + '»?', function () {
+                AppDialog.confirm('¿Salir de «' + (profileData.name || 'este grupo') + '»?', function () {
                     post(chatBase + '/' + currentId + '/salir', {})
                         .done(function () {
                             closeChatProfile();
@@ -5590,7 +5536,7 @@
             }
 
             if (action === 'delete') {
-                confirmDialog('¿Eliminar este grupo para todos? No se puede deshacer.', function () {
+                AppDialog.confirm('¿Eliminar este grupo para todos? No se puede deshacer.', function () {
                     remove(chatBase + '/' + currentId, {})
                         .done(function () {
                             closeChatProfile();
@@ -5721,7 +5667,7 @@
         function pasteFromClipboard() {
             function pasteText() {
                 if (!navigator.clipboard || !navigator.clipboard.readText) {
-                    alertDialog('Usa Ctrl+V para pegar.');
+                    AppDialog.alert('Usa Ctrl+V para pegar.');
 
                     return;
                 }
@@ -5731,7 +5677,7 @@
                         document.execCommand('insertText', false, text);
                     }
                 }).catch(function () {
-                    alertDialog('No se pudo pegar. Usa Ctrl+V.');
+                    AppDialog.alert('No se pudo pegar. Usa Ctrl+V.');
                 });
             }
 
@@ -5783,7 +5729,7 @@
                     }
 
                     if (!files.length && !text) {
-                        alertDialog('No hay nada que pegar.');
+                        AppDialog.alert('No hay nada que pegar.');
                     }
                 });
             }).catch(function () {
@@ -6133,7 +6079,7 @@
                     $button.text('Ocultar');
                 })
                 .catch(function () {
-                    alertDialog('No se pudo abrir el texto. Descárgalo para verlo.');
+                    AppDialog.alert('No se pudo abrir el texto. Descárgalo para verlo.');
                 });
         });
 
@@ -6214,15 +6160,11 @@
                     .join('');
 
                 if (!options) {
-                    alertDialog('No hay otros miembros para gestionar.');
+                    AppDialog.alert('No hay otros miembros para gestionar.');
                     return;
                 }
 
-                if (!window.bootbox) {
-                    return;
-                }
-
-                window.bootbox.dialog({
+                AppDialog.custom({
                     title: 'Gestionar miembros',
                     centerVertical: true,
                     message:
@@ -6239,10 +6181,10 @@
                                 post(chatBase + '/grupo/' + conversationId + '/suspender/' + $('#chat-member-select').val(), {
                                     days: $('#chat-member-days').val()
                                 }).done(function (dialogResponse) {
-                                    alertDialog(dialogResponse.message || 'Usuario suspendido.');
+                                    AppDialog.alert(dialogResponse.message || 'Usuario suspendido.');
                                     refresh();
                                 }).fail(function (xhr) {
-                                    alertDialog((xhr.responseJSON || {}).message || 'No se pudo suspender.');
+                                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo suspender.');
                                 });
                             }
                         },
@@ -6252,11 +6194,11 @@
                             callback: function () {
                                 post(chatBase + '/grupo/' + conversationId + '/banear/' + $('#chat-member-select').val(), {})
                                     .done(function (dialogResponse) {
-                                        alertDialog(dialogResponse.message || 'Usuario vetado.');
+                                        AppDialog.alert(dialogResponse.message || 'Usuario vetado.');
                                         refresh();
                                     })
                                     .fail(function (xhr) {
-                                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo banear.');
+                                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo banear.');
                                     });
                             }
                         },
@@ -6266,18 +6208,18 @@
                             callback: function () {
                                 remove(chatBase + '/grupo/' + conversationId + '/banear/' + $('#chat-member-select').val(), {})
                                     .done(function (dialogResponse) {
-                                        alertDialog(dialogResponse.message || 'Veto retirado.');
+                                        AppDialog.alert(dialogResponse.message || 'Veto retirado.');
                                         refresh();
                                     })
                                     .fail(function (xhr) {
-                                        alertDialog((xhr.responseJSON || {}).message || 'No se pudo desbanear.');
+                                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo desbanear.');
                                     });
                             }
                         }
                     }
                 });
             }).fail(function (xhr) {
-                alertDialog((xhr.responseJSON || {}).message || 'No se pudieron cargar los miembros.');
+                AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudieron cargar los miembros.');
             });
         }
 
@@ -6521,7 +6463,7 @@
             }).fail(function (xhr) {
                 var data = xhr.responseJSON || {};
 
-                alertDialog(data.message || 'No se pudo registrar el voto.');
+                AppDialog.alert(data.message || 'No se pudo registrar el voto.');
                 refreshMessages([messageId]);
             }).always(function () {
                 $poll.removeClass('is-voting');
@@ -6725,3 +6667,4 @@
         startCounterPolling();
     });
 })(window.jQuery);
+

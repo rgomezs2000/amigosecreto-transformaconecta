@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ChatReport;
 use App\Models\User;
 use App\Services\SessionSecurity;
 use Illuminate\Contracts\View\View;
@@ -71,6 +72,14 @@ class LoginController extends Controller
                 $user->registerFailedLogin($maxAttempts);
 
                 if ($user->isLocked()) {
+                    // Se abre un caso de «Cuenta» para que la administración
+                    // pueda desbloquearla desde el Centro de Ayuda y Soporte.
+                    ChatReport::openAccountRequest(
+                        $user,
+                        'unlock',
+                        'Solicitud de desbloqueo de cuenta'
+                    );
+
                     return api_error('La cuenta quedó bloqueada por demasiados intentos. Contacta al administrador.', 423, [
                         'locked' => true,
                     ]);

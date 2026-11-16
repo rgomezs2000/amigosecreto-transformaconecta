@@ -43,9 +43,14 @@ return [
     | navegador se cierra o el dispositivo se apaga, deja de llegar y la
     | sesión se elimina con la limpieza programada.
     |
+    | Nunca se baja de SessionSecurity::MIN_ORPHAN_MINUTES (10): el latido se
+    | detiene mientras la pestaña está oculta y los temporizadores del
+    | navegador se espacian, así que un silencio corto no significa que el
+    | navegador se haya cerrado. Las sesiones de invitados no se borran aquí.
+    |
     */
 
-    'orphan_minutes' => (int) env('SESSION_ORPHAN_MINUTES', 1),
+    'orphan_minutes' => (int) env('SESSION_ORPHAN_MINUTES', 10),
 
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 

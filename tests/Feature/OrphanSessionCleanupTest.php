@@ -56,4 +56,53 @@ class OrphanSessionCleanupTest extends TestCase
         $this->assertNull($user->fresh()->active_session_id);
         $this->assertDatabaseMissing('session_kicks', ['session_id' => 'aviso-viejo']);
     }
+
+    /**
+     * La pantalla de acceso también tiene sesión (guarda el token CSRF). No
+     * envía latido, así que antes se borraba y el envío del formulario
+     * respondía «CSRF token mismatch».
+     */
+    public function test_la_sesion_de_un_invitado_sobrevive_a_la_limpieza(): void
+    {
+        config(['session.driver' => 'database']);
+
+        DB::table('sessions')->insert([
+            'id' => 'invitado-en-la-pantalla-de-acceso',
+            'user_id' => null,
+            'ip_address' => '3.3.3.3',
+            'user_agent' => 'Pantalla de acceso abierta',
+            'payload' => '',
+            'last_activity' => now()->subMinutes(31)->timestamp,
+        ]);
+
+        $this->artisan('sessions:cleanup', ['--minutes' => 30])
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('sessions', ['id' => 'invitado-en-la-pantalla-de-acceso']);
+    }
+
+    /**
+     * El latido se detiene mientras la pestaña está oculta, así que unos
+     * minutos de silencio no indican un navegador cerrado.
+     */
+    public function test_no_borra_una_sesion_de_pocos_minutos_aunque_se_pida_un_minuto(): void
+    {
+        config(['session.driver' => 'database']);
+
+        $user = User::factory()->create();
+
+        DB::table('sessions')->insert([
+            'id' => 'pestana-oculta',
+            'user_id' => $user->id,
+            'ip_address' => '4.4.4.4',
+            'user_agent' => 'Pestaña en segundo plano',
+            'payload' => '',
+            'last_activity' => now()->subMinutes(5)->timestamp,
+        ]);
+
+        $this->artisan('sessions:cleanup', ['--minutes' => 1])
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('sessions', ['id' => 'pestana-oculta']);
+    }
 }

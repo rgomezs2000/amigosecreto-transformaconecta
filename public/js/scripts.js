@@ -94,54 +94,6 @@
     }
 
     /**
-     * Muestra un aviso con Bootbox (o window.alert si no cargó).
-     */
-    function dialog(message, title, callback) {
-        if (window.bootbox) {
-            window.bootbox.alert({
-                title: title || 'Aviso',
-                message: message,
-                centerVertical: true,
-                callback: typeof callback === 'function' ? callback : $.noop
-            });
-            return;
-        }
-
-        window.alert(message);
-
-        if (typeof callback === 'function') {
-            callback();
-        }
-    }
-
-    /**
-     * Confirmación con Bootbox; si se cancela no se ejecuta la acción.
-     */
-    function confirmAction(message, title, onConfirm) {
-        if (window.bootbox) {
-            window.bootbox.confirm({
-                title: title || 'Confirmar',
-                message: message,
-                centerVertical: true,
-                buttons: {
-                    cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                    confirm: { label: 'Aceptar', className: 'btn-primary' }
-                },
-                callback: function (ok) {
-                    if (ok) {
-                        onConfirm();
-                    }
-                }
-            });
-            return;
-        }
-
-        if (window.confirm(message)) {
-            onConfirm();
-        }
-    }
-
-    /**
      * Ver la clave solo mientras se mantiene pulsado el botón.
      */
     function initPasswordToggle() {
@@ -192,6 +144,11 @@
 
     /**
      * Validación local, foco en el campo vacío y envío por AJAX.
+     *
+     * Si el servidor responde 419 (el token de la página ya no vale porque su
+     * sesión se perdió), se pide la página de acceso otra vez para obtener un
+     * token vigente y se reintenta el envío una sola vez. Así el usuario no
+     * ve «CSRF token mismatch» teniendo que recargar a mano.
      */
     function initLoginForm() {
         var $form = $('#login-form');
@@ -200,11 +157,87 @@
             return;
         }
 
+        var $login = $('#login');
+        var $password = $('#password');
+        var $submit = $form.find('button[type="submit"]');
+
+        function showFailure(xhr) {
+            var response = (xhr && xhr.responseJSON) || {};
+            var message = response.message;
+
+            if (!message && response.errors) {
+                var first = Object.keys(response.errors)[0];
+                message = response.errors[first][0];
+            }
+
+            dialog(
+                message || 'No se pudo completar el acceso.',
+                xhr && xhr.status === 423 ? 'Cuenta bloqueada' : 'No se pudo ingresar'
+            );
+        }
+
+        /**
+         * Vuelve a pedir la pantalla de acceso: el servidor emite una sesión y
+         * un token nuevos, que se colocan en el formulario.
+         */
+        function freshToken() {
+            return $.ajax({
+                url: window.location.pathname,
+                method: 'GET',
+                dataType: 'html',
+                cache: false
+            }).then(function (html) {
+                var token = $('<div>').append($.parseHTML(html)).find('input[name="_token"]').val();
+
+                if (!token) {
+                    return $.Deferred().reject({ status: 419, responseJSON: {} }).promise();
+                }
+
+                $form.find('input[name="_token"]').val(token);
+
+                return token;
+            });
+        }
+
+        function post(token) {
+            $submit.prop('disabled', true);
+
+            return $.ajax({
+                url: $form.attr('action'),
+                method: 'POST',
+                dataType: 'json',
+                data: {
+                    _token: token,
+                    login: $.trim($login.val()),
+                    password: $password.val()
+                }
+            }).always(function () {
+                $submit.prop('disabled', false);
+            });
+        }
+
+        function send(token, retried) {
+            post(token).done(function (response) {
+                // La sesión ya quedó iniciada en el servidor: al panel.
+                window.location.assign(response.redirect || '/dashboard');
+            }).fail(function (xhr) {
+                if (xhr.status === 419 && !retried) {
+                    freshToken()
+                        .then(function (fresh) {
+                            send(fresh, true);
+                        })
+                        .fail(showFailure);
+
+                    return;
+                }
+
+                showFailure(xhr);
+            });
+        }
+
         $form.on('submit', function (event) {
             event.preventDefault();
 
-            var $login = $('#login');
-            var $password = $('#password');
             var missing = null;
 
             if (!$.trim($login.val())) {
@@ -223,37 +256,7 @@
                 return;
             }
 
-            var $submit = $form.find('button[type="submit"]');
-            $submit.prop('disabled', true);
-
-            $.ajax({
-                url: $form.attr('action'),
-                method: 'POST',
-                dataType: 'json',
-                data: {
-                    _token: $form.find('input[name="_token"]').val(),
-                    login: $.trim($login.val()),
-                    password: $password.val()
-                }
-            }).done(function (response) {
-                // La sesión ya quedó iniciada en el servidor: al panel.
-                window.location.assign(response.redirect || '/dashboard');
-            }).fail(function (xhr) {
-                var response = xhr.responseJSON || {};
-                var message = response.message;
-
-                if (!message && response.errors) {
-                    var first = Object.keys(response.errors)[0];
-                    message = response.errors[first][0];
-                }
-
-                dialog(
-                    message || 'No se pudo completar el acceso.',
-                    xhr.status === 423 ? 'Cuenta bloqueada' : 'No se pudo ingresar'
-                );
-            }).always(function () {
-                $submit.prop('disabled', false);
-            });
+            send($form.find('input[name="_token"]').val(), false);
         });
     }
 
@@ -281,20 +284,13 @@
                 $('#login').trigger('focus');
             }
 
-            if (window.bootbox) {
-                window.bootbox.confirm({
-                    title: 'Salir del formulario',
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Quedarme', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Sí, salir', className: 'btn-primary' }
-                    },
-                    callback: doExit
-                });
-            } else {
-                doExit(window.confirm(message));
-            }
+            window.AppDialog.confirm(message, function () {
+                doExit(true);
+            }, {
+                title: 'Salir del formulario',
+                confirmLabel: 'Sí, salir',
+                cancelLabel: 'Quedarme'
+            });
         });
     }
 

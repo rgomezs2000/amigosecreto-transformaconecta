@@ -20,6 +20,16 @@ class SessionSecurity
 {
     public const KICKED_MESSAGE = 'Tu sesión se cerró porque la misma cuenta inició sesión en otro dispositivo o ubicación.';
 
+    /**
+     * Minutos mínimos antes de considerar huérfana una sesión autenticada.
+     *
+     * Por debajo de este margen se destruían sesiones que seguían vivas: el
+     * latido del navegador se detiene mientras la pestaña está oculta y Chrome
+     * limita sus temporizadores a una vez por minuto, así que un minuto de
+     * silencio no significa que el navegador se haya cerrado.
+     */
+    public const MIN_ORPHAN_MINUTES = 10;
+
     public static function activate(User $user, Request $request): int
     {
         $currentId = $request->session()->getId();
@@ -106,13 +116,22 @@ class SessionSecurity
     }
 
     /**
-     * Elimina las sesiones que dejaron de enviar latido.
+     * Elimina las sesiones autenticadas que dejaron de enviar latido.
+     *
+     * Solo se borran las sesiones con usuario. Las de los invitados (por
+     * ejemplo, la pantalla de acceso abierta) no envían latido nunca: su fila
+     * guarda el token CSRF del formulario y, si se borraba mientras alguien
+     * escribía su clave, el envío respondía «CSRF token mismatch». Esas filas
+     * las recoge el recolector de Laravel al vencer `session.lifetime`.
      *
      * @return array{deleted: int, cleared: int}
      */
     public static function cleanupOrphans(?int $minutes = null, ?string $exceptSessionId = null): array
     {
-        $minutes = max(1, $minutes ?? (int) config('session.orphan_minutes', 1));
+        $minutes = max(
+            self::MIN_ORPHAN_MINUTES,
+            $minutes ?? (int) config('session.orphan_minutes', self::MIN_ORPHAN_MINUTES)
+        );
 
         if (config('session.driver') !== 'database'
             || ! Schema::hasTable('sessions')
@@ -122,7 +141,9 @@ class SessionSecurity
 
         $cutoff = now()->subMinutes($minutes)->timestamp;
 
-        $query = DB::table('sessions')->where('last_activity', '<', $cutoff);
+        $query = DB::table('sessions')
+            ->whereNotNull('user_id')
+            ->where('last_activity', '<', $cutoff);
 
         if ($exceptSessionId !== null && $exceptSessionId !== '') {
             $query->where('id', '!=', $exceptSessionId);

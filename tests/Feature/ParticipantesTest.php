@@ -149,7 +149,6 @@ class ParticipantesTest extends TestCase
         $this->actingAs($admin)
             ->get($path)
             ->assertOk()
-            ->assertSee('Volver al panel')
             ->assertSee('Buscar participante')
             ->assertSee('Busca por nombre, correo o usuario...')
             ->assertSee('Limpiar')

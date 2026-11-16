@@ -97,12 +97,286 @@
                         Google todavía no está configurado en este entorno.
                     </p>
                 @endif
+
+                <div class="login-secondary">
+                    <a href="#" id="login-register-open">
+                        ¿Deseas registrarte y participar? Puedes solicitarlo acá.
+                    </a>
+                    <a href="#" id="login-reset-open">
+                        ¿Olvidaste tu contraseña? Solicita tu restablecimiento acá.
+                    </a>
+                </div>
             </form>
         </section>
+
+        {{-- Prerregistro: datos básicos para que la administración evalúe la solicitud. --}}
+        <div class="modal fade" id="modal-solicitud-registro" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 class="modal-title h5" id="modal-solicitud-registro-title">Solicitar registro</h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="form-text mb-3">
+                            Completa tus datos. La administración evaluará la solicitud y, si se aprueba,
+                            recibirás tus credenciales por correo. Tu usuario es personal e intransferible.
+                        </p>
+
+                        <form id="solicitud-registro-form" novalidate>
+                            <div class="field">
+                                <label class="form-label" for="solicitud-nombre">Nombre</label>
+                                <input class="form-control" id="solicitud-nombre" maxlength="255" autocomplete="name">
+                            </div>
+
+                            <div class="field">
+                                <label class="form-label" for="solicitud-email">Correo electrónico</label>
+                                <input class="form-control" id="solicitud-email" type="email" maxlength="255" autocomplete="email">
+                            </div>
+
+                            <div class="field">
+                                <label class="form-label" for="solicitud-usuario">Usuario</label>
+                                <input class="form-control" id="solicitud-usuario" maxlength="30" autocomplete="username">
+                                <p class="form-text" id="solicitud-usuario-estado"></p>
+                            </div>
+
+                            <p class="field-message" id="solicitud-registro-estado" role="status" aria-live="polite"></p>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" id="solicitud-registro-limpiar">Limpiar</button>
+                        <button type="submit" form="solicitud-registro-form" class="btn btn-primary" id="solicitud-registro-enviar">Solicitar registro</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{-- Recuperación de contraseña: crea un caso de tipo Cuenta. --}}
+        <div class="modal fade" id="modal-solicitud-recuperacion" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 class="modal-title h5">Solicitar restablecimiento</h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="form-text mb-3">
+                            Escribe tu usuario o correo. La administración procesará el restablecimiento
+                            y te enviará las nuevas credenciales por correo.
+                        </p>
+
+                        <div class="field">
+                            <label class="form-label" for="solicitud-recuperacion-login">Usuario o correo</label>
+                            <input class="form-control" id="solicitud-recuperacion-login" maxlength="255">
+                        </div>
+
+                        <p class="field-message" id="solicitud-recuperacion-estado" role="status" aria-live="polite"></p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn btn-primary" id="solicitud-recuperacion-enviar">Solicitar restablecimiento</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <footer class="login-footer">
             <p>Amigo Secreto Inclusivo · {{ now()->year }}</p>
         </footer>
     </div>
 </main>
+@push('scripts')
+<script>
+(function () {
+    var csrf = @json(csrf_token());
+    var registroModal = document.getElementById('modal-solicitud-registro');
+    var recuperacionModal = document.getElementById('modal-solicitud-recuperacion');
+    var $usuario = document.getElementById('solicitud-usuario');
+    var $estadoUsuario = document.getElementById('solicitud-usuario-estado');
+    var $registroEstado = document.getElementById('solicitud-registro-estado');
+    var $recuperacionEstado = document.getElementById('solicitud-recuperacion-estado');
+    var disponible = null;
+    var timer = null;
+
+    function abrir(modal) {
+        if (modal && window.bootstrap) {
+            window.bootstrap.Modal.getOrCreateInstance(modal).show();
+        }
+    }
+
+    function mensaje(elemento, texto, tipo) {
+        elemento.textContent = texto || '';
+        elemento.setAttribute('data-kind', tipo || '');
+    }
+
+    function consultarUsuario() {
+        var username = $usuario.value.trim();
+        disponible = null;
+
+        if (username === '') {
+            mensaje($estadoUsuario, '', '');
+            return;
+        }
+
+        fetch('{{ route('solicitudes.usuario') }}?username=' + encodeURIComponent(username), {
+            headers: { 'Accept': 'application/json' }
+        }).then(function (response) {
+            return response.json();
+        }).then(function (data) {
+            disponible = data.available === true;
+            mensaje($estadoUsuario, data.message || '', disponible ? 'success' : 'error');
+        }).catch(function () {
+            disponible = null;
+        });
+    }
+
+    if ($usuario) {
+        $usuario.addEventListener('input', function () {
+            clearTimeout(timer);
+            mensaje($estadoUsuario, 'Comprobando disponibilidad...', 'info');
+            timer = setTimeout(consultarUsuario, 350);
+        });
+    }
+
+    var enlaceRegistro = document.getElementById('login-register-open');
+    var enlaceReset = document.getElementById('login-reset-open');
+
+    if (enlaceRegistro) {
+        enlaceRegistro.addEventListener('click', function (event) {
+            event.preventDefault();
+            abrir(registroModal);
+        });
+    }
+
+    if (enlaceReset) {
+        enlaceReset.addEventListener('click', function (event) {
+            event.preventDefault();
+            mensaje($recuperacionEstado, '', '');
+            abrir(recuperacionModal);
+        });
+    }
+
+    document.getElementById('solicitud-registro-limpiar').addEventListener('click', function () {
+        document.getElementById('solicitud-nombre').value = '';
+        document.getElementById('solicitud-email').value = '';
+        $usuario.value = '';
+        disponible = null;
+        mensaje($estadoUsuario, '', '');
+        mensaje($registroEstado, '', '');
+    });
+
+    function enviarSolicitudRegistro() {
+        var nombre = document.getElementById('solicitud-nombre').value.trim();
+        var email = document.getElementById('solicitud-email').value.trim();
+        var username = $usuario.value.trim();
+
+        if (nombre === '' || email === '' || username === '') {
+            mensaje($registroEstado, 'Completa tu nombre, correo y usuario.', 'error');
+            return;
+        }
+
+        if (disponible !== true) {
+            mensaje($registroEstado, 'Comprueba que el usuario esté disponible.', 'error');
+            consultarUsuario();
+            return;
+        }
+
+        confirmDialog('¿Deseas registrarte y participar? Tu solicitud será evaluada por la administración.', function () {
+            fetch('{{ route('solicitudes.registro') }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrf
+                },
+                body: JSON.stringify({ name: nombre, email: email, username: username })
+            }).then(function (response) {
+                return response.json().then(function (data) {
+                    return { ok: response.ok, data: data };
+                });
+            }).then(function (result) {
+                if (!result.ok) {
+                    mensaje($registroEstado, result.data.message || 'No se pudo enviar la solicitud.', 'error');
+                    return;
+                }
+
+                var mensajeExito = result.data.message || 'Solicitud registrada.';
+
+                if (registroModal && window.bootstrap) {
+                    window.bootstrap.Modal.getOrCreateInstance(registroModal).hide();
+                }
+
+                document.getElementById('solicitud-registro-form').reset();
+                $usuario.value = '';
+                disponible = null;
+                mensaje($estadoUsuario, '', '');
+                mensaje($registroEstado, '', '');
+
+                window.AppDialog.success(mensajeExito, { title: 'Solicitud registrada' });
+            }).catch(function () {
+                mensaje($registroEstado, 'No se pudo enviar la solicitud. Intenta de nuevo.', 'error');
+            });
+        });
+    }
+
+    var registroForm = document.getElementById('solicitud-registro-form');
+
+    if (registroForm) {
+        registroForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            enviarSolicitudRegistro();
+        });
+
+        // Enter en cualquiera de los campos levanta la misma confirmación.
+        registroForm.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' || event.shiftKey) {
+                return;
+            }
+
+            if (event.target && event.target.tagName === 'INPUT') {
+                event.preventDefault();
+                enviarSolicitudRegistro();
+            }
+        });
+    }
+
+    document.getElementById('solicitud-recuperacion-enviar').addEventListener('click', function () {
+        var login = document.getElementById('solicitud-recuperacion-login').value.trim();
+
+        if (login === '') {
+            mensaje($recuperacionEstado, 'Escribe tu usuario o correo.', 'error');
+            return;
+        }
+
+        confirmDialog('¿Deseas solicitar la recuperación de tu contraseña?', function () {
+            fetch('{{ route('solicitudes.recuperacion') }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrf
+                },
+                body: JSON.stringify({ login: login })
+            }).then(function (response) {
+                return response.json().then(function (data) {
+                    return { ok: response.ok, data: data };
+                });
+            }).then(function (result) {
+                mensaje(
+                    $recuperacionEstado,
+                    result.data.message || (result.ok ? 'Solicitud recibida.' : 'No se pudo enviar la solicitud.'),
+                    result.ok ? 'success' : 'error'
+                );
+
+                if (result.ok) {
+                    document.getElementById('solicitud-recuperacion-login').value = '';
+                }
+            }).catch(function () {
+                mensaje($recuperacionEstado, 'No se pudo enviar la solicitud. Intenta de nuevo.', 'error');
+            });
+        });
+    });
+})();
+</script>
+@endpush
 @endsection

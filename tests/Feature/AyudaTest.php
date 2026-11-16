@@ -271,11 +271,13 @@ class AyudaTest extends TestCase
             ->assertSee('Contacto y soporte')
             ->assertSee(url('/ayuda/contacto-soporte'), false);
 
-        // Todavía no tiene controlador: muestra el marcador de posición.
+        // El módulo ya está activo: formulario de contacto y seguimiento.
         $this->actingAs($user)
             ->get('/ayuda/contacto-soporte')
             ->assertOk()
-            ->assertSee('Este módulo está en construcción.');
+            ->assertSee('Crear ticket')
+            ->assertSee('Seguimiento')
+            ->assertDontSee('Este módulo está en construcción.');
     }
 
     public function test_el_administrador_no_ve_ni_entra_a_contacto_soporte(): void

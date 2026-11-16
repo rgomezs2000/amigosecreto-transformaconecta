@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\UserRole;
 use App\Models\Module;
+use App\Models\ChatReport;
 use App\Models\Profile;
 use App\Models\User;
 use Illuminate\Contracts\View\View;
@@ -30,12 +31,34 @@ class UsuariosController extends Controller
         }
     }
 
-    public function index(): View
+    public function index(Request $request): View
     {
         $this->ensureAccess();
 
+        $solicitud = null;
+
+        if ($request->filled('solicitud')) {
+            $report = ChatReport::query()
+                ->whereKey((int) $request->query('solicitud'))
+                ->where('type', ChatReport::TYPE_USER_REGISTRATION)
+                ->where('status', '!=', ChatReport::STATUS_CLOSED)
+                ->first();
+
+            if ($report !== null) {
+                $payload = $report->payload ?: [];
+
+                $solicitud = [
+                    'id' => (int) $report->id,
+                    'name' => (string) ($payload['name'] ?? ''),
+                    'email' => (string) ($payload['email'] ?? ''),
+                    'username' => (string) ($payload['username'] ?? ''),
+                ];
+            }
+        }
+
         return view('usuarios.index', [
             'profiles' => Profile::query()->orderBy('name')->get(),
+            'solicitud' => $solicitud,
         ]);
     }
 
@@ -118,6 +141,7 @@ class UsuariosController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
             'username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')],
             'profile_id' => ['required', 'integer', 'exists:profiles,id'],
+            'solicitud' => ['nullable', 'integer'],
         ], [
             'name.required' => 'El nombre es obligatorio.',
             'email.required' => 'El correo es obligatorio.',
@@ -205,6 +229,7 @@ class UsuariosController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')->ignore($user->id)],
             'profile_id' => ['required', 'integer', 'exists:profiles,id'],
+            'solicitud' => ['nullable', 'integer'],
         ], [
             'name.required' => 'El nombre es obligatorio.',
             'email.required' => 'El correo es obligatorio.',

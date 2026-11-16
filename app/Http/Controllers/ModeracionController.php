@@ -7,10 +7,12 @@ use App\Http\Controllers\Concerns\AuthorizesModeracion;
 use App\Models\ChatBlock;
 use App\Models\ChatReport;
 use App\Models\ChatReportAttachment;
+use App\Models\ChatReportRating;
 use App\Models\Conversation;
 use App\Models\GroupBan;
 use App\Models\Module;
 use App\Models\User;
+use App\Services\ReporteAdjuntos;
 use App\Services\ReporteAvisos;
 use App\Services\ReporteChat;
 use Illuminate\Contracts\View\View;
@@ -20,6 +22,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Validator;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
@@ -36,6 +39,7 @@ class ModeracionController extends Controller
     public function __construct(
         private readonly ReporteChat $reporteChat,
         private readonly ReporteAvisos $reporteAvisos,
+        private readonly ReporteAdjuntos $adjuntos,
     ) {}
 
     public function index(): View
@@ -61,6 +65,62 @@ class ModeracionController extends Controller
     /**
      * Contadores de las tres pestañas para actualizarlos sin recargar.
      */
+    /**
+     * Crea un ticket desde la administración. Queda asignado a quien lo crea.
+     */
+    public function crear(Request $request): JsonResponse
+    {
+        $this->ensureModeracionAccess();
+
+        $validator = $this->validarCasoAdmin($request);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
+        }
+
+        $data = $validator->validated();
+        $admin = $request->user();
+
+        $report = ChatReport::create([
+            'type' => $data['type'],
+            'reporter_id' => $admin->id,
+            'reason' => $data['reason'],
+            'case_message' => $data['message'],
+            'suggestion' => $data['type'] === ChatReport::TYPE_SUGGESTION
+                ? ($data['suggestion'] ?? null)
+                : null,
+            'context_url' => $data['context_url'] ?? null,
+            'context_label' => $data['context_label'] ?? null,
+            'status' => ChatReport::STATUS_ATTENDING,
+            'assigned_to' => $admin->id,
+            'taken_by' => $admin->id,
+            'taken_at' => now(),
+        ]);
+
+        $this->adjuntos->guardarArchivos($report, $request->file('files', []));
+        $this->adjuntos->guardarEnlaces($report, $request->input('links', []));
+
+        if ($report->isModeration()) {
+            $this->adjuntos->generarEvidencia($report);
+        }
+
+        $this->guardarRatingsAdmin($report, $data['ratings'] ?? []);
+
+        $conversation = $this->reporteChat->gestionar($report, $admin);
+
+        return api_success('Ticket creado correctamente.', [
+            'ticket' => $report->id,
+            'report' => [
+                'id' => (int) $report->id,
+                'type' => $report->type,
+                'type_label' => $report->typeLabel(),
+                'status' => $report->status,
+                'status_label' => $report->statusLabel(),
+            ],
+            'conversation_id' => $conversation?->id,
+        ]);
+    }
+
     public function contadores(): JsonResponse
     {
         $this->ensureModeracionAccess();
@@ -187,13 +247,11 @@ class ModeracionController extends Controller
         $orderColumn = match ($column) {
             0 => 'id',
             1 => 'created_at',
-            2 => 'status',
+            2 => 'type',
             3 => 'taken_by',
             4 => 'referred_to_id',
-            5 => 'reporter_id',
-            6 => 'message_id',
-            7 => 'reason',
-            9 => 'type',
+            5 => 'reason',
+            6 => 'status',
             default => 'created_at',
         };
 
@@ -235,6 +293,7 @@ class ModeracionController extends Controller
             'referrals.toAdmin',
             'attachments',
             'links',
+            'ratings',
         ]);
 
         $attachments = $report->attachments->map(fn (ChatReportAttachment $attachment) => [
@@ -282,15 +341,31 @@ class ModeracionController extends Controller
                 ->all();
         }
 
+        $ratings = $report->isSuggestion()
+            ? $report->ratings->map(fn (ChatReportRating $rating) => [
+                'aspect' => $rating->aspect,
+                'aspect_label' => $rating->aspectLabel(),
+                'score' => (int) $rating->score,
+                'qualitative' => $rating->qualitativeLabel(),
+            ])->values()->all()
+            : [];
+
+        $ratingsTotal = array_sum(array_column($ratings, 'score'));
+        $ratingsAverage = count($ratings) > 0 ? round($ratingsTotal / count($ratings), 2) : 0;
+
         return api_success('Detalle del caso.', [
             'report' => $this->rowData($report),
             'attachments' => [
                 'media' => $media,
                 'audios' => $audios,
                 'documents' => $documents,
+                'links' => $links,
             ],
             'links' => $links,
             'suggestion_messages' => $suggestionMessages,
+            'ratings' => $ratings,
+            'ratings_total' => $ratingsTotal,
+            'ratings_average' => $ratingsAverage,
         ]);
     }
 
@@ -417,7 +492,7 @@ class ModeracionController extends Controller
 
         return api_success('Caso tomado. Ahora puedes gestionarlo y cerrarlo.', [
             'report' => $this->rowData($report),
-            'ticket_chat_id' => $conversation->id,
+            'ticket_chat_id' => $conversation?->id,
         ]);
     }
 
@@ -674,9 +749,16 @@ class ModeracionController extends Controller
         $ticketChat = $report->conversation;
         $canOpenTicketChat = $ticketChat !== null
             && ! $report->isSuggestion()
+            && ! $report->isUserRegistration()
             && $ticketChat->users->contains('id', auth()->id());
         $ticketChatUrl = $canOpenTicketChat
             ? module_url('chat').'?conversacion='.$ticketChat->id
+            : null;
+
+        // Los casos de registro no abren chat: el administrador formaliza el
+        // alta desde el módulo de Usuarios, con los datos de la solicitud.
+        $createUserUrl = $report->isUserRegistration()
+            ? module_url('usuarios').'?solicitud='.$report->id
             : null;
 
         return [
@@ -690,6 +772,7 @@ class ModeracionController extends Controller
             'status_html' => '<span class="moderacion-status moderacion-status--'.e($status).'">'.e($statusLabel).'</span>',
             'type' => $report->type,
             'type_label' => $typeLabel,
+            'payload' => $report->payload ?: [],
             'type_html' => '<span class="moderacion-type moderacion-type--'.e($report->type).'">'.e($typeLabel).'</span>',
             'module_code' => (string) ($report->module_code ?? ''),
             'module_url' => $moduleUrl,
@@ -719,6 +802,8 @@ class ModeracionController extends Controller
             'author_raw' => $authorName,
             'reason' => e(Str::limit((string) $report->reason, 90)),
             'reason_full' => (string) $report->reason,
+            'report_message' => trim(strip_tags((string) ($report->case_message ?: $message?->body))),
+            'suggestion' => (string) ($report->suggestion ?? ''),
             'message' => e(Str::limit(trim(strip_tags((string) $message?->body)), 90)),
             'message_full' => trim(strip_tags((string) $message?->body)),
             'conversation' => e($conversationLabel),
@@ -726,6 +811,8 @@ class ModeracionController extends Controller
             'conversation_url' => $conversationUrl,
             'ticket_chat_url' => $ticketChatUrl,
             'ticket_chat_id' => $ticketChat?->id,
+            'ticket_chat_url' => $ticketChatUrl,
+            'create_user_url' => $createUserUrl,
             'has_ticket_chat' => $ticketChat !== null,
             // Remisión: solo el gestor actual puede remitir el caso.
             'can_refer' => $report->isAttending() && $isMine,
@@ -735,8 +822,91 @@ class ModeracionController extends Controller
                 'conversationUrl' => $conversationUrl,
                 'ticketChatUrl' => $ticketChatUrl,
                 'moduleUrl' => $moduleUrl,
+                'createUserUrl' => $createUserUrl,
             ])->render(),
         ];
+    }
+
+    /**
+     * Validación del formulario de creación de ticket de administración.
+     */
+    private function validarCasoAdmin(Request $request): Validator
+    {
+        $validator = validator($request->all(), [
+            'type' => ['required', 'string', 'in:'.implode(',', [
+                ChatReport::TYPE_MODERATION,
+                ChatReport::TYPE_SUGGESTION,
+                ChatReport::TYPE_HELP,
+                ChatReport::TYPE_SUPPORT,
+            ])],
+            'reason' => ['required', 'string', 'max:2000'],
+            'message' => ['required', 'string', 'max:5000'],
+            'suggestion' => ['nullable', 'string', 'max:5000'],
+            'ratings' => ['nullable', 'array'],
+            'ratings.*' => ['integer', 'between:1,5'],
+            'links' => ['nullable', 'array', 'max:20'],
+            'links.*' => ['nullable', 'string', 'max:2000', 'url'],
+            'files' => ['nullable', 'array', 'max:10'],
+            'files.*' => ['file', 'max:51200'],
+            'context_url' => ['nullable', 'string', 'max:500'],
+            'context_label' => ['nullable', 'string', 'max:160'],
+        ], [
+            'type.required' => 'Selecciona el tipo de reporte.',
+            'type.in' => 'El tipo de reporte no es válido.',
+            'reason.required' => 'Escribe el motivo del reporte.',
+            'reason.max' => 'El motivo no puede pasar de 2000 caracteres.',
+            'message.required' => 'Escribe el mensaje detallado del reporte.',
+            'message.max' => 'El mensaje no puede pasar de 5000 caracteres.',
+            'suggestion.max' => 'La sugerencia no puede pasar de 5000 caracteres.',
+            'links.*.url' => 'Cada enlace debe ser una dirección válida.',
+            'files.*.max' => 'Cada archivo puede pesar hasta 50 MB.',
+        ]);
+
+        $validator->after(function ($validator) use ($request) {
+            if ($request->input('type') !== ChatReport::TYPE_SUGGESTION) {
+                return;
+            }
+
+            if (trim((string) $request->input('suggestion', '')) === '') {
+                $validator->errors()->add('suggestion', 'Escribe el texto de la sugerencia.');
+            }
+
+            $ratings = $request->input('ratings', []);
+
+            foreach (array_keys(ChatReportRating::ASPECTS) as $aspect) {
+                $score = $ratings[$aspect] ?? null;
+
+                if (! is_numeric($score) || (int) $score < 1 || (int) $score > 5) {
+                    $validator->errors()->add(
+                        'ratings.'.$aspect,
+                        'Valora el aspecto '.ChatReportRating::ASPECTS[$aspect].'.'
+                    );
+                }
+            }
+        });
+
+        return $validator;
+    }
+
+    /**
+     * @param  array<string, mixed>  $ratings
+     */
+    private function guardarRatingsAdmin(ChatReport $report, array $ratings): void
+    {
+        if (! $report->isSuggestion()) {
+            return;
+        }
+
+        foreach (array_keys(ChatReportRating::ASPECTS) as $aspect) {
+            $score = (int) ($ratings[$aspect] ?? 0);
+
+            if ($score >= 1 && $score <= 5) {
+                $report->ratings()->create([
+                    'aspect' => $aspect,
+                    'score' => $score,
+                ]);
+            }
+        }
     }
 
     private function conversationLabel(?Conversation $conversation): string

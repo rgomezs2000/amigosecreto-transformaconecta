@@ -38,39 +38,6 @@
             return String(template || '').replace('__ID__', encodeURIComponent(id));
         }
 
-        function alertDialog(message) {
-            if (window.bootbox) {
-                window.bootbox.alert({ title: 'Aviso', message: message, centerVertical: true });
-                return;
-            }
-
-            window.alert(message);
-        }
-
-        function confirmDialog(message, onConfirm) {
-            if (window.bootbox) {
-                window.bootbox.confirm({
-                    title: 'Confirmar',
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Aceptar', className: 'btn-primary' }
-                    },
-                    callback: function (ok) {
-                        if (ok) {
-                            onConfirm();
-                        }
-                    }
-                });
-                return;
-            }
-
-            if (window.confirm(message)) {
-                onConfirm();
-            }
-        }
-
         function setStatus($target, message, kind) {
             if (!$target || !$target.length) {
                 return;
@@ -92,7 +59,7 @@
                 return;
             }
 
-            alertDialog(response.message || 'No se pudo completar la acción.');
+            AppDialog.alert(response.message || 'No se pudo completar la acción.');
         }
 
         function monto(value) {
@@ -237,7 +204,7 @@
 
             var esModificacion = tieneObsequio;
 
-            confirmDialog(
+            AppDialog.confirm(
                 esModificacion ? '¿Desea modificar el obsequio?' : '¿Desea registrar el obsequio?',
                 function () {
                     $guardar.prop('disabled', true);
@@ -513,7 +480,7 @@
             var id = $consumibleId.val();
             var esModificacion = !!id;
 
-            confirmDialog(
+            AppDialog.confirm(
                 esModificacion ? '¿Desea modificar el consumible?' : '¿Desea agregar el consumible?',
                 function () {
                     $cGuardar.prop('disabled', true);
@@ -611,7 +578,7 @@
             var id = $(this).data('id');
             var nombre = $(this).data('nombre') || 'el consumible';
 
-            confirmDialog('¿Desea eliminar «' + nombre + '»?', function () {
+            AppDialog.confirm('¿Desea eliminar «' + nombre + '»?', function () {
                 $.ajax({
                     url: urlFor(urls.consumible, id),
                     method: 'DELETE',
@@ -627,3 +594,4 @@
         });
     });
 })(window.jQuery);
+

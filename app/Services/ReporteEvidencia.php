@@ -30,7 +30,7 @@ class ReporteEvidencia
         $conversation = $message?->conversation ?? $report->conversation;
         $reporter = $report->reporter;
         $author = $message?->user;
-        $body = trim(strip_tags((string) ($message?->body ?? '')));
+        $body = trim(strip_tags((string) ($message?->body ?? $report->case_message ?? '')));
 
         if ($body === '') {
             $body = 'Sin texto en el contenido reportado.';

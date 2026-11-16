@@ -5,11 +5,6 @@
 @section('shell-eyebrow', 'Amigo secreto')
 
 @section('page')
-    <a class="module-back" href="{{ route('dashboard') }}">
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-        <span>Volver al panel</span>
-    </a>
-
     <div class="participantes-page">
         @if ($events->isEmpty())
             <section class="matriz-card" aria-label="Participantes">
@@ -19,6 +14,10 @@
                 </p>
             </section>
         @else
+            <div id="participantes-estado">
+                @include('participantes.partials.estado', ['estado' => $estado])
+            </div>
+
             <section class="matriz-card participantes-toolbar" aria-label="Consulta de participantes">
                 <div class="participantes-field participantes-field--event">
                     <label for="participantes-evento" class="form-label">Evento</label>
@@ -45,10 +44,6 @@
                     </button>
                 </div>
             </section>
-
-            <div id="participantes-estado">
-                @include('participantes.partials.estado', ['estado' => $estado])
-            </div>
 
             <section class="roles-table-card" aria-label="Listado de participantes">
                 <table id="participantes-table"

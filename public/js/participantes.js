@@ -55,19 +55,6 @@
             return element ? window.bootstrap.Modal.getOrCreateInstance(element) : null;
         }
 
-        function alertDialog(message) {
-            if (window.bootbox) {
-                window.bootbox.alert({
-                    title: 'Aviso',
-                    message: message,
-                    centerVertical: true
-                });
-                return;
-            }
-
-            window.alert(message);
-        }
-
         function showError(xhr) {
             var response = (xhr && xhr.responseJSON) || {};
             var message = response.message;
@@ -77,7 +64,7 @@
                 message = response.errors[first][0];
             }
 
-            alertDialog(message || 'No se pudo completar la consulta.');
+            window.AppDialog.error(message || 'No se pudo completar la consulta.');
         }
 
         function cargar(template, id, data, done) {
@@ -528,3 +515,4 @@
         }
     });
 })(window.jQuery);
+

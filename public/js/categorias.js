@@ -48,30 +48,6 @@
                 .replace(/-+/g, '-');
         }
 
-        function confirmDialog(message, onConfirm) {
-            if (window.bootbox) {
-                window.bootbox.confirm({
-                    title: 'Confirmar',
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Aceptar', className: 'btn-primary' }
-                    },
-                    callback: function (ok) {
-                        if (ok) {
-                            onConfirm();
-                        }
-                    }
-                });
-                return;
-            }
-
-            if (window.confirm(message)) {
-                onConfirm();
-            }
-        }
-
         function showError(xhr) {
             var response = xhr.responseJSON || {};
             var message = response.message;
@@ -83,15 +59,7 @@
 
             message = message || 'No se pudo completar la operación.';
 
-            if (window.bootbox) {
-                window.bootbox.alert({
-                    title: 'Error',
-                    message: message,
-                    centerVertical: true
-                });
-            } else {
-                window.alert(message);
-            }
+            window.AppDialog.error(message);
         }
 
         var table = $('#categorias-table').DataTable({
@@ -198,7 +166,7 @@
 
             var editing = !!id;
 
-            confirmDialog(editing ? '¿Desea modificar la categoría?' : '¿Desea crear la categoría?', function () {
+            AppDialog.confirm(editing ? '¿Desea modificar la categoría?' : '¿Desea crear la categoría?', function () {
                 $.ajax({
                     url: editing ? categoriaBase + '/' + encodeURIComponent(id) : crearUrl,
                     method: editing ? 'PUT' : 'POST',
@@ -285,7 +253,7 @@
             var id = $(this).data('id');
             var name = $(this).data('name');
 
-            confirmDialog('¿Desea eliminar la categoría «' + name + '»?', function () {
+            AppDialog.confirm('¿Desea eliminar la categoría «' + name + '»?', function () {
                 $.ajax({
                     url: categoriaBase + '/' + encodeURIComponent(id),
                     method: 'DELETE',
@@ -340,7 +308,7 @@
                 return;
             }
 
-            confirmDialog('¿Desea eliminar ' + ids.length + ' categoría(s) seleccionada(s)?', function () {
+            AppDialog.confirm('¿Desea eliminar ' + ids.length + ' categoría(s) seleccionada(s)?', function () {
                 $.ajax({
                     url: eliminarVariosUrl,
                     method: 'POST',
@@ -356,3 +324,4 @@
         });
     });
 })(window.jQuery);
+

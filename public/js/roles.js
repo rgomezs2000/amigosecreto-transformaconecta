@@ -34,30 +34,6 @@
             });
         }
 
-        function confirmDialog(message, onConfirm) {
-            if (window.bootbox) {
-                window.bootbox.confirm({
-                    title: 'Confirmar',
-                    message: message,
-                    centerVertical: true,
-                    buttons: {
-                        cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
-                        confirm: { label: 'Aceptar', className: 'btn-primary' }
-                    },
-                    callback: function (ok) {
-                        if (ok) {
-                            onConfirm();
-                        }
-                    }
-                });
-                return;
-            }
-
-            if (window.confirm(message)) {
-                onConfirm();
-            }
-        }
-
         function showError(xhr) {
             var response = xhr.responseJSON || {};
             var message = response.message;
@@ -69,15 +45,7 @@
 
             message = message || 'No se pudo completar la operación.';
 
-            if (window.bootbox) {
-                window.bootbox.alert({
-                    title: 'Error',
-                    message: message,
-                    centerVertical: true
-                });
-            } else {
-                window.alert(message);
-            }
+            window.AppDialog.error(message);
         }
 
         var table = $('#roles-table').DataTable({
@@ -173,7 +141,7 @@
 
             var editing = !!id;
 
-            confirmDialog(editing ? '¿Desea modificar el rol?' : '¿Desea crear el rol?', function () {
+            AppDialog.confirm(editing ? '¿Desea modificar el rol?' : '¿Desea crear el rol?', function () {
                 $.ajax({
                     url: editing ? rolBase + '/' + encodeURIComponent(id) : crearUrl,
                     method: editing ? 'PUT' : 'POST',
@@ -232,7 +200,7 @@
             var id = $(this).data('id');
             var name = $(this).data('name');
 
-            confirmDialog('¿Desea eliminar el rol «' + name + '»?', function () {
+            AppDialog.confirm('¿Desea eliminar el rol «' + name + '»?', function () {
                 $.ajax({
                     url: rolBase + '/' + encodeURIComponent(id),
                     method: 'DELETE',
@@ -287,7 +255,7 @@
                 return;
             }
 
-            confirmDialog('¿Desea eliminar ' + ids.length + ' rol(es) seleccionado(s)?', function () {
+            AppDialog.confirm('¿Desea eliminar ' + ids.length + ' rol(es) seleccionado(s)?', function () {
                 $.ajax({
                     url: eliminarVariosUrl,
                     method: 'POST',
@@ -303,3 +271,4 @@
         });
     });
 })(window.jQuery);
+

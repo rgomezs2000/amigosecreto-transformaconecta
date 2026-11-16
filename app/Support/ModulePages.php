@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Http\Controllers\AyudaController;
 use App\Http\Controllers\CategoriasController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\ContactoSoporteController;
 use App\Http\Controllers\DinamicaController;
 use App\Http\Controllers\EventosController;
 use App\Http\Controllers\MatrizPerfilesController;
@@ -59,6 +60,8 @@ final class ModulePages
         'acerca-de' => ['controller' => AyudaController::class, 'action' => 'acercaDe'],
         'ayuda' => ['controller' => AyudaController::class, 'action' => 'guia'],
         'faq' => ['controller' => AyudaController::class, 'action' => 'faq'],
+        // Contacto y soporte del usuario: crear casos y seguirlos.
+        'contacto-soporte' => ['controller' => ContactoSoporteController::class, 'action' => 'index'],
     ];
 
     /**
