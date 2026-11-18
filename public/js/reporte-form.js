@@ -233,7 +233,7 @@
             }
 
             var $button = $('#reporte-confirmar');
-            $button.prop('disabled', true);
+            window.App.processing($button, true, 'Procesando...');
             setStatus('Enviando...', 'info');
 
             $.ajax({
@@ -248,6 +248,8 @@
                     'Accept': 'application/json'
                 }
             }).done(function (response) {
+                window.App.processing($button, false);
+
                 if (confirmationModal) {
                     confirmationModal.hide();
                 }
@@ -281,14 +283,14 @@
                     detail: response || {}
                 }));
             }).fail(function (xhr) {
+                window.App.processing($button, false);
+
                 if (confirmationModal) {
                     confirmationModal.hide();
                 }
 
                 var message = (xhr.responseJSON || {}).message || 'No se pudo crear el ticket.';
                 setStatus(message, 'error');
-            }).always(function () {
-                $button.prop('disabled', false);
             });
         }
 

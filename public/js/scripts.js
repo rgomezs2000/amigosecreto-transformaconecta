@@ -13,6 +13,7 @@
     }
 
     $(function () {
+        App.initAutoProcessing();
         initPasswordToggle();
         initLoginForm();
         initExitButton();

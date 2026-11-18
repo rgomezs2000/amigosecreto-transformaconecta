@@ -7,7 +7,7 @@
 
     {{-- Chat del caso: se abre al tomarlo y queda en solo lectura al cerrarlo.
          En una sugerencia no hay chat: se responde desde la pestaña Sugerencia. --}}
-    @if (! empty($ticketChatUrl))
+    @if (! empty($ticketChatUrl) && ! empty($canManage))
         <a class="btn btn-sm btn-primary" href="{{ $ticketChatUrl }}"
            title="Chat" aria-label="Abrir el chat del caso">
             <i class="fa-solid fa-comments" aria-hidden="true"></i>
@@ -15,7 +15,7 @@
     @endif
 
     {{-- Solo para moderación: revisar el mensaje original reportado. --}}
-    @if (! empty($conversationUrl) && $report->isAttending())
+    @if (! empty($conversationUrl) && ! empty($canManage) && $report->isAttending())
         <a class="btn btn-sm btn-outline-secondary" href="{{ $conversationUrl }}"
            title="Ver mensaje reportado" aria-label="Ver el mensaje reportado">
             <i class="fa-solid fa-message" aria-hidden="true"></i>
@@ -23,15 +23,23 @@
     @endif
 
     {{-- Registro de usuario: no hay chat; se formaliza el alta en Usuarios. --}}
-    @if (! empty($createUserUrl))
+    @if (! empty($createUserUrl) && ! empty($canManage))
         <a class="btn btn-sm btn-primary" href="{{ $createUserUrl }}"
            title="Crear usuario" aria-label="Crear usuario desde la solicitud de registro">
             <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
         </a>
     @endif
 
+    {{-- Solicitud de contraseña: dirigir al cambio de contraseña del usuario. --}}
+    @if (! empty($passwordChangeUrl) && ! empty($canManage))
+        <a class="btn btn-sm btn-primary" href="{{ $passwordChangeUrl }}"
+           title="Cambio de contraseña del usuario" aria-label="Ir al cambio de contraseña del usuario">
+            <i class="fa-solid fa-key" aria-hidden="true"></i>
+        </a>
+    @endif
+
     {{-- Soporte: ir al módulo o funcionalidad donde ocurrió el inconveniente. --}}
-    @if (! empty($moduleUrl))
+    @if (! empty($moduleUrl) && ! empty($canManage))
         <a class="btn btn-sm btn-outline-secondary" href="{{ $moduleUrl }}"
            title="Ir al módulo" aria-label="Ir al módulo donde ocurrió el caso">
             <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>

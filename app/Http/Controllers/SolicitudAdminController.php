@@ -47,44 +47,15 @@ class SolicitudAdminController extends Controller
     }
 
     /**
-     * El caso solo lo puede resolver quien lo tomó. Si sigue sin gestor, se
-     * toma automáticamente por el administrador que ejecuta la acción.
+     * El caso solo lo puede resolver quien lo tomó. Ninguna acción de gestión
+     * se ejecuta antes de tomar el caso.
      */
     private function ensureManager(ChatReport $report, User $admin): ?JsonResponse
     {
         $takenBy = $report->assigned_to ?: $report->taken_by;
 
-        if ($takenBy !== null && (int) $takenBy !== (int) $admin->id) {
-            $manager = User::query()->find($takenBy);
-
-            return api_error(
-                'Este caso está siendo gestionado por '.($manager?->name ?? 'otro administrador').'.',
-                422
-            );
-        }
-
-        if ($takenBy === null) {
-            $affected = ChatReport::query()
-                ->whereKey($report->id)
-                ->where('status', '!=', ChatReport::STATUS_CLOSED)
-                ->whereNull('assigned_to')
-                ->update([
-                    'status' => ChatReport::STATUS_ATTENDING,
-                    'assigned_to' => $admin->id,
-                    'taken_by' => $admin->id,
-                    'taken_at' => now(),
-                ]);
-
-            if ($affected === 0) {
-                $report->refresh();
-                $takenBy = $report->assigned_to ?: $report->taken_by;
-
-                if ($takenBy !== null && (int) $takenBy !== (int) $admin->id) {
-                    return api_error('Otro administrador tomó este caso.', 422);
-                }
-            }
-
-            $report->refresh();
+        if (! $report->isAttending() || $takenBy === null || (int) $takenBy !== (int) $admin->id) {
+            return api_error('Primero debes tomar el caso para poder gestionarlo.', 422);
         }
 
         return null;
@@ -203,6 +174,11 @@ class SolicitudAdminController extends Controller
         $email = (string) ($payload['email'] ?? '');
         $name = (string) ($payload['name'] ?? '');
         $reason = trim((string) $request->input('reason'));
+
+        if ($email !== '' && User::query()->whereRaw('LOWER(email) = ?', [mb_strtolower($email)])->exists()) {
+            return api_error('El usuario ya fue creado; no se puede rechazar su registro.', 422);
+        }
+
         $sent = false;
 
         if ($email !== '') {
@@ -224,6 +200,13 @@ class SolicitudAdminController extends Controller
                 ]);
             }
         }
+
+        $report->payload = array_merge($payload, [
+            'rejected_at' => now()->toIso8601String(),
+            'rejected_by' => $request->user()->id,
+            'rejection_reason' => $reason,
+        ]);
+        $report->save();
 
         $this->close(
             $report,

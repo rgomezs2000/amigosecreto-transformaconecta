@@ -274,7 +274,18 @@ class SoporteCentroTest extends TestCase
             ->json('data.0');
 
         $this->assertNotNull($row['module_url']);
-        $this->assertStringContainsString('Ir al módulo', $row['actions']);
+        $this->assertStringNotContainsString('Ir al módulo', $row['actions']);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar')
+            ->assertOk();
+
+        $managed = $this->actingAs($admin)
+            ->getJson('/moderacion/datos?draw=1&start=0&length=10')
+            ->assertOk()
+            ->json('data.0');
+
+        $this->assertStringContainsString('Ir al módulo', $managed['actions']);
     }
 
     public function test_el_widget_de_chat_tiene_el_formulario_de_reporte_con_archivos_y_enlaces(): void

@@ -19,6 +19,8 @@ class LoginViewTest extends TestCase
             ->assertSee('Salir')
             ->assertSee('Solo para cuentas creadas por el administrador')
             ->assertSee('Continuar con Google')
+            ->assertSee('¿Desea solicitar recuperación de tu contraseña? Una vez aprobada se realiza tu cambio de contraseña por correo.')
+            ->assertSee('window.AppDialog.success', false)
             ->assertSee('auth/google/redirect', false);
     }
 

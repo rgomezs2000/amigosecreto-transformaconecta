@@ -36,6 +36,7 @@
         var $usernameError = $('#usuarios-username-error');
         var $roleError = $('#usuarios-role-error');
         var $solicitudEstado = $('#usuarios-solicitud-estado');
+        var $save = $('#usuarios-save');
         var usernameAvailable = true;
         var usernameTimer = null;
         var solicitudTimer = null;
@@ -123,6 +124,13 @@
                 table.search(value).draw();
             }, 300);
         });
+
+        var initialSearch = new URLSearchParams(window.location.search).get('buscar');
+
+        if (initialSearch) {
+            $('#usuarios-search').val(initialSearch);
+            table.search(initialSearch).draw();
+        }
 
         function toggleFilters() {
             var type = $('#usuarios-filter-type').val();
@@ -332,6 +340,10 @@
         }
 
         function saveUser() {
+            if ($save.prop('disabled')) {
+                return;
+            }
+
             var id = $('#usuarios-form-id').val();
             var name = $.trim($name.val());
             var email = $.trim($email.val());
@@ -379,6 +391,8 @@
             }
 
             AppDialog.confirm(editing ? '¿Desea modificar el usuario?' : '¿Desea crear el usuario?', function () {
+                window.App.processing($save, true, 'Procesando...');
+
                 $.ajax({
                     url: editing ? usuarioBase + '/' + encodeURIComponent(id) : crearUrl,
                     method: editing ? 'PUT' : 'POST',
@@ -394,6 +408,8 @@
                 }).done(function (response) {
                     window.location.assign(response.redirect || indexUrl);
                 }).fail(function (xhr) {
+                    window.App.processing($save, false);
+
                     var response = xhr.responseJSON || {};
 
                     if (response.errors) {
@@ -474,8 +490,11 @@
         $('#usuarios-table').on('click', '.btn-user-reset', function () {
             var id = $(this).data('id');
             var name = $(this).data('name');
+            var $button = $(this);
 
             AppDialog.confirm('¿Restablecer la contraseña de «' + name + '»? Se enviará una nueva clave por correo.', function () {
+                window.App.processing($button, true, 'Procesando...');
+
                 $.ajax({
                     url: usuarioBase + '/' + encodeURIComponent(id) + '/restablecer',
                     method: 'POST',
@@ -483,7 +502,10 @@
                     data: { _token: token }
                 }).done(function (response) {
                     window.location.assign(response.redirect || indexUrl);
-                }).fail(showError);
+                }).fail(function (xhr) {
+                    window.App.processing($button, false);
+                    showError(xhr);
+                });
             });
         });
 

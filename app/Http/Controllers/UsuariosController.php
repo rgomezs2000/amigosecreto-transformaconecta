@@ -173,6 +173,30 @@ class UsuariosController extends Controller
             });
     }
 
+    /**
+     * Última solicitud de registro (abierta o cerrada) para ese correo/usuario.
+     * Sirve para impedir crear un usuario cuya solicitud fue rechazada.
+     */
+    private function ultimaSolicitudRegistro(string $email, string $username): ?ChatReport
+    {
+        if ($email === '' && $username === '') {
+            return null;
+        }
+
+        return ChatReport::query()
+            ->where('type', ChatReport::TYPE_USER_REGISTRATION)
+            ->orderByDesc('id')
+            ->get()
+            ->first(function (ChatReport $report) use ($email, $username) {
+                $payload = $report->payload ?: [];
+                $reportEmail = mb_strtolower(trim((string) ($payload['email'] ?? '')));
+                $reportUsername = mb_strtolower(trim((string) ($payload['username'] ?? '')));
+
+                return ($email !== '' && $reportEmail === $email)
+                    || ($username !== '' && $reportUsername === $username);
+            });
+    }
+
     private function buscarSolicitudReset(User $user): ?ChatReport
     {
         return ChatReport::query()
@@ -289,6 +313,21 @@ class UsuariosController extends Controller
         if (User::query()->loginExists($data['username'])->exists()) {
             return api_response(false, 'Usuario no disponible.', [
                 'errors' => ['username' => ['Usuario no disponible.']],
+            ], 422);
+        }
+
+        // Una solicitud rechazada no se puede convertir en usuario.
+        $ultimaSolicitud = $this->ultimaSolicitudRegistro(
+            mb_strtolower(trim((string) $data['email'])),
+            mb_strtolower(trim((string) $data['username']))
+        );
+
+        if ($ultimaSolicitud !== null
+            && ! empty(($ultimaSolicitud->payload ?: [])['rejected_at'])) {
+            return api_response(false, 'La solicitud de registro fue rechazada; no se puede crear este usuario.', [
+                'errors' => [
+                    'email' => ['La solicitud de registro fue rechazada; no se puede crear este usuario.'],
+                ],
             ], 422);
         }
 

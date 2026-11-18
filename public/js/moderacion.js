@@ -603,7 +603,7 @@
             $('#moderacion-detail-refer').prop('hidden', !row.can_refer);
 
             var $createUser = $('#moderacion-solicitud-crear');
-            var solicitudAbierta = row.status_class !== 'cerrado';
+            var solicitudAbierta = row.status_class !== 'cerrado' && Boolean(row.can_manage);
 
             if (row.create_user_url && solicitudAbierta) {
                 $createUser.attr('href', row.create_user_url).prop('hidden', false);
@@ -617,18 +617,26 @@
                 action: row.account_action || ''
             };
 
+            var $passwordLink = $('#moderacion-solicitud-password');
+
+            if (solicitudAbierta && row.password_change_url) {
+                $passwordLink.attr('href', row.password_change_url).prop('hidden', false);
+            } else {
+                $passwordLink.prop('hidden', true).removeAttr('href');
+            }
+
             $('#moderacion-solicitud-reset')
-                .prop('hidden', !(solicitudAbierta && row.account_action === 'reset'));
+                .prop('hidden', !(solicitudAbierta && row.account_action === 'reset' && !row.password_change_url));
             $('#moderacion-solicitud-unlock')
                 .prop('hidden', !(solicitudAbierta && row.account_action === 'unlock'));
             $('#moderacion-solicitud-reject')
-                .prop('hidden', !(solicitudAbierta && row.type === 'registro'));
+                .prop('hidden', !(solicitudAbierta && row.can_reject_registration));
 
             renderReferrals(row.referrals);
 
             var $messageChat = $('#moderacion-detail-chat');
 
-            if (row.conversation_url && row.status_class === 'atendiendo') {
+            if (row.can_manage && row.conversation_url && row.status_class === 'atendiendo') {
                 $messageChat.attr('href', row.conversation_url).prop('hidden', false);
             } else {
                 $messageChat.prop('hidden', true).removeAttr('href');
@@ -636,7 +644,7 @@
 
             var $ticketChat = $('#moderacion-detail-ticket-chat');
 
-            if (row.ticket_chat_url) {
+            if (row.can_manage && row.ticket_chat_url) {
                 $ticketChat.attr('href', row.ticket_chat_url).prop('hidden', false);
             } else {
                 $ticketChat.prop('hidden', true).removeAttr('href');
@@ -644,7 +652,7 @@
 
             var $moduleLink = $('#moderacion-detail-module-link');
 
-            if (row.module_url) {
+            if (row.can_manage && row.module_url) {
                 $moduleLink.attr('href', row.module_url).prop('hidden', false);
             } else {
                 $moduleLink.prop('hidden', true).removeAttr('href');
@@ -663,9 +671,13 @@
             }
         }
 
-        function enviarSolicitud(template, data) {
+        function enviarSolicitud(template, data, $button) {
             if (!detailSolicitud) {
                 return;
+            }
+
+            if ($button) {
+                window.App.processing($button, true, 'Procesando...');
             }
 
             $.ajax({
@@ -675,6 +687,10 @@
                 headers: { 'X-CSRF-TOKEN': csrf },
                 data: data || {}
             }).done(function (response) {
+                if ($button) {
+                    window.App.processing($button, false);
+                }
+
                 AppDialog.alert((response && response.message) || 'Listo.');
 
                 if (modal) {
@@ -685,6 +701,10 @@
                     reportesTable.ajax.reload(null, false);
                 }
             }).fail(function (xhr) {
+                if ($button) {
+                    window.App.processing($button, false);
+                }
+
                 AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo completar la gestión.');
             });
         }
@@ -694,8 +714,10 @@
                 return;
             }
 
+            var $button = $(this);
+
             AppDialog.confirm('¿Restablecer la contraseña y enviar las nuevas credenciales por correo?', function () {
-                enviarSolicitud(restablecerUrl, {});
+                enviarSolicitud(restablecerUrl, {}, $button);
             });
         });
 
@@ -704,8 +726,10 @@
                 return;
             }
 
+            var $button = $(this);
+
             AppDialog.confirm('¿Desbloquear la cuenta y cerrar el caso?', function () {
-                enviarSolicitud(desbloquearUrl, {});
+                enviarSolicitud(desbloquearUrl, {}, $button);
             });
         });
 
@@ -714,12 +738,14 @@
                 return;
             }
 
+            var $button = $(this);
+
             AppDialog.prompt('Motivo del rechazo (se avisa al solicitante por correo):', function (value) {
                 if (!value) {
                     return;
                 }
 
-                enviarSolicitud(rechazarUrl, { reason: value });
+                enviarSolicitud(rechazarUrl, { reason: value }, $button);
             }, { title: 'Rechazar registro' });
         });
 
@@ -1004,11 +1030,14 @@
 
             var body = $.trim($('#moderacion-sugerencia-body').val() || '');
             var $error = $('#moderacion-sugerencia-error').text('').removeAttr('data-kind');
+            var $button = $(this);
 
             if (body === '') {
                 $error.text('Escribe la respuesta a la sugerencia.').attr('data-kind', 'error');
                 return;
             }
+
+            window.App.processing($button, true, 'Procesando...');
 
             $.ajax({
                 url: sugerenciaUrl.replace('__ID__', encodeURIComponent(detailReportId)),
@@ -1021,6 +1050,8 @@
                     body: body
                 }
             }).done(function (response) {
+                window.App.processing($button, false);
+
                 var message = (response && response.reply) || null;
                 var $thread = $('#moderacion-sugerencia-thread');
 
@@ -1038,6 +1069,7 @@
                 $('#moderacion-sugerencia-body').val('');
                 $('#moderacion-sugerencia-error').text('Respuesta enviada.').attr('data-kind', 'success');
             }).fail(function (xhr) {
+                window.App.processing($button, false);
                 var message = (xhr.responseJSON || {}).message || 'No se pudo enviar la respuesta.';
                 $error.text(message).attr('data-kind', 'error');
             });
@@ -1265,7 +1297,7 @@
                 return;
             }
 
-            $button.prop('disabled', true);
+            window.App.processing($button, true, 'Procesando...');
 
             $.ajax({
                 url: remitirUrl.replace('__ID__', detailReportId),
@@ -1280,6 +1312,8 @@
                     observation: observation
                 }
             }).done(function (response) {
+                window.App.processing($button, false);
+
                 if (referModal) {
                     referModal.hide();
                 }
@@ -1304,9 +1338,8 @@
                     AppDialog.alert(response.message);
                 }
             }).fail(function (xhr) {
+                window.App.processing($button, false);
                 $error.attr('data-kind', 'error').text(caseError(xhr));
-            }).always(function () {
-                $button.prop('disabled', false);
             });
         });
 
@@ -1318,7 +1351,7 @@
             var $button = $(this);
             var $error = $('#moderacion-take-error');
 
-            $button.prop('disabled', true);
+            window.App.processing($button, true, 'Procesando...');
             $error.text('').removeAttr('data-kind');
 
             $.ajax({
@@ -1333,6 +1366,8 @@
                     attention_observation: $('#moderacion-take-observation').val()
                 }
             }).done(function (response) {
+                window.App.processing($button, false);
+
                 if (takeModal) {
                     takeModal.hide();
                 }
@@ -1374,9 +1409,8 @@
                     }));
                 }
             }).fail(function (xhr) {
+                window.App.processing($button, false);
                 $error.attr('data-kind', 'error').text(caseError(xhr));
-            }).always(function () {
-                $button.prop('disabled', false);
             });
         });
 
@@ -1403,7 +1437,7 @@
 
             var $button = $(this);
 
-            $button.prop('disabled', true);
+            window.App.processing($button, true, 'Procesando...');
 
             $.ajax({
                 url: cerrarUrl.replace('__ID__', detailReportId),
@@ -1418,6 +1452,8 @@
                     confirmed: 1
                 }
             }).done(function () {
+                window.App.processing($button, false);
+
                 if (closeModal) {
                     closeModal.hide();
                 }
@@ -1429,9 +1465,8 @@
                 reportesTable.ajax.reload(null, false);
                 refreshModerationCounts();
             }).fail(function (xhr) {
+                window.App.processing($button, false);
                 $error.attr('data-kind', 'error').text(caseError(xhr));
-            }).always(function () {
-                $button.prop('disabled', false);
             });
         });
 

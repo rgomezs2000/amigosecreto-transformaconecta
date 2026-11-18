@@ -743,11 +743,16 @@ class ModeracionController extends Controller
             ])
             ->values();
 
+        // Solo el administrador que tomó el caso puede gestionar sus acciones.
+        // Un caso pendiente o cerrado no se gestiona.
+        $canManage = $report->isAttending() && $isMine;
+
         // Chat del caso (ticket): solo lo ve quien está dentro. El beneficiario
         // y el administrador que lo tomó; otro administrador no entra hasta
         // tomarlo (aunque sí puede ver la ficha y monitorear el caso).
         $ticketChat = $report->conversation;
-        $canOpenTicketChat = $ticketChat !== null
+        $canOpenTicketChat = $canManage
+            && $ticketChat !== null
             && ! $report->isSuggestion()
             && ! $report->isUserRegistration()
             && ! $report->isAccountRequest()
@@ -760,15 +765,34 @@ class ModeracionController extends Controller
         // alta desde el módulo de Usuarios, con los datos de la solicitud.
         $registrationPayload = $report->isUserRegistration() ? ($report->payload ?: []) : [];
         $registrationHasData = trim((string) ($registrationPayload['email'] ?? '')) !== '';
-        $createUserUrl = $report->isUserRegistration()
+        $registrationUserExists = $registrationHasData
+            && User::query()->whereRaw('LOWER(email) = ?', [mb_strtolower((string) $registrationPayload['email'])])->exists();
+        $createUserUrl = $canManage && $report->isUserRegistration() && ! $registrationUserExists
             ? module_url('usuarios').($registrationHasData ? '?solicitud='.$report->id : '')
             : null;
+        $canRejectRegistration = $canManage
+            && $report->isUserRegistration()
+            && $registrationHasData
+            && ! $registrationUserExists;
 
         // Las solicitudes de cuenta (reset/desbloqueo) tampoco abren chat:
         // se resuelven con las acciones de su ficha.
-        $accountAction = $report->isAccountRequest()
+        $accountAction = $canManage && $report->isAccountRequest()
             ? (string) (($report->payload ?: [])['action'] ?? '')
             : '';
+
+        // Los casos de restablecimiento dirigen al cambio de contraseña del
+        // usuario en el módulo Usuarios, en lugar de ejecutar el cambio aquí.
+        $passwordChangeUrl = null;
+
+        if ($canManage && $accountAction === 'reset') {
+            $resetUserId = (int) (($report->payload ?: [])['user_id'] ?? 0);
+            $resetUser = $resetUserId > 0 ? User::query()->find($resetUserId) : null;
+
+            if ($resetUser !== null) {
+                $passwordChangeUrl = module_url('usuarios').'?buscar='.urlencode($resetUser->username);
+            }
+        }
 
         return [
             'id' => $report->id,
@@ -823,6 +847,9 @@ class ModeracionController extends Controller
             'ticket_chat_url' => $ticketChatUrl,
             'create_user_url' => $createUserUrl,
             'account_action' => $accountAction,
+            'password_change_url' => $passwordChangeUrl,
+            'can_manage' => $canManage,
+            'can_reject_registration' => $canRejectRegistration,
             'has_ticket_chat' => $ticketChat !== null,
             // Remisión: solo el gestor actual puede remitir el caso.
             'can_refer' => $report->isAttending() && $isMine,
@@ -833,6 +860,8 @@ class ModeracionController extends Controller
                 'ticketChatUrl' => $ticketChatUrl,
                 'moduleUrl' => $moduleUrl,
                 'createUserUrl' => $createUserUrl,
+                'passwordChangeUrl' => $passwordChangeUrl,
+                'canManage' => $canManage,
             ])->render(),
         ];
     }

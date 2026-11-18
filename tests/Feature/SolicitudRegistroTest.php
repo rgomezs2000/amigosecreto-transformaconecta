@@ -395,4 +395,150 @@ class SolicitudRegistroTest extends TestCase
         $this->assertSame($admin->id, $report->refresh()->taken_by);
         $this->assertSame(ChatReport::STATUS_ATTENDING, $report->status);
     }
+
+    public function test_no_se_puede_rechazar_un_registro_si_el_usuario_ya_existe(): void
+    {
+        $this->postJson('/solicitudes/registro', [
+            'name' => 'Registro Existente',
+            'email' => 'registro.existente@example.com',
+            'username' => 'registro.existente',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar')
+            ->assertOk();
+
+        User::factory()->create([
+            'name' => 'Registro Existente',
+            'email' => 'registro.existente@example.com',
+            'username' => 'registro.existente',
+        ]);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/solicitudes/'.$report->id.'/rechazar-registro', [
+                'reason' => 'No aplica',
+            ])
+            ->assertStatus(422);
+
+        $this->assertSame(ChatReport::STATUS_ATTENDING, $report->refresh()->status);
+    }
+
+    public function test_no_se_puede_crear_un_usuario_de_una_solicitud_rechazada(): void
+    {
+        $this->postJson('/solicitudes/registro', [
+            'name' => 'Registro Rechazado',
+            'email' => 'registro.rechazado@example.com',
+            'username' => 'registro.rechazado',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar')
+            ->assertOk();
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/solicitudes/'.$report->id.'/rechazar-registro', [
+                'reason' => 'Datos incompletos',
+            ])
+            ->assertOk();
+
+        $this->assertSame(ChatReport::STATUS_CLOSED, $report->refresh()->status);
+        $this->assertNotEmpty(($report->payload ?: [])['rejected_at']);
+
+        $this->actingAs($admin)
+            ->postJson(route('usuarios.crear'), [
+                'name' => 'Registro Rechazado',
+                'email' => 'registro.rechazado@example.com',
+                'username' => 'registro.rechazado',
+                'profile_id' => $this->perfilUsuario()->id,
+            ])
+            ->assertStatus(422);
+    }
+
+    public function test_no_se_puede_rechazar_antes_de_tomar_el_caso(): void
+    {
+        $this->postJson('/solicitudes/registro', [
+            'name' => 'Sin Tomar',
+            'email' => 'sin.tomar@example.com',
+            'username' => 'sin.tomar',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/solicitudes/'.$report->id.'/rechazar-registro', [
+                'reason' => 'Intento antes de tomar',
+            ])
+            ->assertStatus(422);
+
+        $this->assertSame(ChatReport::STATUS_PENDING, $report->refresh()->status);
+    }
+
+    public function test_no_hay_acciones_de_gestion_antes_de_tomar_ni_despues_de_cerrar(): void
+    {
+        $this->postJson('/solicitudes/registro', [
+            'name' => 'Caso Gestionable',
+            'email' => 'gestionable@example.com',
+            'username' => 'gestionable',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+        $otro = $this->makeUser('Otro Para Remitir', UserRole::Admin, ['moderacion']);
+
+        // Pendiente: solo se puede ver y tomar.
+        $pending = $this->actingAs($admin)
+            ->getJson('/moderacion/reportes/'.$report->id.'/detalle')
+            ->assertOk()
+            ->assertJsonPath('report.can_manage', false)
+            ->assertJsonPath('report.create_user_url', null)
+            ->assertJsonPath('report.ticket_chat_url', null);
+
+        $this->assertSame('', $pending->json('report.account_action'));
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/remitir', [
+                'admin_id' => $otro->id,
+                'observation' => 'Todavía pendiente',
+            ])
+            ->assertStatus(422);
+
+        // Tomado: ya se puede gestionar.
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar')
+            ->assertOk();
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/reportes/'.$report->id.'/detalle')
+            ->assertOk()
+            ->assertJsonPath('report.can_manage', true);
+
+        // Cerrado: no se vuelve a gestionar ni remitir.
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/cerrar', [
+                'close_observation' => 'Caso cerrado',
+                'confirmed' => 1,
+            ])
+            ->assertOk();
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/reportes/'.$report->id.'/detalle')
+            ->assertOk()
+            ->assertJsonPath('report.can_manage', false)
+            ->assertJsonPath('report.create_user_url', null)
+            ->assertJsonPath('report.ticket_chat_url', null);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/remitir', [
+                'admin_id' => $otro->id,
+                'observation' => 'Ya está cerrado',
+            ])
+            ->assertStatus(422);
+    }
 }

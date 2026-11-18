@@ -515,6 +515,10 @@
                 <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
                 <span>Crear usuario</span>
             </a>
+            <a class="btn btn-primary" id="moderacion-solicitud-password" href="#" hidden>
+                <i class="fa-solid fa-key" aria-hidden="true"></i>
+                <span>Cambio de contraseña del usuario</span>
+            </a>
             <button type="button" class="btn btn-outline-danger" id="moderacion-solicitud-reject" hidden>
                 <i class="fa-solid fa-ban" aria-hidden="true"></i>
                 <span>Rechazar registro</span>

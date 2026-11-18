@@ -72,7 +72,7 @@
                 <p id="login-status" class="form-status" role="status" aria-live="polite"></p>
 
                 <div class="login-actions">
-                    <button type="submit" class="btn btn-primary btn-lg" id="login-submit">
+                    <button type="submit" class="btn btn-primary btn-lg" id="login-submit" data-processing-manual="true">
                         <i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i>
                         <span>Ingresar</span>
                     </button>
@@ -348,7 +348,7 @@
             return;
         }
 
-        confirmDialog('¿Deseas solicitar la recuperación de tu contraseña?', function () {
+        confirmDialog('¿Desea solicitar recuperación de tu contraseña? Una vez aprobada se realiza tu cambio de contraseña por correo.', function () {
             fetch('{{ route('solicitudes.recuperacion') }}', {
                 method: 'POST',
                 headers: {
@@ -362,15 +362,29 @@
                     return { ok: response.ok, data: data };
                 });
             }).then(function (result) {
-                mensaje(
-                    $recuperacionEstado,
-                    result.data.message || (result.ok ? 'Solicitud recibida.' : 'No se pudo enviar la solicitud.'),
-                    result.ok ? 'success' : 'error'
-                );
+                if (!result.ok) {
+                    mensaje(
+                        $recuperacionEstado,
+                        result.data.message || 'No se pudo enviar la solicitud.',
+                        'error'
+                    );
 
-                if (result.ok) {
-                    document.getElementById('solicitud-recuperacion-login').value = '';
+                    return;
                 }
+
+                var mensajeSolicitud = result.data.message
+                    || 'Si la cuenta existe, la administración procesará el restablecimiento y te enviará las credenciales por correo.';
+
+                if (recuperacionModal && window.bootstrap) {
+                    window.bootstrap.Modal.getOrCreateInstance(recuperacionModal).hide();
+                }
+
+                document.getElementById('solicitud-recuperacion-login').value = '';
+                mensaje($recuperacionEstado, '', '');
+
+                window.AppDialog.success(mensajeSolicitud, {
+                    title: 'Solicitud de restablecimiento'
+                });
             }).catch(function () {
                 mensaje($recuperacionEstado, 'No se pudo enviar la solicitud. Intenta de nuevo.', 'error');
             });
