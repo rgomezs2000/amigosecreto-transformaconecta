@@ -84,6 +84,10 @@
          data-url-pistas="{{ route('participantes.pistas', ['participant' => '__ID__']) }}"
          data-url-obsequios="{{ route('participantes.obsequios', ['participant' => '__ID__']) }}"
          data-url-consumibles="{{ route('participantes.consumibles', ['participant' => '__ID__']) }}"
+         data-url-invitar="{{ route('eventos.participantes.invitar', ['event' => '__EVENT__', 'user' => '__ID__']) }}"
+         data-url-expulsar="{{ route('eventos.participantes.expulsar', ['event' => '__EVENT__', 'user' => '__ID__']) }}"
+         data-url-descartar="{{ route('eventos.participantes.descartar', ['event' => '__EVENT__', 'user' => '__ID__']) }}"
+         data-csrf="{{ csrf_token() }}"
          data-evento-actual="{{ $event?->id }}"
          hidden></div>
 

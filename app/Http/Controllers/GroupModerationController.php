@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\UserRole;
+use App\Models\ChatBlock;
 use App\Models\ChatGroupAudit;
 use App\Models\Conversation;
 use App\Models\GroupBan;
@@ -25,6 +26,11 @@ class GroupModerationController extends Controller
     public function invitar(Request $request, Conversation $conversation): JsonResponse
     {
         $this->ensureGroup($conversation);
+
+        if ($conversation->is_closed) {
+            return api_error('Esta sala es cerrada: se gestiona solo con sus miembros.', 422);
+        }
+
         $this->ensureOwnerOrAdmin($request->user(), $conversation);
 
         $validator = validator($request->all(), [
@@ -36,6 +42,10 @@ class GroupModerationController extends Controller
         }
 
         $invitedUserId = $request->input('user_id');
+
+        if ($invitedUserId !== null && ChatBlock::existsBetween($request->user()->id, (int) $invitedUserId)) {
+            return api_error('No puedes invitar a una persona bloqueada.', 422);
+        }
 
         if ($invitedUserId !== null && GroupBan::query()
             ->where('conversation_id', $conversation->id)
@@ -134,6 +144,17 @@ class GroupModerationController extends Controller
 
         $invitation = $state['invitation'];
         $user = $request->user();
+        $conversation = $invitation->conversation;
+
+        $blockedWithOwner = $conversation !== null
+            && ChatBlock::existsBetween((int) $conversation->created_by, $user->id);
+
+        $blockedWithInviter = $invitation->invited_by !== null
+            && ChatBlock::existsBetween((int) $invitation->invited_by, $user->id);
+
+        if ($blockedWithOwner || $blockedWithInviter) {
+            return api_error('No puedes unirte: hay un bloqueo con el grupo o con quien te invitó.', 403);
+        }
 
         if (GroupBan::query()
             ->where('conversation_id', $invitation->conversation_id)
@@ -143,7 +164,7 @@ class GroupModerationController extends Controller
             return api_error('No puedes unirte: estás vetado en este grupo.', 403);
         }
 
-        $invitation->conversation->users()->syncWithoutDetaching([$user->id]);
+        $conversation->users()->syncWithoutDetaching([$user->id]);
         $invitation->update(['accepted_at' => now()]);
 
         ChatGroupAudit::log(
@@ -189,6 +210,11 @@ class GroupModerationController extends Controller
     public function suspender(Request $request, Conversation $conversation, User $user): JsonResponse
     {
         $this->ensureGroup($conversation);
+
+        if ($conversation->is_closed) {
+            return api_error('Esta sala es cerrada: no admite suspensiones.', 422);
+        }
+
         $this->ensureOwnerOrAdmin($request->user(), $conversation);
 
         $validator = validator($request->all(), [
@@ -226,6 +252,11 @@ class GroupModerationController extends Controller
     public function banear(Request $request, Conversation $conversation, User $user): JsonResponse
     {
         $this->ensureGroup($conversation);
+
+        if ($conversation->is_closed) {
+            return api_error('Esta sala es cerrada: no admite vetos.', 422);
+        }
+
         $this->ensureOwnerOrAdmin($request->user(), $conversation);
 
         if ($user->id === $request->user()->id) {
@@ -258,6 +289,11 @@ class GroupModerationController extends Controller
     public function desbanear(Request $request, Conversation $conversation, User $user): JsonResponse
     {
         $this->ensureGroup($conversation);
+
+        if ($conversation->is_closed) {
+            return api_error('Esta sala es cerrada: no admite vetos.', 422);
+        }
+
         $this->ensureOwnerOrAdmin($request->user(), $conversation);
 
         GroupBan::query()
@@ -280,6 +316,11 @@ class GroupModerationController extends Controller
     public function baneados(Request $request, Conversation $conversation): JsonResponse
     {
         $this->ensureGroup($conversation);
+
+        if ($conversation->is_closed) {
+            return api_error('Esta sala es cerrada: no admite vetos.', 422);
+        }
+
         $this->ensureOwnerOrAdmin($request->user(), $conversation);
 
         $items = GroupBan::query()

@@ -18,6 +18,19 @@
         </div>
     </header>
 
+    @if ($presupuesto !== null)
+        <p class="amigo-tasa">
+            <i class="fa-solid fa-wallet" aria-hidden="true"></i>
+            <span>
+                Presupuesto máximo:
+                <strong>US$ {{ format_rate($presupuesto) }}</strong>
+                @if ($tasa !== null)
+                    · <strong>Bs. {{ format_rate($presupuesto * $tasa) }}</strong>
+                @endif
+            </span>
+        </p>
+    @endif
+
     <p class="amigo-tasa" id="amigo-tasa">
         <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
         <span>
@@ -44,6 +57,14 @@
                        maxlength="150" autocomplete="off" value="{{ $gift?->product }}"
                        @disabled($bloqueado)>
                 <p class="field-message" id="amigo-obsequio-nombre-error" role="status" aria-live="polite"></p>
+            </div>
+
+            <div class="field amigo-gift__wide">
+                <label for="amigo-obsequio-descripcion" class="form-label">Descripción del obsequio</label>
+                <textarea class="form-control" id="amigo-obsequio-descripcion" name="descripcion"
+                          rows="2" maxlength="500" placeholder="Detalles del regalo (opcional)"
+                          @disabled($bloqueado)>{{ $gift?->description }}</textarea>
+                <p class="field-message" id="amigo-obsequio-descripcion-error" role="status" aria-live="polite"></p>
             </div>
 
             <div class="field">

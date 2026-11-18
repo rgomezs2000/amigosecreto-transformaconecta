@@ -159,6 +159,7 @@ class DinamicaTest extends TestCase
             'user_id' => $ana->id,
             'body' => 'Hola',
             'type' => 'text',
+            'event_id' => $eventId,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -174,11 +175,84 @@ class DinamicaTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        DB::table('chat_reports')->insert([
+        DB::table('chat_message_favorites')->insert([
+            'message_id' => $messageId,
+            'user_id' => $ana->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $pollId = DB::table('chat_polls')->insertGetId([
+            'message_id' => $messageId,
+            'conversation_id' => $conversationId,
+            'created_by' => $ana->id,
+            'question' => '¿Qué regalo?',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $optionId = DB::table('chat_poll_options')->insertGetId([
+            'poll_id' => $pollId,
+            'label' => 'Café',
+            'position' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('chat_poll_votes')->insert([
+            'poll_id' => $pollId,
+            'option_id' => $optionId,
+            'user_id' => $luis->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $reportId = DB::table('chat_reports')->insertGetId([
             'message_id' => $messageId,
             'reporter_id' => $luis->id,
             'reason' => 'Prueba',
             'status' => 'pendiente',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('chat_report_ratings')->insert([
+            'report_id' => $reportId,
+            'aspect' => 'claridad',
+            'score' => 5,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('chat_report_referrals')->insert([
+            'report_id' => $reportId,
+            'from_admin_id' => null,
+            'to_admin_id' => null,
+            'observation' => 'Remisión de prueba',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('chat_broadcast_recipients')->insert([
+            'conversation_id' => $conversationId,
+            'user_id' => $luis->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('wish_items')->insert([
+            'event_id' => $eventId,
+            'user_id' => $ana->id,
+            'title' => 'Audífonos',
+            'description' => 'Inalámbricos',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('session_kicks')->insert([
+            'session_id' => 'sesion-de-prueba',
+            'user_id' => $ana->id,
+            'message' => 'Sesión cerrada',
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -293,11 +367,15 @@ class DinamicaTest extends TestCase
 
         // Nada de dinámica.
         foreach ([
-            'events', 'event_participants', 'assignments', 'wishlists', 'clues',
+            'events', 'event_participants', 'assignments', 'wishlists', 'wish_items', 'clues',
             'exchange_gifts', 'consumable_gifts', 'chat_conversations', 'chat_messages',
-            'chat_message_attachments', 'chat_reports', 'chat_blocks', 'chat_moderation_reads',
+            'chat_message_attachments', 'chat_message_favorites', 'chat_message_reactions',
+            'chat_polls', 'chat_poll_options', 'chat_poll_votes',
+            'chat_reports', 'chat_report_attachments', 'chat_report_links',
+            'chat_report_ratings', 'chat_report_referrals', 'chat_blocks',
+            'chat_broadcast_recipients', 'chat_moderation_reads',
             'chat_group_audits', 'chat_group_bans', 'chat_group_suspensions',
-            'chat_group_invitations', 'notifications', 'audit_logs',
+            'chat_group_invitations', 'session_kicks', 'notifications', 'audit_logs',
             'notification_preferences',
         ] as $table) {
             $this->assertSame(0, DB::table($table)->count(), 'La tabla '.$table.' debería quedar vacía.');

@@ -7,14 +7,5 @@
 
     <p class="amigo-card__name">{{ $amigo['name'] ?? '—' }}</p>
 
-    @if (! empty($amigo['username']))
-        <p class="amigo-card__user">&#64;{{ $amigo['username'] }}</p>
-    @endif
-
-    @if (! empty($amigo['notas']))
-        <p class="amigo-card__notes">
-            <span class="amigo-card__label">Preferencias</span>
-            {{ $amigo['notas'] }}
-        </p>
-    @endif
+    <p class="amigo-card__user">Solo verás su nombre hasta la gran revelación.</p>
 </article>

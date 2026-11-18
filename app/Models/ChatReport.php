@@ -230,6 +230,11 @@ class ChatReport extends Model
         return $this->type === self::TYPE_USER_REGISTRATION;
     }
 
+    public function isAccountRequest(): bool
+    {
+        return $this->type === self::TYPE_ACCOUNT;
+    }
+
     public function statusLabel(): string
     {
         return match ($this->status) {

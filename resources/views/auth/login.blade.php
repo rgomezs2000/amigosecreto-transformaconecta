@@ -72,7 +72,7 @@
                 <p id="login-status" class="form-status" role="status" aria-live="polite"></p>
 
                 <div class="login-actions">
-                    <button type="submit" class="btn btn-primary btn-lg">
+                    <button type="submit" class="btn btn-primary btn-lg" id="login-submit">
                         <i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i>
                         <span>Ingresar</span>
                     </button>

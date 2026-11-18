@@ -31,13 +31,14 @@ class ReporteAvisos
         $ticket = $report->id;
         $url = $this->urlBeneficiario($report);
         $esSugerencia = $report->isSuggestion();
+        $esUsuarios = $report->isUserRegistration();
 
         $this->correo(
             $beneficiary,
             'Caso Nº '.$ticket.' abierto (por atender)',
             $esSugerencia
                 ? 'Tu sugerencia Nº '.$ticket.' quedó registrada'
-                : 'Tu caso Nº '.$ticket.' quedó registrado',
+                : ($esUsuarios ? 'Tu solicitud Nº '.$ticket.' quedó registrada' : 'Tu caso Nº '.$ticket.' quedó registrado'),
             $esSugerencia
                 ? [
                     'La sugerencia está abierta y por atender.',
@@ -51,7 +52,9 @@ class ReporteAvisos
                     'Ticket: Nº '.$ticket,
                     'Motivo: '.$this->motivo($report),
                     'Fecha: '.now()->format('d/m/Y H:i'),
-                    'El chat del caso está en solo lectura hasta que un administrador lo tome.',
+                    $esUsuarios
+                        ? 'La administración revisará tu solicitud y te contactará por correo.'
+                        : 'El chat del caso está en solo lectura hasta que un administrador lo tome.',
                 ],
             $url
         );
@@ -62,7 +65,9 @@ class ReporteAvisos
             'Caso Nº '.$ticket.' abierto',
             $esSugerencia
                 ? 'Tu sugerencia quedó registrada y está por atender.'
-                : 'Tu caso quedó registrado y está por atender. El chat se habilita cuando se tome.',
+                : ($esUsuarios
+                    ? 'Tu solicitud quedó registrada y está por atender.'
+                    : 'Tu caso quedó registrado y está por atender. El chat se habilita cuando se tome.'),
             $this->datosPush($report, $conversation, 'por_atender'),
             $url,
             'reporte'

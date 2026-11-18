@@ -16,7 +16,7 @@
         <div class="eventos-toolbar">
             <div>
                 <h2 class="eventos-title">Tus eventos</h2>
-                <p class="eventos-subtitle">Un evento por año. Las tarjetas son de solo lectura; usa los botones para gestionar el evento.</p>
+                <p class="eventos-subtitle">Un evento por año. Primero se crea y se envía la invitación personal; el sorteo empieza cuando todos hayan respondido.</p>
             </div>
 
             @php
@@ -45,6 +45,11 @@
          data-url-index="{{ module_url('eventos') }}"
          data-url-reiniciar="{{ route('eventos.reiniciar') }}"
          data-url-participantes="{{ url('/eventos') }}"
+         data-url-invitar="{{ route('eventos.invitar', ['event' => '__ID__']) }}"
+         data-url-invitar-uno="{{ route('eventos.participantes.invitar', ['event' => '__ID__', 'user' => '__USER__']) }}"
+         data-url-expulsar="{{ route('eventos.participantes.expulsar', ['event' => '__ID__', 'user' => '__USER__']) }}"
+         data-url-descartar="{{ route('eventos.participantes.descartar', ['event' => '__ID__', 'user' => '__USER__']) }}"
+         data-tasa="{{ $tasa ?? '' }}"
          hidden></div>
 
     <div id="eventos-live"
@@ -69,56 +74,36 @@
                 </div>
 
                 <div class="field">
+                    <label for="evento-presupuesto" class="form-label">Presupuesto máximo por obsequio (US$)</label>
+                    <input type="number" class="form-control" id="evento-presupuesto"
+                           min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" autocomplete="off">
+                    <p class="field-message" id="evento-presupuesto-error" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="field">
+                    <label for="evento-presupuesto-bs" class="form-label">Referencia en Bs. (tasa BCV)</label>
+                    <input type="text" class="form-control" id="evento-presupuesto-bs"
+                           readonly aria-readonly="true" placeholder="—">
+                    <p class="field-message amigo-hint" id="evento-presupuesto-bs-hint">
+                        Se calcula con la tasa oficial del BCV y no se guarda en la base.
+                        @if ($tasa !== null)
+                            Tasa actual: <strong>Bs. {{ format_rate($tasa) }}</strong> por US$.
+                        @else
+                            Tasa no disponible.
+                        @endif
+                    </p>
+                </div>
+
+                <div class="field">
                     <label for="evento-observations" class="form-label">Observaciones generales</label>
                     <textarea class="form-control" id="evento-observations" rows="3" maxlength="1000"
                               placeholder="Opcional"></textarea>
                 </div>
 
-                <div class="evento-participants">
-                    <p class="evento-participants__title">
-                        Participantes activos: <strong>{{ $participantUsers->count() }}</strong>
-                    </p>
-
-                    @if ($participantUsers->isEmpty())
-                        <p class="field-message" data-kind="error">No hay usuarios participantes activos. Crea usuarios con rol de participante antes de planificar el evento.</p>
-                    @else
-                        <div class="evento-participants__list">
-                            @foreach ($participantUsers as $participant)
-                                <div class="evento-participant">
-                                    <div class="evento-participant__data">
-                                        <p class="evento-participant__name">{{ $participant->name }}</p>
-                                        <p class="evento-participant__email">{{ $participant->email }}</p>
-                                        <span class="status-badge status-badge--active">Activo</span>
-                                    </div>
-                                    <input type="text" class="form-control evento-participant__notes"
-                                           data-user-id="{{ $participant->id }}"
-                                           maxlength="500"
-                                           placeholder="Observaciones (opcional)"
-                                           aria-label="Observaciones de {{ $participant->name }}">
-                                </div>
-                            @endforeach
-                        </div>
-
-                        <div class="evento-participants__pager">
-                            <div class="evento-participants__length">
-                                <label for="evento-participants-length">Mostrar</label>
-                                <select id="evento-participants-length" class="form-select form-select-sm">
-                                    <option value="2" selected>2</option>
-                                    <option value="5">5</option>
-                                    <option value="10">10</option>
-                                    <option value="25">25</option>
-                                </select>
-                                <span>participantes</span>
-                            </div>
-
-                            <div class="evento-participants__nav">
-                                <span id="evento-participants-info"></span>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="evento-participants-prev">Anterior</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="evento-participants-next">Siguiente</button>
-                            </div>
-                        </div>
-                    @endif
-                </div>
+                <p class="sorteo-note">
+                    <i class="fa-solid fa-envelope-circle-check" aria-hidden="true"></i>
+                    <span>Al guardar el evento se genera una invitación personal para cada usuario participante. Nadie queda inscrito hasta que la acepte.</span>
+                </p>
             </form>
         </x-slot:body>
 
@@ -131,7 +116,7 @@
     <x-app-modal id="modal-evento-reiniciar" title="Reiniciar evento">
         <x-slot:body>
             <p class="evento-modal__text">
-                Se eliminará el evento del año y toda su dinámica: participaciones, listas de deseos,
+                Se eliminará el evento del año y toda su dinámica: invitaciones, participaciones, listas de deseos,
                 asignaciones, pistas y regalos. Los usuarios del sistema no se borran.
             </p>
             <div class="progress evento-reiniciar__progress" role="progressbar" aria-label="Progreso del reinicio"
@@ -155,10 +140,10 @@
                 <div class="evento-participants__length">
                     <label for="evento-modal-participants-length">Mostrar</label>
                     <select id="evento-modal-participants-length" class="form-select form-select-sm">
-                        <option value="2" selected>2</option>
-                        <option value="5">5</option>
+                        <option value="5" selected>5</option>
                         <option value="10">10</option>
                         <option value="25">25</option>
+                        <option value="50">50</option>
                     </select>
                 </div>
                 <div class="evento-participants__nav">
@@ -238,4 +223,3 @@
 @push('scripts')
     <script src="{{ asset('js/eventos.js') }}?v={{ filemtime(public_path('js/eventos.js')) }}"></script>
 @endpush
-

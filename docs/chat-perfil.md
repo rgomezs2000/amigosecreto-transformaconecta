@@ -6,9 +6,13 @@ abre desde el perfil.
 
 ## Navegación
 
-- Perfil principal → conversación con la flecha izquierda.
+- Perfil abierto desde una conversación → vuelve a la conversación.
+- Perfil abierto desde la bandeja, grupo, sala, difusión o Usuarios → vuelve a
+  la lista; no abre el mensaje por detrás.
 - Miembros, auditoría o galería → perfil principal.
-- Conversación → bandeja con la flecha del encabezado del chat.
+- El perfil incluye una acción fija al final: **Buscar** si se abrió dentro de
+  la conversación, **Conversación** si es un grupo/sala/difusión de la lista, o
+  **Mensaje** para una persona. Ver [perfiles y bloqueos](chat-perfiles-bloqueos.md).
 
 ## Conversación directa
 
@@ -17,6 +21,8 @@ abre desde el perfil.
 - Encabezado «Contenido multimedia, documentos y enlaces» con flecha para abrir
   la galería completa.
 - Opciones: añadir/quitar favorito, vaciar chat, bloquear/desbloquear y reportar.
+- Si hay un bloqueo, el chat se puede leer pero el cuadro de escritura se
+  reemplaza por el aviso de bloqueo.
 - En el amigo secreto se respeta el anonimato del receptor.
 
 ## Grupo

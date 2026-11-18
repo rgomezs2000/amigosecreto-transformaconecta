@@ -8,6 +8,9 @@ use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ContactoSoporteController;
 use App\Http\Controllers\DinamicaController;
 use App\Http\Controllers\EventosController;
+use App\Http\Controllers\GranRevelacionController;
+use App\Http\Controllers\IntercambioPistasController;
+use App\Http\Controllers\ListaDeseosController;
 use App\Http\Controllers\MatrizPerfilesController;
 use App\Http\Controllers\ModeracionController;
 use App\Http\Controllers\ModulosController;
@@ -54,6 +57,9 @@ final class ModulePages
         ],
         'asignar-amigo' => ['controller' => SorteoCiegoController::class, 'action' => 'index'],
         'ver-tu-amigo' => ['controller' => VerTuAmigoController::class, 'action' => 'index'],
+        'lista-de-deseos' => ['controller' => ListaDeseosController::class, 'action' => 'index'],
+        'intercambio-de-pista' => ['controller' => IntercambioPistasController::class, 'action' => 'index'],
+        'gran-revelacion' => ['controller' => GranRevelacionController::class, 'action' => 'index'],
         'participantes' => ['controller' => ParticipantesController::class, 'action' => 'index'],
         'usuarios-asociados' => ['controller' => UsuariosAsociadosController::class, 'action' => 'index'],
         // Centro de ayuda: las tres pantallas son estáticas y leen la base.

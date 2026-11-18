@@ -145,7 +145,7 @@ class SorteoCiegoTest extends TestCase
         $this->assertSame(4, $chat->users()->count());
         $this->assertDatabaseHas('chat_messages', [
             'conversation_id' => $chat->id,
-            'body' => 'El evento «'.$evento->name.'» ha comenzado. El sorteo está abierto: entra a «Sorteo ciego» y descubre a tu amigo secreto.',
+            'body' => 'La Unión terminó y el sorteo está abierto. Entra a «Sorteo ciego» y descubre a tu amigo secreto.',
         ]);
 
         // Aviso en pantalla para cada participante.
@@ -244,7 +244,7 @@ class SorteoCiegoTest extends TestCase
 
         $this->assertDatabaseHas('chat_messages', [
             'conversation_id' => $chat->id,
-            'body' => 'El sorteo ciego ha concluido: todos los participantes ya eligieron a su amigo secreto. Comienza la etapa de la lista de deseos.',
+            'body' => 'El sorteo ciego ha concluido: todos los participantes ya eligieron a su amigo secreto. Comienza el intercambio de pistas.',
         ]);
 
         foreach ($this->ctx['usuarios'] as $usuario) {

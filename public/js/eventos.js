@@ -1,6 +1,7 @@
 /**
  * Eventos: tarjetas de solo lectura y acciones AJAX.
- * Crear, iniciar, suspender, posponer, cancelar y ver participantes.
+ * Creación con presupuesto, invitaciones, inicio, suspensión, postergación,
+ * cancelación y gestión de la participación.
  */
 (function ($) {
     'use strict';
@@ -16,6 +17,11 @@
         var indexUrl = $config.attr('data-url-index');
         var reiniciarUrl = $config.attr('data-url-reiniciar');
         var participantesBase = $config.attr('data-url-participantes');
+        var invitarUrl = $config.attr('data-url-invitar');
+        var invitarUnoUrl = $config.attr('data-url-invitar-uno');
+        var expulsarUrl = $config.attr('data-url-expulsar');
+        var descartarUrl = $config.attr('data-url-descartar');
+        var tasa = parseFloat($config.attr('data-tasa')) || 0;
         var token = $('#eventos-csrf').val();
 
         function modal(id) {
@@ -65,48 +71,38 @@
             return cardOf(button).data('evento-id');
         }
 
-        // Crear evento -----------------------------------------------------
-        var participantsPage = 1;
-
-        function paginateParticipants(reset) {
-            var perPage = parseInt($('#evento-participants-length').val(), 10) || 2;
-            var $rows = $('.evento-participants__list .evento-participant');
-            var total = $rows.length;
-            var pages = Math.max(1, Math.ceil(total / perPage));
-
-            if (reset) {
-                participantsPage = 1;
-            }
-
-            participantsPage = Math.min(Math.max(1, participantsPage), pages);
-
-            $rows.each(function (index) {
-                $(this).prop('hidden', index < (participantsPage - 1) * perPage || index >= participantsPage * perPage);
-            });
-
-            $('#evento-participants-info').text('Página ' + participantsPage + ' de ' + pages);
-            $('#evento-participants-prev').prop('disabled', participantsPage <= 1);
-            $('#evento-participants-next').prop('disabled', participantsPage >= pages);
+        function urlFor(pattern, id, user) {
+            return String(pattern || '')
+                .replace('__ID__', id)
+                .replace('__USER__', user);
         }
 
-        $('#evento-participants-length').on('change', function () {
-            paginateParticipants(true);
-        });
+        // Presupuesto: referencia en bolívares, solo para mostrar ----------
+        function updateBudgetBs() {
+            var usd = parseFloat($('#evento-presupuesto').val());
 
-        $('#evento-participants-prev').on('click', function () {
-            participantsPage--;
-            paginateParticipants();
-        });
+            if (!isFinite(usd) || usd <= 0 || tasa <= 0) {
+                $('#evento-presupuesto-bs').val('');
+                return;
+            }
 
-        $('#evento-participants-next').on('click', function () {
-            participantsPage++;
-            paginateParticipants();
-        });
+            var bs = usd * tasa;
 
+            $('#evento-presupuesto-bs').val('Bs. ' + bs.toLocaleString('es-VE', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }));
+        }
+
+        $('#evento-presupuesto').on('input change', updateBudgetBs);
+
+        // Crear evento -----------------------------------------------------
         function openCreate() {
             $('#form-evento')[0].reset();
-            $('#evento-name-error, #evento-date-error').text('').removeAttr('data-kind');
-            paginateParticipants(true);
+            $('#evento-name-error, #evento-date-error, #evento-presupuesto-error')
+                .text('')
+                .removeAttr('data-kind');
+            $('#evento-presupuesto-bs').val('');
             modal('modal-evento-form').show();
         }
 
@@ -115,10 +111,12 @@
         function saveEvent() {
             var name = $.trim($('#evento-name').val());
             var date = $('#evento-date').val();
+            var presupuesto = $.trim($('#evento-presupuesto').val());
             var observations = $.trim($('#evento-observations').val());
-            var notes = {};
 
-            $('#evento-name-error, #evento-date-error').text('').removeAttr('data-kind');
+            $('#evento-name-error, #evento-date-error, #evento-presupuesto-error')
+                .text('')
+                .removeAttr('data-kind');
 
             if (!name) {
                 $('#evento-name-error').attr('data-kind', 'error').text('Este campo es obligatorio.');
@@ -132,41 +130,48 @@
                 return;
             }
 
-            $('.evento-participant__notes').each(function () {
-                notes[$(this).data('user-id')] = { notes: $(this).val() };
-            });
+            if (!presupuesto || !isFinite(parseFloat(presupuesto)) || parseFloat(presupuesto) <= 0) {
+                $('#evento-presupuesto-error')
+                    .attr('data-kind', 'error')
+                    .text('Escribe un presupuesto válido en US$.');
+                $('#evento-presupuesto').trigger('focus');
+                return;
+            }
 
-            AppDialog.confirm('¿Desea guardar el evento?', function () {
-                post(crearUrl, {
-                    name: name,
-                    exchange_at: date,
-                    status_reason: observations,
-                    participants: notes
-                }).done(function (response) {
-                    AppDialog.confirm('El evento se guardó. ¿Desea iniciarlo ahora?', function () {
-                        post(participantesBase + '/' + response.event_id + '/iniciar', {})
-                            .done(function (startResponse) {
-                                redirect(startResponse);
-                            })
-                            .fail(showError);
+            AppDialog.confirm(
+                '¿Desea guardar el evento? Se generará una invitación personal para cada usuario participante.',
+                function () {
+                    post(crearUrl, {
+                        name: name,
+                        exchange_at: date,
+                        presupuesto: presupuesto,
+                        status_reason: observations
+                    }).done(function () {
+                        window.location.reload();
+                    }).fail(function (xhr) {
+                        var response = xhr.responseJSON || {};
+
+                        if (response.errors) {
+                            if (response.errors.name) {
+                                $('#evento-name-error').attr('data-kind', 'error').text(response.errors.name[0]);
+                                $('#evento-name').trigger('focus');
+                            }
+                            if (response.errors.exchange_at) {
+                                $('#evento-date-error').attr('data-kind', 'error').text(response.errors.exchange_at[0]);
+                                $('#evento-date').trigger('focus');
+                            }
+                            if (response.errors.presupuesto) {
+                                $('#evento-presupuesto-error')
+                                    .attr('data-kind', 'error')
+                                    .text(response.errors.presupuesto[0]);
+                                $('#evento-presupuesto').trigger('focus');
+                            }
+                        }
+
+                        showError(xhr);
                     });
-                }).fail(function (xhr) {
-                    var response = xhr.responseJSON || {};
-
-                    if (response.errors) {
-                        if (response.errors.name) {
-                            $('#evento-name-error').attr('data-kind', 'error').text(response.errors.name[0]);
-                            $('#evento-name').trigger('focus');
-                        }
-                        if (response.errors.exchange_at) {
-                            $('#evento-date-error').attr('data-kind', 'error').text(response.errors.exchange_at[0]);
-                            $('#evento-date').trigger('focus');
-                        }
-                    }
-
-                    showError(xhr);
-                });
-            });
+                }
+            );
         }
 
         $('#form-evento').on('submit', function (event) {
@@ -177,9 +182,22 @@
         // Participantes ----------------------------------------------------
         var modalParticipants = [];
         var modalParticipantsPage = 0;
+        var modalParticipantsEvent = 0;
+
+        function statusBadgeKey(statusKey) {
+            if (statusKey === 'active') {
+                return 'active';
+            }
+
+            if (statusKey === 'pending') {
+                return 'pending';
+            }
+
+            return 'inactive';
+        }
 
         function renderModalParticipants() {
-            var perPage = parseInt($('#evento-modal-participants-length').val(), 10) || 2;
+            var perPage = parseInt($('#evento-modal-participants-length').val(), 10) || 5;
             var total = modalParticipants.length;
             var pages = Math.max(1, Math.ceil(total / perPage));
 
@@ -190,16 +208,30 @@
 
             $('#evento-participantes-list').html(
                 pageItems.map(function (participant) {
+                    var actions = '';
+
+                    if (participant.status_key === 'pending') {
+                        actions = '<div class="table-actions">' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-invitar" data-user="' + participant.id + '" title="Enviar invitación"><i class="fa-solid fa-envelope"></i></button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-link" data-url="' + (participant.invitation_url || '') + '" title="Copiar enlace"><i class="fa-solid fa-link"></i></button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-descartar" data-user="' + participant.id + '" title="Descartar"><i class="fa-solid fa-ban"></i></button>' +
+                            '</div>';
+                    } else if (participant.status_key === 'active') {
+                        actions = '<div class="table-actions">' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-expulsar" data-user="' + participant.id + '" title="Expulsar"><i class="fa-solid fa-user-slash"></i></button>' +
+                            '</div>';
+                    }
+
                     return '<div class="evento-participant">' +
-                        '<span class="status-badge status-badge--active evento-participant__status">' +
+                        '<span class="status-badge status-badge--' + statusBadgeKey(participant.status_key) + ' evento-participant__status">' +
                         $('<div>').text(participant.status).html() + '</span>' +
                         '<div class="evento-participant__data">' +
                         '<p class="evento-participant__name">' + $('<div>').text(participant.name).html() + '</p>' +
                         '<p class="evento-participant__email">' + $('<div>').text(participant.email).html() + '</p>' +
-                        (participant.notes ? '<p class="evento-card__note">' + $('<div>').text(participant.notes).html() + '</p>' : '') +
-                        '</div>' +
+                        (participant.reason ? '<p class="evento-card__note">' + $('<div>').text(participant.reason).html() + '</p>' : '') +
+                        '</div>' + actions +
                         '</div>';
-                }).join('') || '<p class="menu-empty">El evento no tiene participantes.</p>'
+                }).join('') || '<p class="menu-empty">El evento no tiene usuarios invitados.</p>'
             );
 
             $('#evento-modal-participants-info').text(
@@ -210,20 +242,30 @@
             $('#evento-modal-participants-next').prop('disabled', modalParticipantsPage >= pages - 1);
         }
 
-        $('#eventos-lista').on('click', '.btn-evento-participantes', function () {
-            var id = eventId(this);
-
-            $.getJSON(participantesBase + '/' + id + '/participantes')
+        function loadParticipants(id, openModal) {
+            return $.getJSON(participantesBase + '/' + id + '/participantes')
                 .done(function (response) {
                     modalParticipants = response.participants || [];
+                    modalParticipantsEvent = id;
                     modalParticipantsPage = 0;
 
-                    $('#evento-participantes-count').text('Participantes activos: ' + response.count);
+                    $('#evento-participantes-count').text(
+                        'Activos: ' + (response.count || 0) +
+                        ' · Pendientes: ' + (response.pending || 0) +
+                        ' · Total: ' + (response.total || 0)
+                    );
 
                     renderModalParticipants();
-                    modal('modal-evento-participantes').show();
+
+                    if (openModal) {
+                        modal('modal-evento-participantes').show();
+                    }
                 })
                 .fail(showError);
+        }
+
+        $('#eventos-lista').on('click', '.btn-evento-participantes', function () {
+            loadParticipants(eventId(this), true);
         });
 
         $('#evento-modal-participants-length').on('change', function () {
@@ -240,6 +282,119 @@
             modalParticipantsPage += 1;
             renderModalParticipants();
         });
+
+        // Enviar todas las invitaciones pendientes ------------------------
+        $('#eventos-lista').on('click', '.btn-evento-invitar', function () {
+            var id = eventId(this);
+
+            AppDialog.confirm(
+                '¿Desea enviar las invitaciones pendientes por correo, chat del sistema y notificación push?',
+                function () {
+                    post(urlFor(invitarUrl, id), {})
+                        .done(function (response) {
+                            window.AppDialog.success(response.message, {
+                                callback: function () {
+                                    window.location.reload();
+                                }
+                            });
+                        })
+                        .fail(showError);
+                }
+            );
+        });
+
+        // Invitar / descartar / expulsar una persona ----------------------
+        $('#evento-participantes-list').on('click', '.btn-participante-invitar', function () {
+            var userId = $(this).data('user');
+
+            post(urlFor(invitarUnoUrl, modalParticipantsEvent, userId), {})
+                .done(function (response) {
+                    if (response.invitation_url) {
+                        copyText(response.invitation_url);
+                    }
+
+                    window.AppDialog.success('Invitación enviada. El enlace personal se copió al portapapeles.', {
+                        callback: function () {
+                            loadParticipants(modalParticipantsEvent, false);
+                        }
+                    });
+                })
+                .fail(showError);
+        });
+
+        $('#evento-participantes-list').on('click', '.btn-participante-link', function () {
+            var url = $(this).data('url');
+
+            if (!url) {
+                return;
+            }
+
+            copyText(url);
+            window.AppDialog.success('Enlace personal copiado al portapapeles.');
+        });
+
+        $('#evento-participantes-list').on('click', '.btn-participante-descartar', function () {
+            var userId = $(this).data('user');
+
+            window.AppDialog.prompt(
+                'Motivo por el que se descarta la invitación (opcional):',
+                function (reason) {
+                    AppDialog.confirm(
+                        '¿Desea descartar esta invitación? La persona ya no contará como pendiente.',
+                        function () {
+                            post(urlFor(descartarUrl, modalParticipantsEvent, userId), { reason: reason || '' })
+                                .done(function () {
+                                    loadParticipants(modalParticipantsEvent, false);
+                                })
+                                .fail(showError);
+                        }
+                    );
+                },
+                { title: 'Descartar invitación', required: false, maxlength: 1000 }
+            );
+        });
+
+        $('#evento-participantes-list').on('click', '.btn-participante-expulsar', function () {
+            var userId = $(this).data('user');
+
+            window.AppDialog.prompt(
+                'Motivo de la expulsión (obligatorio):',
+                function (reason) {
+                    if (!$.trim(reason)) {
+                        window.AppDialog.error('Escribe el motivo de la expulsión.');
+                        return;
+                    }
+
+                    AppDialog.confirm(
+                        '¿Desea expulsar al participante del evento?',
+                        function () {
+                            post(urlFor(expulsarUrl, modalParticipantsEvent, userId), { reason: reason })
+                                .done(function () {
+                                    loadParticipants(modalParticipantsEvent, false);
+                                })
+                                .fail(showError);
+                        },
+                        { danger: true, confirmLabel: 'Expulsar' }
+                    );
+                },
+                { title: 'Expulsar participante', required: true, maxlength: 1000 }
+            );
+        });
+
+        function copyText(text) {
+            if (!text) {
+                return;
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text);
+                return;
+            }
+
+            var $temp = $('<textarea>').val(text).appendTo('body').select();
+            document.execCommand('copy');
+            $temp.remove();
+        }
 
         // Reiniciar --------------------------------------------------------
         $('#eventos-lista').on('click', '.btn-evento-reiniciar', function () {
@@ -292,10 +447,26 @@
                 $button.prop('disabled', false);
             });
         });
+
+        // Iniciar ----------------------------------------------------------
         $('#eventos-lista').on('click', '.btn-evento-iniciar', function () {
             var id = eventId(this);
+            var pending = parseInt($(this).data('pending'), 10) || 0;
+            var active = parseInt($(this).data('active'), 10) || 0;
 
-            AppDialog.confirm('¿Desea iniciar el evento? Se enviará un correo a los participantes.', function () {
+            if (pending > 0) {
+                window.AppDialog.warning(
+                    'Todavía hay ' + pending + ' invitación(es) en espera. Deben responder o descartarse antes de iniciar.'
+                );
+                return;
+            }
+
+            if (active < 2) {
+                window.AppDialog.warning('Se necesitan al menos 2 participantes activos para iniciar el sorteo.');
+                return;
+            }
+
+            AppDialog.confirm('¿Desea iniciar el evento? Se avisará a los participantes activos.', function () {
                 post(participantesBase + '/' + id + '/iniciar', {})
                     .done(redirect)
                     .fail(showError);
@@ -408,7 +579,7 @@
                 post(participantesBase + '/' + id + '/cancelar', { reason: reason })
                     .done(redirect)
                     .fail(showError);
-            });
+            }, { danger: true, confirmLabel: 'Cancelar evento' });
         });
 
         /* ------------------------------------------------------------------
@@ -417,7 +588,6 @@
 
         var $live = $('#eventos-live');
         var estadoUrl = $live.length ? $live.attr('data-url-estado') : '';
-        var liveTimer = null;
 
         function canRefreshEvents() {
             if (!estadoUrl || document.hidden) {
@@ -466,12 +636,15 @@
                     }
 
                     $card.find('.status-badge')
-                        .removeClass('status-badge--active status-badge--blocked status-badge--inactive')
+                        .removeClass('status-badge--active status-badge--blocked status-badge--inactive status-badge--pending')
                         .addClass('status-badge--' + event.badge)
                         .text(event.status);
                     $card.find('[data-evento-field="status"]').text(event.status);
                     $card.find('[data-evento-field="exchange"]').text(event.exchange);
-                    $card.find('[data-evento-field="participants"]').text(event.participants);
+                    $card.find('[data-evento-field="budget"]').text(event.budget);
+                    $card.find('[data-evento-field="participants"]').text(event.active);
+                    $card.find('[data-evento-field="pending"]').text(event.pending);
+                    $card.find('[data-evento-field="phase"]').text(event.phase_label);
                     $card.find('[data-evento-field="created"]').text(event.created);
                     $card.find('[data-evento-field="name"]').text(event.name);
                     $card.attr('data-evento-name', event.name);
@@ -495,7 +668,7 @@
         }
 
         if (estadoUrl) {
-            liveTimer = window.setInterval(function () {
+            window.setInterval(function () {
                 if (!document.hidden) {
                     refreshEvents();
                 }
@@ -509,5 +682,3 @@
         }
     });
 })(window.jQuery);
-
-

@@ -3,6 +3,13 @@
 @section('title', 'Panel de control · Amigo Secreto Inclusivo')
 
 @section('page')
+    @if (session('invitacion_aviso'))
+        <div class="alert perfil-alert" role="status">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            <span>{{ session('invitacion_aviso') }}</span>
+        </div>
+    @endif
+
     @include('partials.stepper', ['currentStep' => $shell['currentStep']])
 
     <section class="dashboard-modules" aria-label="Módulos disponibles">

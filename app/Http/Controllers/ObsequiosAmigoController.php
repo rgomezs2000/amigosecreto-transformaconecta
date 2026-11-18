@@ -94,7 +94,7 @@ class ObsequiosAmigoController extends Controller
         $data = $validator->validated();
         $valor = (float) $data['valor'];
 
-        if (($error = $this->validarTopeObsequio($event, $valor)) !== null) {
+        if (($error = $this->validarTopeObsequio($event, $assignment, $valor)) !== null) {
             return $this->errorValor($error);
         }
 
@@ -105,7 +105,7 @@ class ObsequiosAmigoController extends Controller
         $gift = ExchangeGift::create([
             'assignment_id' => $assignment->id,
             'product' => trim((string) $data['nombre']),
-            'description' => null,
+            'description' => $this->textoOpcional($data['descripcion'] ?? null),
             'value' => $valor,
             'registered_at' => now(),
         ]);
@@ -151,12 +151,15 @@ class ObsequiosAmigoController extends Controller
         $data = $validator->validated();
         $valor = (float) $data['valor'];
 
-        if (($error = $this->validarTopeObsequio($event, $valor)) !== null) {
+        if (($error = $this->validarTopeObsequio($event, $assignment, $valor)) !== null) {
             return $this->errorValor($error);
         }
 
         $gift->update([
             'product' => trim((string) $data['nombre']),
+            'description' => array_key_exists('descripcion', $data)
+                ? $this->textoOpcional($data['descripcion'])
+                : $gift->description,
             'value' => $valor,
         ]);
 
@@ -188,7 +191,10 @@ class ObsequiosAmigoController extends Controller
         $search = trim((string) $request->input('search.value', ''));
 
         if ($search !== '') {
-            $query->where('description', 'like', '%'.$search.'%');
+            $query->where(function ($inner) use ($search) {
+                $inner->where('name', 'like', '%'.$search.'%')
+                    ->orWhere('description', 'like', '%'.$search.'%');
+            });
         }
 
         $recordsFiltered = (clone $query)->count();
@@ -196,7 +202,7 @@ class ObsequiosAmigoController extends Controller
         $columnIndex = (int) $request->input('order.0.column', 0);
         $direction = $request->input('order.0.dir') === 'asc' ? 'asc' : 'desc';
         $column = match ($columnIndex) {
-            1 => 'description',
+            1 => 'name',
             2 => 'value',
             default => 'given_on',
         };
@@ -215,7 +221,8 @@ class ObsequiosAmigoController extends Controller
         $data = $query->get()->map(fn (ConsumableGift $gift) => [
             'id' => $gift->id,
             'fecha' => format_date($gift->given_on, 'd/m/Y'),
-            'nombre' => e($gift->description),
+            'nombre' => e($gift->name ?: $gift->description),
+            'descripcion' => e((string) ($gift->description ?? '')),
             'valor_usd' => $this->usd($gift->value),
             'valor_bs' => $this->bsDe($gift->value, $tasa),
             'actions' => view('amigo.partials.consumible-acciones', [
@@ -271,7 +278,8 @@ class ObsequiosAmigoController extends Controller
 
         $gift = ConsumableGift::create([
             'assignment_id' => $assignment->id,
-            'description' => trim((string) $data['nombre']),
+            'name' => trim((string) $data['nombre']),
+            'description' => $this->textoOpcional($data['descripcion'] ?? null) ?? trim((string) $data['nombre']),
             'quantity' => 1,
             'value' => $valor,
             'given_on' => now()->toDateString(),
@@ -319,7 +327,10 @@ class ObsequiosAmigoController extends Controller
         }
 
         $consumable->update([
-            'description' => trim((string) $data['nombre']),
+            'name' => trim((string) $data['nombre']),
+            'description' => array_key_exists('descripcion', $data)
+                ? ($this->textoOpcional($data['descripcion']) ?? trim((string) $data['nombre']))
+                : $consumable->description,
             'value' => $valor,
         ]);
 
@@ -396,6 +407,15 @@ class ObsequiosAmigoController extends Controller
             return api_error('Todavía no hay un evento activo.', 409);
         }
 
+        $participacion = \App\Models\EventParticipant::query()
+            ->where('event_id', $event->id)
+            ->where('user_id', $request->user()->id)
+            ->first();
+
+        if ($participacion === null || ! $participacion->status->isParticipating()) {
+            return api_error('Primero acepta la invitación al evento.', 409);
+        }
+
         $assignment = $this->sorteo->asignacionDe($event, $request->user());
 
         if ($assignment === null) {
@@ -440,6 +460,7 @@ class ObsequiosAmigoController extends Controller
     {
         return [
             'nombre' => ['required', 'string', 'max:150'],
+            'descripcion' => ['nullable', 'string', 'max:500'],
             'valor' => ['required', 'numeric', 'min:0.01', 'max:99999999.99'],
         ];
     }
@@ -453,6 +474,7 @@ class ObsequiosAmigoController extends Controller
             'nombre.required' => 'El nombre es obligatorio.',
             'nombre.string' => 'Escribe un nombre válido.',
             'nombre.max' => 'El nombre no puede superar los 150 caracteres.',
+            'descripcion.max' => 'La descripción no puede superar los 500 caracteres.',
             'valor.required' => 'El valor es obligatorio.',
             'valor.numeric' => 'Escribe un valor válido en US$.',
             'valor.min' => 'El valor debe ser mayor que cero.',
@@ -478,17 +500,31 @@ class ObsequiosAmigoController extends Controller
         return is_numeric($valor) ? max(0, (float) $valor) : 0.0;
     }
 
-    private function validarTopeObsequio(Event $event, float $valor): ?string
+    private function textoOpcional(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' ? null : $value;
+    }
+
+    private function validarTopeObsequio(Event $event, Assignment $assignment, float $valor): ?string
     {
         $min = $event->min_value !== null ? (float) $event->min_value : null;
-        $max = $event->max_value !== null ? (float) $event->max_value : null;
+        $max = $event->budget();
 
         if ($min !== null && $min > 0 && $valor < $min) {
             return 'El valor del obsequio debe ser al menos US$ '.format_rate($min).'.';
         }
 
-        if ($max !== null && $max > 0 && $valor > $max) {
-            return 'El valor del obsequio no puede superar US$ '.format_rate($max).'.';
+        if ($max !== null && $max > 0) {
+            $consumibles = (float) ConsumableGift::query()
+                ->where('assignment_id', $assignment->id)
+                ->sum('value');
+
+            if ($valor + $consumibles > $max) {
+                return 'El presupuesto del evento es US$ '.format_rate($max)
+                    .'. El obsequio más los consumibles no puede superarlo.';
+            }
         }
 
         return null;
@@ -496,7 +532,9 @@ class ObsequiosAmigoController extends Controller
 
     private function validarTopeConsumibles(Event $event, Assignment $assignment, float $valor, ?int $ignorarId = null): ?string
     {
-        $cap = $event->consumable_value_cap !== null ? (float) $event->consumable_value_cap : null;
+        $cap = $event->consumable_value_cap !== null
+            ? (float) $event->consumable_value_cap
+            : $event->budget();
 
         if ($cap === null || $cap <= 0) {
             return null;
@@ -507,11 +545,13 @@ class ObsequiosAmigoController extends Controller
             ->when($ignorarId !== null, fn ($query) => $query->whereKeyNot($ignorarId))
             ->sum('value');
 
-        if ((float) $total + $valor > $cap) {
-            $restante = max(0, $cap - (float) $total);
+        $gift = (float) ($assignment->exchangeGift?->value ?? 0);
 
-            return 'El tope de consumibles del evento es US$ '.format_rate($cap)
-                .'. Te quedan US$ '.format_rate($restante).' disponibles.';
+        if ($gift + (float) $total + $valor > $cap) {
+            $restante = max(0, $cap - $gift - (float) $total);
+
+            return 'El presupuesto del evento es US$ '.format_rate($cap)
+                .'. Te quedan US$ '.format_rate($restante).' disponibles para consumibles.';
         }
 
         return null;
@@ -526,6 +566,7 @@ class ObsequiosAmigoController extends Controller
 
         return [
             'nombre' => (string) $gift->product,
+            'descripcion' => (string) ($gift->description ?? ''),
             'valor' => (string) $gift->value,
             'valor_usd' => $this->usd($gift->value),
             'valor_bs' => $this->bsDe($gift->value, $tasa),
@@ -545,7 +586,8 @@ class ObsequiosAmigoController extends Controller
 
         return [
             'id' => (int) $gift->id,
-            'nombre' => (string) $gift->description,
+            'nombre' => (string) ($gift->name ?: $gift->description),
+            'descripcion' => (string) ($gift->description ?? ''),
             'valor' => (string) $gift->value,
             'valor_usd' => $this->usd($gift->value),
             'valor_bs' => $this->bsDe($gift->value, $tasa),

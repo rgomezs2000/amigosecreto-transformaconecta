@@ -161,6 +161,24 @@
         var $password = $('#password');
         var $submit = $form.find('button[type="submit"]');
 
+        function setLoading() {
+            $submit
+                .prop('disabled', true)
+                .attr('aria-busy', 'true')
+                .find('i')
+                .attr('class', 'fa-solid fa-spinner fa-spin');
+            $submit.find('span').text('Ingresando...');
+        }
+
+        function resetSubmit() {
+            $submit
+                .prop('disabled', false)
+                .removeAttr('aria-busy')
+                .find('i')
+                .attr('class', 'fa-solid fa-right-to-bracket');
+            $submit.find('span').text('Ingresar');
+        }
+
         function showFailure(xhr) {
             var response = (xhr && xhr.responseJSON) || {};
             var message = response.message;
@@ -200,7 +218,7 @@
         }
 
         function post(token) {
-            $submit.prop('disabled', true);
+            setLoading();
 
             return $.ajax({
                 url: $form.attr('action'),
@@ -211,14 +229,13 @@
                     login: $.trim($login.val()),
                     password: $password.val()
                 }
-            }).always(function () {
-                $submit.prop('disabled', false);
             });
         }
 
         function send(token, retried) {
             post(token).done(function (response) {
-                // La sesión ya quedó iniciada en el servidor: al panel.
+                // La sesión ya quedó iniciada en el servidor: el botón sigue
+                // bloqueado con el indicador hasta que se abre el panel.
                 window.location.assign(response.redirect || '/dashboard');
             }).fail(function (xhr) {
                 if (xhr.status === 419 && !retried) {
@@ -226,17 +243,25 @@
                         .then(function (fresh) {
                             send(fresh, true);
                         })
-                        .fail(showFailure);
+                        .fail(function () {
+                            resetSubmit();
+                            showFailure(xhr);
+                        });
 
                     return;
                 }
 
+                resetSubmit();
                 showFailure(xhr);
             });
         }
 
         $form.on('submit', function (event) {
             event.preventDefault();
+
+            if ($submit.prop('disabled')) {
+                return;
+            }
 
             var missing = null;
 

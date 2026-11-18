@@ -19,6 +19,25 @@
                 </div>
             </header>
 
+            @if (! ($participacion?->status->isParticipating() ?? false))
+                <p class="sorteo-note">
+                    <i class="fa-solid fa-envelope-open-text" aria-hidden="true"></i>
+                    <span>
+                        Para entrar al sorteo primero debes aceptar la invitación.
+                        @if ($participacion)
+                            Tu estado actual es «{{ $participacion->status->label() }}».
+                        @endif
+                    </span>
+                </p>
+
+                <div class="sorteo-cta">
+                    <a class="btn btn-primary" href="{{ module_url('ver-tu-amigo') }}">
+                        <i class="fa-solid fa-handshake" aria-hidden="true"></i>
+                        <span>Ir a mi invitación</span>
+                    </a>
+                </div>
+            @endif
+
             @if ($estado['total'] > 0)
                 <p class="sorteo-progress" role="status" aria-live="polite">
                     Han elegido <strong>{{ $estado['elegidos'] }}</strong> de
@@ -62,6 +81,11 @@
                         <i class="fa-solid fa-eye" aria-hidden="true"></i>
                         <span>Ver de nuevo</span>
                     </button>
+
+                    <a class="btn btn-outline-secondary" href="{{ module_url('ver-tu-amigo') }}?seccion=obsequios">
+                        <i class="fa-solid fa-gift" aria-hidden="true"></i>
+                        <span>Registrar mi obsequio</span>
+                    </a>
 
                     <a class="btn btn-outline-secondary" href="{{ module_url('ver-tu-amigo') }}">
                         <i class="fa-solid fa-user-secret" aria-hidden="true"></i>

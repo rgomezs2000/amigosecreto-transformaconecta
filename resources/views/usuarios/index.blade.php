@@ -110,6 +110,7 @@
          data-url-eliminar-varios="{{ route('usuarios.eliminar-varios') }}"
          data-url-index="{{ module_url('usuarios') }}"
          data-url-login-existe="{{ route('perfil.login-existe') }}"
+         data-url-solicitud="{{ route('usuarios.solicitud') }}"
          hidden></div>
 
     @if (! empty($solicitud))
@@ -125,6 +126,7 @@
             <form id="form-user" action="{{ route('usuarios.crear') }}" method="post" novalidate>
                 @csrf
                 <input type="hidden" id="usuarios-form-id" value="">
+                <p class="field-message" id="usuarios-solicitud-estado" role="status" aria-live="polite"></p>
 
                 <div class="field">
                     <label for="usuarios-name" class="form-label">Nombre</label>

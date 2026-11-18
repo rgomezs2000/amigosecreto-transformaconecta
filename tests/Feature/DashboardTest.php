@@ -173,7 +173,7 @@ class DashboardTest extends TestCase
             ->get('/dashboard')
             ->assertOk()
             ->assertSee('Amigo Secreto 2026')
-            ->assertSee('Lista de deseos')
+            ->assertSee('Intercambio de pistas')
             ->assertSee('event-countdown', false)
             ->assertSee('data-exchange-at', false)
             ->assertSee('data-server-now', false)

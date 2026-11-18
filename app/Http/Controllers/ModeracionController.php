@@ -750,6 +750,7 @@ class ModeracionController extends Controller
         $canOpenTicketChat = $ticketChat !== null
             && ! $report->isSuggestion()
             && ! $report->isUserRegistration()
+            && ! $report->isAccountRequest()
             && $ticketChat->users->contains('id', auth()->id());
         $ticketChatUrl = $canOpenTicketChat
             ? module_url('chat').'?conversacion='.$ticketChat->id
@@ -757,9 +758,17 @@ class ModeracionController extends Controller
 
         // Los casos de registro no abren chat: el administrador formaliza el
         // alta desde el módulo de Usuarios, con los datos de la solicitud.
+        $registrationPayload = $report->isUserRegistration() ? ($report->payload ?: []) : [];
+        $registrationHasData = trim((string) ($registrationPayload['email'] ?? '')) !== '';
         $createUserUrl = $report->isUserRegistration()
-            ? module_url('usuarios').'?solicitud='.$report->id
+            ? module_url('usuarios').($registrationHasData ? '?solicitud='.$report->id : '')
             : null;
+
+        // Las solicitudes de cuenta (reset/desbloqueo) tampoco abren chat:
+        // se resuelven con las acciones de su ficha.
+        $accountAction = $report->isAccountRequest()
+            ? (string) (($report->payload ?: [])['action'] ?? '')
+            : '';
 
         return [
             'id' => $report->id,
@@ -813,6 +822,7 @@ class ModeracionController extends Controller
             'ticket_chat_id' => $ticketChat?->id,
             'ticket_chat_url' => $ticketChatUrl,
             'create_user_url' => $createUserUrl,
+            'account_action' => $accountAction,
             'has_ticket_chat' => $ticketChat !== null,
             // Remisión: solo el gestor actual puede remitir el caso.
             'can_refer' => $report->isAttending() && $isMine,
@@ -838,6 +848,7 @@ class ModeracionController extends Controller
                 ChatReport::TYPE_SUGGESTION,
                 ChatReport::TYPE_HELP,
                 ChatReport::TYPE_SUPPORT,
+                ChatReport::TYPE_USER_REGISTRATION,
             ])],
             'reason' => ['required', 'string', 'max:2000'],
             'message' => ['required', 'string', 'max:5000'],

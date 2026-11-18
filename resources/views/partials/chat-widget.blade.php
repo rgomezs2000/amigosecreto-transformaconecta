@@ -13,6 +13,7 @@
      data-sound="{{ ($shell['notificationPreferences']['chat_sound'] ?? false) ? '1' : '0' }}"
      data-in-app="{{ ($shell['notificationPreferences']['in_app'] ?? true) ? '1' : '0' }}"
      data-is-admin="{{ $shell['user']->role === \App\Enums\UserRole::Admin ? '1' : '0' }}"
+     data-user-id="{{ $shell['user']->id }}"
      data-invitation="{{ $shell['chatInvitation'] ?? '' }}"
      data-invitation-notice="{{ $shell['chatInvitationNotice'] ?? '' }}"
      data-csrf="{{ csrf_token() }}">
@@ -29,6 +30,10 @@
                 <h2 class="chat-panel__title">Buzón de entrada</h2>
             </div>
             <div class="chat-panel__actions">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-broadcast-open"
+                        aria-label="Crear difusión" title="Crear difusión">
+                    <i class="fa-solid fa-bullhorn" aria-hidden="true"></i>
+                </button>
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-sound-toggle"
                         aria-pressed="false" aria-label="Sonido del chat" title="Sonido del chat">
                     <i class="fa-solid fa-volume-xmark" aria-hidden="true"></i>
@@ -42,6 +47,8 @@
         <div class="chat-tabs" role="tablist">
             <button type="button" class="chat-tab is-active" data-tab="conversations" role="tab">Conversaciones</button>
             <button type="button" class="chat-tab" data-tab="groups" role="tab">Grupos</button>
+            <button type="button" class="chat-tab" data-tab="rooms" role="tab">Salas</button>
+            <button type="button" class="chat-tab" data-tab="broadcasts" role="tab">Difusión</button>
             <button type="button" class="chat-tab" data-tab="reports" role="tab">
                 Reportes
                 <span class="chat-tab__count" id="chat-reports-count" hidden>0</span>
@@ -81,6 +88,34 @@
                     <button type="button" class="btn btn-sm btn-primary" id="chat-group-open">
                         <i class="fa-solid fa-users" aria-hidden="true"></i>
                         <span>Crear grupo</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="chat-tab-panel" data-panel="rooms" hidden>
+                <p class="chat-hint">Salas cerradas: solo sus miembros. Se crean eligiendo personas y no tienen enlace de invitación.</p>
+                <div class="chat-list" id="chat-rooms">
+                    <p class="chat-hint">Aún no perteneces a ninguna sala.</p>
+                </div>
+
+                <div class="chat-list-actions">
+                    <button type="button" class="btn btn-sm btn-primary" id="chat-room-open">
+                        <i class="fa-solid fa-door-closed" aria-hidden="true"></i>
+                        <span>Crear sala</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="chat-tab-panel" data-panel="broadcasts" hidden>
+                <p class="chat-hint">Difusiones que creaste. Los destinatarios reciben cada mensaje en su chat individual contigo; no se agregan a esta sala.</p>
+                <div class="chat-list" id="chat-broadcasts">
+                    <p class="chat-hint">Aún no tienes difusiones.</p>
+                </div>
+
+                <div class="chat-list-actions">
+                    <button type="button" class="btn btn-sm btn-primary" id="chat-broadcast-new">
+                        <i class="fa-solid fa-bullhorn" aria-hidden="true"></i>
+                        <span>Crear difusión</span>
                     </button>
                 </div>
             </div>
@@ -133,6 +168,7 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-back" aria-label="Volver">
                     <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
                 </button>
+
                 <button type="button" class="chat-conversation__identity" id="chat-profile-open"
                         aria-label="Abrir perfil de la conversación">
                     <span class="chat-conversation__heading">
@@ -146,7 +182,32 @@
                         <span id="chat-subtitle"></span>
                     </span>
                 </button>
+
+                {{-- Las opciones van al final de la barra, separadas del nombre. --}}
+                <button type="button" class="chat-conversation__more" id="chat-more"
+                        aria-label="Más opciones" aria-haspopup="menu" aria-expanded="false">
+                    <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
+                </button>
             </header>
+
+            {{-- Barra de búsqueda: se abre desde el menú ⋮. La X limpia el
+                 texto, quita el resaltado y cierra la barra. --}}
+            <div class="chat-search" id="chat-search" hidden>
+                <i class="fa-solid fa-magnifying-glass chat-search__icon" aria-hidden="true"></i>
+                <input type="search" class="chat-search__input" id="chat-search-input"
+                       placeholder="Buscar en la conversación..." autocomplete="off"
+                       aria-label="Buscar en la conversación">
+                <span class="chat-search__count" id="chat-search-count" role="status" aria-live="polite"></span>
+                <button type="button" class="chat-search__close" id="chat-search-close"
+                        aria-label="Limpiar y cerrar búsqueda" title="Limpiar y cerrar búsqueda">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
+            </div>
+
+            {{-- Resultados de la búsqueda: sustituyen a los mensajes mientras
+                 se escribe y desaparecen al abrir uno de ellos. --}}
+            <div class="chat-search-results" id="chat-search-results" hidden
+                 role="region" aria-label="Resultados de la búsqueda"></div>
 
             {{-- Cintillo del mensaje fijado. Se desfija con el clic derecho. --}}
             <div class="chat-pin" id="chat-pin" hidden>
@@ -200,32 +261,66 @@
                 <span id="chat-readonly-label">Chat del evento: solo lectura.</span>
             </p>
 
+            {{-- Selección múltiple: sustituye al cuadro de escritura. --}}
+            <div class="chat-selection" id="chat-selection" hidden>
+                <button type="button" class="chat-selection__cancel" id="chat-selection-cancel"
+                        aria-label="Cancelar selección" title="Cancelar selección">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
+                <span class="chat-selection__count" id="chat-selection-count">0 seleccionados</span>
+                <div class="chat-selection__actions">
+                    <button type="button" class="chat-selection__action" data-selection-action="reply"
+                            title="Responder al último mensaje seleccionado">
+                        <i class="fa-solid fa-reply" aria-hidden="true"></i>
+                        <span>Responder</span>
+                    </button>
+                    <button type="button" class="chat-selection__action" data-selection-action="favorite">
+                        <i class="fa-regular fa-star" aria-hidden="true"></i>
+                        <span>Favorito</span>
+                    </button>
+                    <button type="button" class="chat-selection__action" data-selection-action="pin"
+                            title="Fija el último mensaje seleccionado; reemplaza el fijado anterior">
+                        <i class="fa-solid fa-thumbtack" aria-hidden="true"></i>
+                        <span>Fijar</span>
+                    </button>
+                    <button type="button" class="chat-selection__action chat-selection__action--danger"
+                            data-selection-action="delete">
+                        <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                        <span>Eliminar</span>
+                    </button>
+                </div>
+            </div>
+
             <form class="chat-form" id="chat-form">
                 <input type="file" id="chat-file" hidden multiple>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-attach" aria-label="Adjuntar archivo" title="Adjuntar">
-                    <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-emoji-toggle" aria-label="Emojis" title="Emojis">
-                    <i class="fa-regular fa-face-smile" aria-hidden="true"></i>
-                </button>
-                <div class="form-control chat-input" id="chat-input" contenteditable="true" role="textbox"
-                     aria-label="Escribe un mensaje" data-placeholder="Escribe un mensaje..."></div>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-mic" aria-label="Grabar audio" title="Grabar audio">
-                    <i class="fa-solid fa-microphone" aria-hidden="true"></i>
-                </button>
-                <button type="submit" class="btn btn-primary" aria-label="Enviar mensaje">
+                <div class="chat-composer" id="chat-composer">
+                    <button type="button" class="chat-composer__action" id="chat-attach" aria-label="Adjuntar archivo" title="Adjuntar">
+                        <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="chat-composer__action" id="chat-emoji-toggle" aria-label="Emojis" title="Emojis">
+                        <i class="fa-regular fa-face-smile" aria-hidden="true"></i>
+                    </button>
+                    <div class="chat-input" id="chat-input" contenteditable="true" role="textbox"
+                         aria-label="Escribe un mensaje" data-placeholder="Escribe un mensaje..."></div>
+                    <button type="button" class="chat-composer__action" id="chat-mic" aria-label="Grabar audio" title="Grabar audio">
+                        <i class="fa-solid fa-microphone" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <button type="submit" class="btn btn-primary chat-form__send" aria-label="Enviar mensaje">
                     <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
                 </button>
             </form>
 
             <div class="chat-recorder" id="chat-recorder" hidden>
-                <span class="chat-recorder__dot" aria-hidden="true"></span>
-                <span class="chat-recorder__time" id="chat-recorder-time">0:00</span>
-                <canvas class="chat-recorder__wave" id="chat-recorder-wave" width="180" height="36"></canvas>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="chat-recorder-cancel" aria-label="Cancelar audio" title="Cancelar audio">
-                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-                </button>
-                <button type="button" class="btn btn-primary btn-sm" id="chat-recorder-send" aria-label="Enviar audio" title="Enviar audio">
+                <div class="chat-recorder__bar">
+                    <span class="chat-recorder__dot" id="chat-recorder-dot" aria-hidden="true"></span>
+                    <span class="chat-recorder__time" id="chat-recorder-time">0:00</span>
+                    <canvas class="chat-recorder__wave" id="chat-recorder-wave" width="180" height="36"></canvas>
+                    <button type="button" class="chat-recorder__cancel" id="chat-recorder-cancel" aria-label="Cancelar audio" title="Cancelar audio">
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <button type="button" class="btn btn-primary chat-recorder__send" id="chat-recorder-send" aria-label="Enviar audio" title="Enviar audio">
                     <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
                 </button>
             </div>
@@ -280,6 +375,20 @@
                     <div class="chat-profile__members" id="chat-profile-member-list"></div>
                 </div>
 
+                <div class="chat-profile__section" data-profile-section="member" hidden>
+                    <div class="chat-profile__card">
+                        <div class="chat-profile__identity">
+                            <span class="chat-profile__avatar" id="chat-member-avatar">--</span>
+                            <p class="chat-profile__name" id="chat-member-name"></p>
+                            <p class="chat-profile__username" id="chat-member-username"></p>
+                            <p class="chat-profile__email" id="chat-member-status"></p>
+                        </div>
+                    </div>
+                    <button type="button" class="chat-profile__link" data-profile-action="member-back">
+                        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Volver al grupo
+                    </button>
+                </div>
+
                 <div class="chat-profile__section" data-profile-section="audit" hidden>
                     <div class="chat-profile__section-head">
                         <h3 class="chat-profile__section-title">Auditoría del grupo</h3>
@@ -299,6 +408,7 @@
                     </div>
                 </div>
             </div>
+            <div class="chat-profile__footer" id="chat-profile-footer" hidden></div>
         </section>
 
         <div class="chat-lightbox" id="chat-lightbox" hidden>
@@ -356,8 +466,28 @@
             <button type="button" class="chat-context-item" data-pin-action="unpin">Desfijar mensaje</button>
         </div>
 
+        {{-- Menú del botón ⋮ de la cabecera de la conversación. --}}
+        <div class="chat-context-menu chat-more-menu" id="chat-more-menu" role="menu"
+             aria-label="Opciones de la conversación" hidden>
+            <button type="button" class="chat-context-item" role="menuitem" data-more-action="search">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <span>Buscar</span>
+            </button>
+            <button type="button" class="chat-context-item" role="menuitem" data-more-action="select">
+                <i class="fa-solid fa-square-check" aria-hidden="true"></i>
+                <span>Seleccionar mensajes</span>
+            </button>
+            <button type="button" class="chat-context-item" role="menuitem" data-more-action="profile">
+                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                <span>Ver perfil</span>
+            </button>
+        </div>
+
         {{-- Acciones de una persona de la pestaña Usuarios. --}}
         <div class="chat-context-menu chat-list-menu" id="chat-user-menu" hidden>
+            <button type="button" class="chat-context-item" data-user-action="profile">Ver perfil</button>
+            <button type="button" class="chat-context-item" data-user-action="chat">Conversación</button>
+            <button type="button" class="chat-context-item" data-user-action="favorite">Favorito</button>
             <button type="button" class="chat-context-item" data-user-action="mute" hidden>Silenciar</button>
             <button type="button" class="chat-context-item" data-user-action="unmute" hidden>Quitar silencio</button>
             <button type="button" class="chat-context-item chat-context-item--danger" data-user-action="block" hidden>Bloquear</button>
@@ -366,6 +496,7 @@
         </div>
 
         <div class="chat-context-menu chat-list-menu" id="chat-list-menu" hidden>
+            <button type="button" class="chat-context-item" data-list-action="profile">Ver perfil</button>
             <button type="button" class="chat-context-item" data-list-action="mute" hidden>Silenciar</button>
             <button type="button" class="chat-context-item" data-list-action="unmute" hidden>Quitar silencio</button>
             <button type="button" class="chat-context-item" data-list-action="favorite" hidden>Colocar en favoritos</button>
@@ -437,6 +568,75 @@
     </x-slot:footer>
 </x-app-modal>
 
+{{-- Sala cerrada: grupo con usuarios elegidos, sin enlace de invitación. --}}
+<x-app-modal id="modal-chat-room" title="Crear sala">
+    <x-slot:body>
+        <div class="chat-group-form">
+            <p class="chat-hint">Las salas no tienen nombre: se identifican por las personas que las forman.</p>
+
+            <p class="form-label" id="chat-room-members-label">Integrantes</p>
+            <div class="chat-group__users" id="chat-room-users"
+                 role="group" aria-labelledby="chat-room-members-label"></div>
+
+            <p class="chat-hint">Elige al menos dos personas: contigo serán tres. La sala no tiene enlace de invitación ni vetos.</p>
+            <p class="chat-hint" id="chat-room-error" role="status" aria-live="polite"></p>
+        </div>
+    </x-slot:body>
+
+    <x-slot:footer>
+        <button type="button" class="btn btn-primary" id="chat-room-create">Crear sala</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+    </x-slot:footer>
+</x-app-modal>
+
+{{-- Difusión: el mismo mensaje a varias personas, cada una en su chat. --}}
+<x-app-modal id="modal-chat-broadcast" title="Crear difusión" size="lg" scrollable>
+    <x-slot:body>
+        <div class="chat-broadcast">
+            <p class="chat-hint">
+                Elige a las personas. Cada mensaje que envíes en esta difusión se copia
+                en tu chat individual con cada una; no se agregan a la sala.
+            </p>
+
+            <label class="chat-forward__search">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="search" id="chat-broadcast-search"
+                       placeholder="Buscar persona..." autocomplete="off">
+            </label>
+
+            <div class="chat-broadcast__list" id="chat-broadcast-list">
+                <p class="chat-hint">Cargando personas...</p>
+            </div>
+
+            <p class="chat-hint" id="chat-broadcast-error" role="status" aria-live="polite"></p>
+        </div>
+    </x-slot:body>
+
+    <x-slot:footer>
+        <button type="button" class="btn btn-primary" id="chat-broadcast-send" disabled>Crear difusión</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+    </x-slot:footer>
+</x-app-modal>
+
+<div class="modal fade" id="modal-chat-add-groups" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5">Añadir a grupos</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="chat-hint">Selecciona los grupos a los que quieres agregar a esta persona.</p>
+                <div id="chat-add-groups-list" class="chat-add-groups"></div>
+                <p class="chat-hint" id="chat-add-groups-error" role="status" aria-live="polite"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="chat-add-groups-save">Añadir</button>
+            </div>
+        </div>
+    </div>
+</div>
 {{-- Reenviar un mensaje: se eligen uno o varios destinatarios entre grupos,
      administradores, amigos secretos y personas. --}}
 <x-app-modal id="modal-chat-forward" title="Reenviar mensaje" size="lg" scrollable>

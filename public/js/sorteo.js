@@ -18,29 +18,13 @@
         function cardHtml(amigo) {
             var html = '<article class="amigo-card">' +
                 '<p class="amigo-card__eyebrow">Tu amigo secreto es</p>' +
-                '<p class="amigo-card__name"></p>';
-
-            if (amigo.username) {
-                html += '<p class="amigo-card__user"></p>';
-            }
-
-            if (amigo.notas) {
-                html += '<p class="amigo-card__notes"><span class="amigo-card__label">Preferencias</span> <span class="amigo-card__notes-text"></span></p>';
-            }
-
-            html += '</article>';
+                '<p class="amigo-card__name"></p>' +
+                '<p class="amigo-card__user">Solo verás su nombre hasta la gran revelación.</p>' +
+                '</article>';
 
             var $html = $(html);
 
             $html.find('.amigo-card__name').text(amigo.name || '—');
-
-            if (amigo.username) {
-                $html.find('.amigo-card__user').text('@' + amigo.username);
-            }
-
-            if (amigo.notas) {
-                $html.find('.amigo-card__notes-text').text(amigo.notas);
-            }
 
             return $html;
         }
@@ -123,7 +107,6 @@
             var datosUrl = $amigo.attr('data-url-datos');
             var $errorAmigo = $('#amigo-error');
             var $tarjetaAmigo = $('#amigo-tarjeta');
-            var $pistas = $('#amigo-clues');
 
             $('#amigo-ver-de-nuevo').on('click', function () {
                 clearError($errorAmigo);
@@ -131,26 +114,6 @@
                 $.getJSON(datosUrl).done(function (response) {
                     if (response.amigo) {
                         $tarjetaAmigo.html(cardHtml(response.amigo));
-                    }
-
-                    if (response.pistas) {
-                        if (!response.pistas.length) {
-                            $pistas.html('<li class="amigo-clue amigo-clue--empty">Todavía no te ha dejado pistas.</li>');
-                        } else {
-                            $pistas.html(response.pistas.map(function (pista) {
-                                return '<li class="amigo-clue">' +
-                                    '<p class="amigo-clue__body"></p>' +
-                                    '<p class="amigo-clue__date"></p>' +
-                                    '</li>';
-                            }).join(''));
-
-                            response.pistas.forEach(function (pista, index) {
-                                var $item = $pistas.find('.amigo-clue').eq(index);
-
-                                $item.find('.amigo-clue__body').text(pista.body || '');
-                                $item.find('.amigo-clue__date').text(pista.fecha || '');
-                            });
-                        }
                     }
                 }).fail(function (xhr) {
                     var data = xhr.responseJSON || {};

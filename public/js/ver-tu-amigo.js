@@ -33,6 +33,7 @@
         var token = $config.attr('data-csrf');
         var puedeEditar = $config.attr('data-puede-editar') === '1';
         var tieneObsequio = $config.attr('data-tiene-obsequio') === '1';
+        var presupuesto = parseFloat($config.attr('data-presupuesto')) || 0;
 
         function urlFor(template, id) {
             return String(template || '').replace('__ID__', encodeURIComponent(id));
@@ -124,6 +125,7 @@
         /* ------------------------------------------------------------ Obsequio */
 
         var $nombre = $('#amigo-obsequio-nombre');
+        var $descripcion = $('#amigo-obsequio-descripcion');
         var $valor = $('#amigo-obsequio-valor');
         var $bs = $('#amigo-obsequio-bs');
         var $bsHint = $('#amigo-obsequio-bs-hint');
@@ -139,6 +141,7 @@
 
         var guardado = {
             nombre: $nombre.val() || '',
+            descripcion: $descripcion.val() || '',
             valor: $valor.val() || '',
             bs: $bs.val() || ''
         };
@@ -149,6 +152,7 @@
             var bloquear = !puedeEditar || !editando;
 
             $nombre.prop('disabled', bloquear);
+            $descripcion.prop('disabled', bloquear);
             $valor.prop('disabled', bloquear);
             $bs.prop('disabled', bloquear);
 
@@ -186,6 +190,13 @@
             } else if (valor <= 0) {
                 marcarError($valor, $valorError, 'Escribe un valor mayor que cero.');
                 ok = false;
+            } else if (presupuesto > 0 && valor > presupuesto) {
+                marcarError(
+                    $valor,
+                    $valorError,
+                    'El presupuesto máximo es US$ ' + presupuesto.toFixed(2) + '.'
+                );
+                ok = false;
             }
 
             return { ok: ok, nombre: nombre, valor: valor };
@@ -216,6 +227,7 @@
                         data: {
                             _token: token,
                             nombre: data.nombre,
+                            descripcion: $.trim($descripcion.val()),
                             valor: data.valor
                         }
                     }).done(function (response) {
@@ -223,6 +235,7 @@
 
                         guardado = {
                             nombre: gift.nombre || data.nombre,
+                            descripcion: gift.descripcion || '',
                             valor: gift.valor || data.valor,
                             bs: gift.valor_bs || ''
                         };
@@ -231,6 +244,7 @@
                         editando = false;
 
                         $nombre.val(guardado.nombre);
+                        $descripcion.val(guardado.descripcion);
                         $valor.val(guardado.valor);
                         $bs.val(guardado.bs);
 
@@ -281,6 +295,7 @@
         $cancelar.on('click', function () {
             editando = false;
             $nombre.val(guardado.nombre);
+            $descripcion.val(guardado.descripcion);
             $valor.val(guardado.valor);
             $bs.val(guardado.bs);
             limpiarErroresObsequio();
@@ -290,6 +305,7 @@
 
         $limpiar.on('click', function () {
             $nombre.val('');
+            $descripcion.val('');
             $valor.val('');
             $bs.val('');
             limpiarErroresObsequio();
@@ -374,14 +390,33 @@
             }
         });
 
+        // Búsqueda explícita antes de la lista, con su botón de limpiar.
+        var consumiblesSearchTimer = null;
+
+        $('#amigo-consumibles-search').on('input', function () {
+            var value = this.value;
+
+            window.clearTimeout(consumiblesSearchTimer);
+            consumiblesSearchTimer = window.setTimeout(function () {
+                tabla.search(value).draw();
+            }, 200);
+        });
+
+        $('#amigo-consumibles-search-clear').on('click', function () {
+            $('#amigo-consumibles-search').val('').trigger('focus');
+            tabla.search('').draw();
+        });
+
         var modalElement = document.getElementById('modal-consumible');
         var modal = modalElement ? window.bootstrap.Modal.getOrCreateInstance(modalElement) : null;
         var $consumibleId = $('#consumible-id');
         var $cNombre = $('#consumible-nombre');
+        var $cDescripcion = $('#consumible-descripcion');
         var $cValor = $('#consumible-valor');
         var $cBs = $('#consumible-bs');
         var $cBsHint = $('#consumible-bs-hint');
         var $cNombreError = $('#consumible-nombre-error');
+        var $cDescripcionError = $('#consumible-descripcion-error');
         var $cValorError = $('#consumible-valor-error');
         var $cFormError = $('#consumible-form-error');
         var $cLimpiar = $('#consumible-limpiar');
@@ -390,9 +425,11 @@
         function limpiarFormularioConsumible() {
             $consumibleId.val('');
             $cNombre.val('');
+            $cDescripcion.val('');
             $cValor.val('');
             $cBs.val('');
             $cNombreError.text('').removeAttr('data-kind');
+            $cDescripcionError.text('').removeAttr('data-kind');
             $cValorError.text('').removeAttr('data-kind');
             $cFormError.text('').removeAttr('data-kind');
             $cBsHint.text('Se calcula con la tasa oficial del BCV.').removeAttr('data-kind');
@@ -406,6 +443,7 @@
             if (data) {
                 $consumibleId.val(data.id || '');
                 $cNombre.val(data.nombre || '');
+                $cDescripcion.val(data.descripcion || '');
                 $cValor.val(data.valor || '');
                 $cBs.val(data.valor_bs || '');
             }
@@ -417,6 +455,7 @@
 
         function validarConsumible() {
             $cNombreError.text('').removeAttr('data-kind');
+            $cDescripcionError.text('').removeAttr('data-kind');
             $cValorError.text('').removeAttr('data-kind');
             $cFormError.text('').removeAttr('data-kind');
 
@@ -434,6 +473,11 @@
                 ok = false;
             } else if (valor <= 0) {
                 $cValorError.attr('data-kind', 'error').text('Escribe un valor mayor que cero.');
+                ok = false;
+            } else if (presupuesto > 0 && valor > presupuesto) {
+                $cValorError.attr('data-kind', 'error').text(
+                    'El presupuesto máximo es US$ ' + presupuesto.toFixed(2) + '.'
+                );
                 ok = false;
             }
 
@@ -492,6 +536,7 @@
                         data: {
                             _token: token,
                             nombre: data.nombre,
+                            descripcion: $.trim($cDescripcion.val()),
                             valor: data.valor
                         }
                     }).done(function (response) {

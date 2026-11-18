@@ -29,6 +29,7 @@ class ShareAppShell
             }
 
             $event = Event::query()->orderByDesc('year')->first();
+            $event = FaseEvento::sincronizar($event);
             $frozen = $event?->isSuspended() ?? false;
 
             $menuModules = $user->accessibleModules()
@@ -48,7 +49,6 @@ class ShareAppShell
 
             $groups = $modules->groupBy(fn (Module $module) => $this->groupName($module));
             $menuGroups = $menuModules->groupBy(fn (Module $module) => $this->groupName($module));
-            $event = Event::query()->orderByDesc('year')->first();
 
             $notificationsModule = Module::activeByCode('notificaciones');
 

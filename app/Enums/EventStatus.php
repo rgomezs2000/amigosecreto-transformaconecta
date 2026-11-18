@@ -16,17 +16,23 @@ enum EventStatus: string
     {
         return match ($this) {
             self::Draft => 'Borrador',
-            self::Registration => 'Inscripción',
-            self::DrawEnabled => 'Sorteo habilitado',
-            self::Drawn => 'Sorteado',
-            self::Closed => 'Cerrado',
-            self::Revealed => 'Revelado',
+            self::Registration => 'Unión',
+            self::DrawEnabled => 'Sorteo ciego',
+            self::Drawn => 'Intercambio de pistas',
+            self::Closed => 'Finalizado',
+            self::Revealed => 'Gran revelación',
             self::Suspended => 'Suspendido',
         };
     }
 
     /** El administrador todavía puede inscribir o quitar participantes. */
     public function allowsRegistration(): bool
+    {
+        return in_array($this, [self::Draft, self::Registration], true);
+    }
+
+    /** Se pueden generar y enviar invitaciones personales. */
+    public function allowsInvitations(): bool
     {
         return in_array($this, [self::Draft, self::Registration], true);
     }
@@ -43,10 +49,16 @@ enum EventStatus: string
         return $this === self::Drawn;
     }
 
-    /** El administrador puede disparar la revelación final. */
+    /** Se pueden escribir pistas para el amigo secreto. */
+    public function allowsClues(): bool
+    {
+        return $this === self::Drawn;
+    }
+
+    /** La gran revelación se abre cuando llega la fecha del intercambio. */
     public function allowsReveal(): bool
     {
-        return $this === self::Closed;
+        return in_array($this, [self::Drawn, self::Closed, self::Revealed], true);
     }
 
     public function isFinished(): bool

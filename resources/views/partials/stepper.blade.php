@@ -1,8 +1,8 @@
 @php
     $steps = [
-        1 => 'Creación / Unión',
-        2 => 'Sorteo ciego',
-        3 => 'Lista de deseos',
+        1 => 'Creación',
+        2 => 'Unión',
+        3 => 'Sorteo ciego',
         4 => 'Intercambio de pistas',
         5 => 'Gran revelación',
     ];

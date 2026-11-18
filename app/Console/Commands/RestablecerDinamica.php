@@ -165,9 +165,15 @@ class RestablecerDinamica extends Command
     {
         return [
             'Adjuntos del chat' => fn (): int => DB::table('chat_message_attachments')->delete(),
+            'Favoritos de mensajes' => fn (): int => DB::table('chat_message_favorites')->delete(),
             'Reacciones del chat' => fn (): int => DB::table('chat_message_reactions')->delete(),
+            'Votos de encuestas' => fn (): int => DB::table('chat_poll_votes')->delete(),
+            'Opciones de encuestas' => fn (): int => DB::table('chat_poll_options')->delete(),
+            'Encuestas del chat' => fn (): int => DB::table('chat_polls')->delete(),
             'Adjuntos de casos' => fn (): int => DB::table('chat_report_attachments')->delete(),
             'Enlaces de casos' => fn (): int => DB::table('chat_report_links')->delete(),
+            'Valoraciones de casos' => fn (): int => DB::table('chat_report_ratings')->delete(),
+            'Remisiones de casos' => fn (): int => DB::table('chat_report_referrals')->delete(),
             'Reportes de moderación' => fn (): int => DB::table('chat_reports')->delete(),
             'Lecturas de moderación' => fn (): int => DB::table('chat_moderation_reads')->delete(),
             'Bitácora de grupos' => fn (): int => DB::table('chat_group_audits')->delete(),
@@ -175,6 +181,7 @@ class RestablecerDinamica extends Command
             'Suspensiones de grupo' => fn (): int => DB::table('chat_group_suspensions')->delete(),
             'Invitaciones de grupo' => fn (): int => DB::table('chat_group_invitations')->delete(),
             'Bloqueos entre usuarios' => fn (): int => DB::table('chat_blocks')->delete(),
+            'Destinatarios de difusión' => fn (): int => DB::table('chat_broadcast_recipients')->delete(),
             'Mensajes del chat' => fn (): int => DB::table('chat_messages')->delete(),
             'Participantes de conversaciones' => fn (): int => DB::table('chat_conversation_user')->delete(),
             'Conversaciones' => fn (): int => DB::table('chat_conversations')->delete(),
@@ -182,6 +189,7 @@ class RestablecerDinamica extends Command
             'Regalos de intercambio' => fn (): int => DB::table('exchange_gifts')->delete(),
             'Regalos consumibles' => fn (): int => DB::table('consumable_gifts')->delete(),
             'Listas de deseos' => fn (): int => DB::table('wishlists')->delete(),
+            'Deseos del participante' => fn (): int => DB::table('wish_items')->delete(),
             'Asignaciones' => fn (): int => DB::table('assignments')->delete(),
             'Participaciones del evento' => fn (): int => DB::table('event_participants')->delete(),
             'Auditoría' => fn (): int => DB::table('audit_logs')->delete(),
@@ -202,8 +210,16 @@ class RestablecerDinamica extends Command
             // Primero se cierran las sesiones (dejando el aviso) y después se
             // borran las cuentas: así nadie queda con la sesión abierta.
             'Sesiones de los usuarios' => fn (): int => $this->cerrarSesiones($superAdminId),
+            'Avisos de sesión' => fn (): int => DB::table('session_kicks')->delete(),
             'Usuarios' => fn (): int => DB::table('users')->where('id', '!=', $superAdminId)->delete(),
             'Tokens de recuperación' => fn (): int => DB::table('password_reset_tokens')->delete(),
+            // La cola y la caché pueden conservar correos, avisos o datos de
+            // cuentas que ya no existen.
+            'Cola de trabajos' => fn (): int => DB::table('jobs')->delete(),
+            'Trabajos fallidos' => fn (): int => DB::table('failed_jobs')->delete(),
+            'Lotes de trabajos' => fn (): int => DB::table('job_batches')->delete(),
+            'Caché del sistema' => fn (): int => DB::table('cache')->delete(),
+            'Bloqueos de caché' => fn (): int => DB::table('cache_locks')->delete(),
         ];
     }
 

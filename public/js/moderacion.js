@@ -603,12 +603,26 @@
             $('#moderacion-detail-refer').prop('hidden', !row.can_refer);
 
             var $createUser = $('#moderacion-solicitud-crear');
+            var solicitudAbierta = row.status_class !== 'cerrado';
 
-            if (row.create_user_url) {
+            if (row.create_user_url && solicitudAbierta) {
                 $createUser.attr('href', row.create_user_url).prop('hidden', false);
             } else {
                 $createUser.prop('hidden', true).removeAttr('href');
             }
+
+            detailSolicitud = {
+                id: row.id,
+                type: row.type,
+                action: row.account_action || ''
+            };
+
+            $('#moderacion-solicitud-reset')
+                .prop('hidden', !(solicitudAbierta && row.account_action === 'reset'));
+            $('#moderacion-solicitud-unlock')
+                .prop('hidden', !(solicitudAbierta && row.account_action === 'unlock'));
+            $('#moderacion-solicitud-reject')
+                .prop('hidden', !(solicitudAbierta && row.type === 'registro'));
 
             renderReferrals(row.referrals);
 

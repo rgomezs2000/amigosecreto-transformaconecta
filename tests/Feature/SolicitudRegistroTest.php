@@ -214,4 +214,185 @@ class SolicitudRegistroTest extends TestCase
 
         $this->assertSame(1, User::query()->where('email', 'duplicado@example.com')->count());
     }
+
+    public function test_el_administrador_puede_crear_un_ticket_de_usuarios_sin_chat(): void
+    {
+        $admin = $this->administrador();
+
+        $this->actingAs($admin)
+            ->get('/administracion/moderacion')
+            ->assertOk()
+            ->assertSee('<option value="registro">Usuarios</option>', false);
+
+        $this->actingAs($admin)->post('/moderacion/reportes', [
+            'type' => ChatReport::TYPE_USER_REGISTRATION,
+            'reason' => 'Alta de usuario',
+            'message' => 'El administrador registra el caso para crear la cuenta.',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+
+        $this->assertSame(ChatReport::TYPE_USER_REGISTRATION, $report->type);
+        $this->assertSame(ChatReport::STATUS_ATTENDING, $report->status);
+        $this->assertDatabaseMissing('chat_conversations', ['report_id' => $report->id]);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/reportes/'.$report->id.'/detalle')
+            ->assertOk()
+            ->assertJsonPath('report.ticket_chat_url', null)
+            ->assertJsonPath('report.create_user_url', module_url('usuarios'));
+    }
+
+    public function test_una_solicitud_de_cuenta_tampoco_abre_chat(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Cuenta Reset',
+            'email' => 'reset@example.com',
+            'username' => 'cuenta.reset',
+        ]);
+
+        $this->postJson('/solicitudes/recuperacion', [
+            'login' => 'reset@example.com',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar')
+            ->assertOk()
+            ->assertJsonPath('ticket_chat_id', null)
+            ->assertJsonPath('report.account_action', 'reset')
+            ->assertJsonPath('report.ticket_chat_url', null);
+
+        $this->assertDatabaseMissing('chat_conversations', ['report_id' => $report->id]);
+    }
+
+    public function test_buscar_una_solicitud_abierta_la_toma_y_bloquea_si_es_de_otro(): void
+    {
+        $this->postJson('/solicitudes/registro', [
+            'name' => 'Solicitud Buscada',
+            'email' => 'buscada@example.com',
+            'username' => 'solicitud.buscada',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+        $otro = $this->makeUser('Otro Admin', UserRole::Admin, ['usuarios']);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/usuarios/solicitud?email=buscada@example.com')
+            ->assertOk()
+            ->assertJsonPath('found', true)
+            ->assertJsonPath('blocked', false)
+            ->assertJsonPath('solicitud.id', $report->id);
+
+        $this->assertSame(ChatReport::STATUS_ATTENDING, $report->refresh()->status);
+        $this->assertSame($admin->id, $report->taken_by);
+
+        $this->actingAs($otro)
+            ->getJson('/usuarios/solicitud?username=solicitud.buscada')
+            ->assertOk()
+            ->assertJsonPath('found', true)
+            ->assertJsonPath('blocked', true)
+            ->assertJsonPath('taken_by', $admin->name);
+
+        $this->actingAs($otro)
+            ->postJson(route('usuarios.crear'), [
+                'name' => 'Solicitud Buscada',
+                'email' => 'buscada@example.com',
+                'username' => 'solicitud.buscada',
+                'profile_id' => $this->perfilUsuario()->id,
+            ])
+            ->assertStatus(422);
+    }
+
+    public function test_crear_un_usuario_con_solicitud_abierta_la_toma_si_no_tiene_gestor(): void
+    {
+        $this->postJson('/solicitudes/registro', [
+            'name' => 'Solicitud Sin Gestor',
+            'email' => 'sin.gestor@example.com',
+            'username' => 'sin.gestor',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+
+        $this->actingAs($admin)
+            ->postJson(route('usuarios.crear'), [
+                'name' => 'Solicitud Sin Gestor',
+                'email' => 'sin.gestor@example.com',
+                'username' => 'sin.gestor',
+                'profile_id' => $this->perfilUsuario()->id,
+            ])
+            ->assertOk();
+
+        $this->assertSame($admin->id, $report->refresh()->taken_by);
+        $this->assertSame(ChatReport::STATUS_ATTENDING, $report->status);
+    }
+
+    public function test_el_cambio_de_clave_atado_a_un_caso_respeta_al_gestor(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Cuenta Clave',
+            'email' => 'clave@example.com',
+            'username' => 'cuenta.clave',
+        ]);
+
+        $this->postJson('/solicitudes/recuperacion', [
+            'login' => 'clave@example.com',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+        $otro = $this->makeUser('Otro Gestor', UserRole::Admin, ['usuarios']);
+        $hashOriginal = $user->password;
+
+        // Otro administrador no puede cambiar la clave si el caso no es suyo.
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/tomar')
+            ->assertOk();
+
+        $this->actingAs($otro)
+            ->postJson('/usuarios/'.$user->id.'/restablecer')
+            ->assertStatus(422);
+
+        $this->assertSame($hashOriginal, $user->fresh()->password);
+
+        // El gestor sí puede cambiarla; el caso queda abierto hasta cerrarlo.
+        $this->actingAs($admin)
+            ->postJson('/usuarios/'.$user->id.'/restablecer')
+            ->assertOk()
+            ->assertJsonPath('mail_sent', true);
+
+        $this->assertNotSame($hashOriginal, $user->fresh()->password);
+        $this->assertSame($admin->id, $report->refresh()->taken_by);
+        $this->assertSame(ChatReport::STATUS_ATTENDING, $report->status);
+
+        Mail::assertSent(\App\Mail\NotificationMail::class, fn ($mail) => $mail->hasTo($user->email));
+    }
+
+    public function test_el_cambio_de_clave_toma_el_caso_si_no_tiene_gestor(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Cuenta Libre',
+            'email' => 'libre@example.com',
+            'username' => 'cuenta.libre',
+        ]);
+
+        $this->postJson('/solicitudes/recuperacion', [
+            'login' => 'libre@example.com',
+        ])->assertOk();
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+        $admin = $this->administrador();
+
+        $this->actingAs($admin)
+            ->postJson('/usuarios/'.$user->id.'/restablecer')
+            ->assertOk()
+            ->assertJsonPath('mail_sent', true);
+
+        $this->assertSame($admin->id, $report->refresh()->taken_by);
+        $this->assertSame(ChatReport::STATUS_ATTENDING, $report->status);
+    }
 }

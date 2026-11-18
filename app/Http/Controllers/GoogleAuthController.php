@@ -99,7 +99,7 @@ class GoogleAuthController extends Controller
             // invalida en su siguiente petición y recibe el aviso.
             SessionSecurity::activate($user, $request);
 
-            return $this->result($request, 'ok', ['name' => $user->name], route('dashboard'));
+            return $this->result($request, 'ok', ['name' => $user->name], redirect()->intended(route('dashboard'))->getTargetUrl());
         } catch (Throwable $exception) {
             Log::error('Google: error en el callback', [
                 'error' => $exception->getMessage(),

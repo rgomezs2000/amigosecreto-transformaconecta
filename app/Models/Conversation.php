@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class Conversation extends Model
 {
@@ -20,6 +21,7 @@ class Conversation extends Model
         'report_id',
         'is_moderated',
         'is_read_only',
+        'is_closed',
         'pinned_message_id',
     ];
 
@@ -28,6 +30,7 @@ class Conversation extends Model
         return [
             'is_moderated' => 'boolean',
             'is_read_only' => 'boolean',
+            'is_closed' => 'boolean',
         ];
     }
 
@@ -74,6 +77,20 @@ class Conversation extends Model
         return $this->belongsTo(ChatMessage::class, 'pinned_message_id');
     }
 
+    /**
+     * Destinatarios de una sala de difusión. No son miembros del chat: solo
+     * reciben copia de los mensajes en su conversación directa con el dueño.
+     */
+    public function broadcastRecipients(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            User::class,
+            'chat_broadcast_recipients',
+            'conversation_id',
+            'user_id'
+        )->withTimestamps();
+    }
+
     public function assignment(): BelongsTo
     {
         return $this->belongsTo(Assignment::class);
@@ -111,7 +128,7 @@ class Conversation extends Model
      */
     public function isArchivedForAnyUser(): bool
     {
-        return \Illuminate\Support\Facades\DB::table('chat_conversation_user')
+        return DB::table('chat_conversation_user')
             ->where('conversation_id', $this->id)
             ->whereNotNull('archived_at')
             ->exists();
@@ -128,6 +145,32 @@ class Conversation extends Model
     public function isGroup(): bool
     {
         return $this->type === 'group';
+    }
+
+    /**
+     * Sala de difusión: conversación del dueño cuyos destinatarios no son
+     * miembros; reciben copia en su chat directo.
+     */
+    public function isBroadcast(): bool
+    {
+        return $this->type === 'broadcast';
+    }
+
+    /**
+     * Sala cerrada: un grupo que solo existe para sus miembros, sin enlace de
+     * invitación ni vetos. Se crea eligiendo usuarios y no se descubre.
+     */
+    public function isClosed(): bool
+    {
+        return $this->isGroup() && $this->is_closed;
+    }
+
+    /**
+     * Chat del sistema: avisos e invitaciones personales del evento.
+     */
+    public function isSystem(): bool
+    {
+        return $this->type === 'system';
     }
 
     /**
@@ -181,6 +224,26 @@ class Conversation extends Model
         return null;
     }
 
+    /**
+     * Nombres de una sala o difusión: «A, B y C» o «A, B, C y N más».
+     */
+    private function namesSummary($names, string $fallback = 'Sala'): string
+    {
+        $count = $names->count();
+
+        if ($count === 0) {
+            return $fallback;
+        }
+
+        if ($count <= 3) {
+            $last = $names->pop();
+
+            return $names->isEmpty() ? $last : $names->implode(', ').' y '.$last;
+        }
+
+        return $names->take(3)->implode(', ').' y '.($count - 3).' más';
+    }
+
     public function titleFor(User $user): string
     {
         if ($this->type === 'secret') {
@@ -200,12 +263,31 @@ class Conversation extends Model
             return $this->name ?: 'Reporte Nº: '.($this->report_id ?? $this->id);
         }
 
+        // Las salas no tienen nombre: se identifican con los nombres de sus
+        // integrantes (máximo tres y «N más»).
+        if ($this->isClosed()) {
+            $this->loadMissing('users');
+
+            return $this->namesSummary($this->users->pluck('name')->filter()->values());
+        }
+
+        if ($this->isBroadcast()) {
+            return $this->namesSummary(
+                $this->broadcastRecipients()->pluck('name')->filter()->values(),
+                'Difusión'
+            );
+        }
+
         if ($this->isGroup()) {
             return $this->name ?: 'Grupo';
         }
 
         if ($this->isEventChannel()) {
             return $this->name ?: 'Evento';
+        }
+
+        if ($this->isSystem()) {
+            return $this->name ?: 'Sistema';
         }
 
         $other = $this->users->firstWhere('id', '!=', $user->id);

@@ -1,8 +1,13 @@
 <div class="amigo-consumible-ficha">
     <dl class="perfil-data">
         <div class="perfil-data__item perfil-data__item--wide">
-            <dt>Obsequio</dt>
-            <dd class="amigo-texto">{{ $consumible->description }}</dd>
+            <dt>Nombre</dt>
+            <dd class="amigo-texto">{{ $consumible->name ?: $consumible->description }}</dd>
+        </div>
+
+        <div class="perfil-data__item perfil-data__item--wide">
+            <dt>Descripción</dt>
+            <dd class="amigo-texto">{{ format_text($consumible->description, 'Sin descripción') }}</dd>
         </div>
 
         <div class="perfil-data__item">

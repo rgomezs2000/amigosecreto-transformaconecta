@@ -30,7 +30,7 @@ class ReporteChat
      */
     public function abrirTicket(ChatReport $report): ?Conversation
     {
-        if ($report->isSuggestion() || $report->isUserRegistration()) {
+        if ($report->isSuggestion() || $report->isUserRegistration() || $report->isAccountRequest()) {
             return null;
         }
 
@@ -70,7 +70,7 @@ class ReporteChat
      */
     public function gestionar(ChatReport $report, User $admin): ?Conversation
     {
-        if ($report->isUserRegistration()) {
+        if ($report->isUserRegistration() || $report->isAccountRequest()) {
             return null;
         }
 

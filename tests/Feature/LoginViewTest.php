@@ -15,6 +15,7 @@ class LoginViewTest extends TestCase
             ->assertSee('Usuario o correo')
             ->assertSee('Clave')
             ->assertSee('Ingresar')
+            ->assertSee('id="login-submit"', false)
             ->assertSee('Salir')
             ->assertSee('Solo para cuentas creadas por el administrador')
             ->assertSee('Continuar con Google')

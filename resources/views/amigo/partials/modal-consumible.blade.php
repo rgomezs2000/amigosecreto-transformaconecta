@@ -12,6 +12,13 @@
             </div>
 
             <div class="field">
+                <label for="consumible-descripcion" class="form-label">Descripción del consumible</label>
+                <textarea class="form-control" id="consumible-descripcion" rows="2" maxlength="500"
+                          placeholder="Detalles: sabor, tamaño, cantidad…"></textarea>
+                <p class="field-message" id="consumible-descripcion-error" role="status" aria-live="polite"></p>
+            </div>
+
+            <div class="field">
                 <label for="consumible-valor" class="form-label">Valor en US$</label>
                 <input type="number" class="form-control" id="consumible-valor" name="valor"
                        min="0.01" step="0.01" inputmode="decimal" placeholder="0,00">

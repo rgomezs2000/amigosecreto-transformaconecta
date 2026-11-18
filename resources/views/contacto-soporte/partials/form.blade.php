@@ -27,7 +27,7 @@
         <textarea class="form-control" id="reporte-mensaje" name="message" rows="5"
                   maxlength="5000" placeholder="Explica con detalle qué ocurrió o qué necesitas." required></textarea>
         <p class="form-text">
-            Este mensaje lo lee la administración antes de tomar el caso y se copia al chat del ticket.
+            Este mensaje lo lee la administración antes de tomar el caso.
         </p>
     </div>
 

@@ -16,6 +16,15 @@ class EventoReinicioController extends Controller
 
         $year = (int) $request->input('year', now()->year);
 
+        $event = \App\Models\Event::query()->where('year', $year)->first();
+
+        if ($event !== null && $event->status->isFinished()) {
+            return api_error(
+                'El evento ya se celebró y quedó finalizado: no se puede reiniciar.',
+                409
+            );
+        }
+
         $output = new BufferedOutput();
 
         $status = Artisan::call('evento:reiniciar', ['year' => $year], $output);

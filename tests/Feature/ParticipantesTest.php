@@ -13,7 +13,7 @@ use App\Models\Permission;
 use App\Models\Profile;
 use App\Models\ProfilePermissionModule;
 use App\Models\User;
-use App\Models\Wishlist;
+use App\Models\WishItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -154,7 +154,7 @@ class ParticipantesTest extends TestCase
             ->assertSee('Limpiar')
             ->assertSee('participantes-evento', false)
             ->assertSee('participantes-table', false)
-            ->assertSee('Creación / Unión')
+            ->assertSee('Unión')
             ->assertSee('Pistas del amigo secreto')
             ->assertSee('Pistas al amigo secreto')
             ->assertSee('Obsequios consumibles');
@@ -207,15 +207,15 @@ class ParticipantesTest extends TestCase
         $response = $this->actingAs($admin)
             ->getJson('/participantes/datos?'.$this->dataTable())
             ->assertOk()
-            ->assertJsonPath('recordsTotal', 2)
-            ->assertJsonPath('recordsFiltered', 2)
-            ->assertJsonPath('estado.fase', 1)
+            ->assertJsonPath('recordsTotal', 3)
+            ->assertJsonPath('recordsFiltered', 3)
+            ->assertJsonPath('estado.fase', 2)
             ->assertJsonPath('estado.asignados', 0)
             ->assertJsonPath('estado.sin_asignar', 2);
 
         $json = $response->json();
 
-        $this->assertStringContainsString('Creación / Unión', $json['estado_html']);
+        $this->assertStringContainsString('Unión', $json['estado_html']);
         $this->assertStringContainsString('Sin asignar', $json['data'][0]['secret']);
         $this->assertSame($actual->id, $json['estado']['evento']['id']);
     }
@@ -307,11 +307,11 @@ class ParticipantesTest extends TestCase
         $participation = $this->participar($event, $ana);
         $this->participar($event, $beto);
 
-        Wishlist::create([
-            'event_participant_id' => $participation->id,
-            'likes' => 'Libros de aventuras y café',
-            'avoid' => 'Sin gluten',
-            'categories' => ['libros', 'café'],
+        WishItem::create([
+            'event_id' => $event->id,
+            'user_id' => $ana->id,
+            'title' => 'Libros de aventuras y café',
+            'description' => 'Sin gluten',
         ]);
 
         $conLista = $this->actingAs($admin)
@@ -322,7 +322,6 @@ class ParticipantesTest extends TestCase
 
         $this->assertStringContainsString('Libros de aventuras y café', $json['html']);
         $this->assertStringContainsString('Sin gluten', $json['html']);
-        $this->assertStringContainsString('libros', $json['html']);
 
         $sinLista = $this->actingAs($admin)
             ->getJson('/participantes/'.$beto->id.'/lista-deseos?evento='.$event->id)
@@ -393,7 +392,7 @@ class ParticipantesTest extends TestCase
             ->getJson('/participantes/'.$ana->id.'/pistas?evento='.$event->id.'&tipo=recibidas&'.$this->dataTable())
             ->assertOk()
             ->assertJsonPath('estado.asignado', false)
-            ->assertJsonPath('estado.fase', 2)
+            ->assertJsonPath('estado.fase', 3)
             ->assertJsonPath('recordsTotal', 0);
 
         $json = $response->json();
@@ -471,9 +470,9 @@ class ParticipantesTest extends TestCase
             ->getJson('/participantes/'.$ana->id.'/obsequios?evento='.$event->id)
             ->assertOk()
             ->assertJsonPath('estado.asignado', false)
-            ->assertJsonPath('estado.fase', 1);
+            ->assertJsonPath('estado.fase', 2);
 
-        $this->assertStringContainsString('Creación / Unión', $response->json('aviso_html'));
+        $this->assertStringContainsString('Unión', $response->json('aviso_html'));
     }
 
     public function test_el_evento_en_curso_queda_seleccionado_y_los_modulos_van_antes_de_lista_de_deseos(): void

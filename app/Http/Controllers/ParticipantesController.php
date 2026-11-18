@@ -10,7 +10,7 @@ use App\Models\Event;
 use App\Models\EventParticipant;
 use App\Models\Module;
 use App\Models\User;
-use App\Models\Wishlist;
+use App\Models\WishItem;
 use App\Support\FaseEvento;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -97,6 +97,12 @@ class ParticipantesController extends Controller
             ]);
         }
 
+        // En la Unión, los usuarios participantes creados después del evento
+        // también deben aparecer con su invitación pendiente.
+        if ($event->status->allowsInvitations()) {
+            app(\App\Services\InvitacionesEvento::class)->generar($event);
+        }
+
         $query = EventParticipant::query()
             ->where('event_participants.event_id', $event->id)
             ->join('users', 'users.id', '=', 'event_participants.user_id')
@@ -147,7 +153,7 @@ class ParticipantesController extends Controller
             ->keyBy('giver_id');
         $estado = $this->estadoEvento($event);
 
-        $data = $participations->map(function (EventParticipant $participation) use ($assignments) {
+        $data = $participations->map(function (EventParticipant $participation) use ($assignments, $event) {
             $user = $participation->user;
 
             return [
@@ -162,7 +168,11 @@ class ParticipantesController extends Controller
                 'secret' => view('participantes.partials.estado-amigo', [
                     'assignment' => $assignments->get($user->id),
                 ])->render(),
-                'actions' => view('participantes.partials.actions', ['participant' => $user])->render(),
+                'actions' => view('participantes.partials.actions', [
+                    'participant' => $user,
+                    'participation' => $participation,
+                    'event' => $event,
+                ])->render(),
             ];
         });
 
@@ -220,9 +230,11 @@ class ParticipantesController extends Controller
         }
 
         $participation = $this->participacion($event, $participant);
-        $wishlist = Wishlist::query()
-            ->where('event_participant_id', $participation->id)
-            ->first();
+        $items = WishItem::query()
+            ->where('event_id', $event->id)
+            ->where('user_id', $participant->id)
+            ->orderBy('title')
+            ->get();
 
         $estado = $this->estadoParticipante($event, $participant);
 
@@ -232,7 +244,7 @@ class ParticipantesController extends Controller
             'html' => view('participantes.partials.lista-deseos', [
                 'event' => $event,
                 'participant' => $participant,
-                'wishlist' => $wishlist,
+                'items' => $items,
             ])->render(),
         ]);
     }
@@ -423,7 +435,7 @@ class ParticipantesController extends Controller
 
         $data = $gifts->map(fn (ConsumableGift $gift) => [
             'fecha' => format_date($gift->given_on, 'd/m/Y'),
-            'nombre' => e($gift->description),
+            'nombre' => e($gift->name ?: $gift->description),
             'cantidad' => (int) $gift->quantity,
             'valor' => $this->money($gift->value, $event),
         ]);
@@ -481,6 +493,8 @@ class ParticipantesController extends Controller
                 'suspendido' => false,
                 'pospuesto' => false,
                 'participantes' => 0,
+                'activos' => 0,
+                'pendientes' => 0,
                 'asignados' => 0,
                 'sin_asignar' => 0,
                 'reparto' => false,
@@ -490,8 +504,16 @@ class ParticipantesController extends Controller
 
         $paso = FaseEvento::paso($event);
         $participantes = EventParticipant::query()->where('event_id', $event->id)->count();
+        $activos = EventParticipant::query()
+            ->where('event_id', $event->id)
+            ->where('status', \App\Enums\ParticipantStatus::Active->value)
+            ->count();
+        $pendientes = EventParticipant::query()
+            ->where('event_id', $event->id)
+            ->where('status', \App\Enums\ParticipantStatus::Pending->value)
+            ->count();
         $asignados = Assignment::query()->where('event_id', $event->id)->count();
-        $sinAsignar = max(0, $participantes - $asignados);
+        $sinAsignar = max(0, $activos - $asignados);
 
         return [
             'evento' => [
@@ -508,17 +530,25 @@ class ParticipantesController extends Controller
             'suspendido' => $event->isSuspended(),
             'pospuesto' => $event->isPostponed(),
             'participantes' => $participantes,
+            'activos' => $activos,
+            'pendientes' => $pendientes,
             'asignados' => $asignados,
             'sin_asignar' => $sinAsignar,
             'reparto' => $asignados > 0,
-            'mensaje' => $this->mensajeEvento($event, $participantes, $asignados, $sinAsignar),
+            'mensaje' => $this->mensajeEvento($event, $participantes, $activos, $pendientes, $asignados, $sinAsignar),
         ];
     }
 
-    private function mensajeEvento(Event $event, int $participantes, int $asignados, int $sinAsignar): string
-    {
+    private function mensajeEvento(
+        Event $event,
+        int $participantes,
+        int $activos,
+        int $pendientes,
+        int $asignados,
+        int $sinAsignar
+    ): string {
         if ($participantes === 0) {
-            return 'Este evento todavía no tiene participantes. Inscríbelos desde el módulo de Eventos.';
+            return 'Este evento todavía no tiene invitaciones generadas.';
         }
 
         if ($event->isSuspended()) {
@@ -529,21 +559,24 @@ class ParticipantesController extends Controller
             return 'El evento ya finalizó. La información queda disponible en solo lectura.';
         }
 
-        if ($asignados === 0) {
-            if ($event->isPostponed()) {
-                return 'El evento está pospuesto y todavía no se ha asignado el amigo secreto.';
-            }
+        if ($event->status->allowsInvitations() && $pendientes > 0) {
+            return 'La Unión sigue abierta: hay '.$pendientes.' invitación(es) en espera. '
+                .'El evento no puede iniciarse hasta que todos respondan o se descarten.';
+        }
 
-            return FaseEvento::paso($event) === 1
-                ? 'El evento está en la fase «Creación / Unión»: todavía no se ha asignado el amigo secreto. Las pistas y los obsequios se registran después del sorteo.'
-                : 'El evento está en la fase «Sorteo ciego» y todavía no se ha asignado el amigo secreto.';
+        if ($event->status->allowsInvitations()) {
+            return 'Todos respondieron la invitación. La organización ya puede iniciar el sorteo.';
+        }
+
+        if ($asignados === 0) {
+            return 'El evento está en la fase «'.FaseEvento::etiquetaDe($event).'» y todavía no se ha asignado el amigo secreto.';
         }
 
         if ($sinAsignar > 0) {
-            return 'El amigo secreto ya está asignado a '.$asignados.' de '.$participantes.' participantes. Los que faltan aparecen como «Sin asignar».';
+            return 'El amigo secreto ya está asignado a '.$asignados.' de '.$activos.' participantes activos. Los que faltan aparecen como «Sin asignar».';
         }
 
-        return 'El amigo secreto ya está asignado a todos los participantes.';
+        return 'El amigo secreto ya está asignado a todos los participantes activos.';
     }
 
     /**
@@ -587,8 +620,9 @@ class ParticipantesController extends Controller
         }
 
         return match ($paso) {
-            1 => 'El evento está en la fase «Creación / Unión» y todavía no se ha asignado el amigo secreto. Esta ficha se completa cuando se realice el sorteo.',
-            2 => 'El evento está en la fase «Sorteo ciego» y este participante todavía no tiene amigo secreto asignado.',
+            1 => 'El evento está en la fase «Creación» y todavía no se ha asignado el amigo secreto.',
+            2 => 'El evento está en la fase «Unión» y todavía no se ha asignado el amigo secreto. Esta ficha se completa cuando se realice el sorteo.',
+            3 => 'El evento está en la fase «Sorteo ciego» y este participante todavía no tiene amigo secreto asignado.',
             default => 'Este participante todavía no tiene amigo secreto asignado, así que todavía no hay información que mostrar aquí.',
         };
     }

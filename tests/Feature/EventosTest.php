@@ -84,23 +84,30 @@ class EventosTest extends TestCase
         ]);
     }
 
-    private function eventWithParticipant(EventStatus $status = EventStatus::Registration): array
+    private function eventWithParticipant(EventStatus $status = EventStatus::Registration, int $participants = 1): array
     {
         $event = Event::create([
             'name' => 'Amigo Secreto 2026',
             'year' => 2026,
             'status' => $status,
             'exchange_at' => now()->addDays(20),
+            'max_value' => 100,
         ]);
 
-        $participant = $this->participant();
+        $first = null;
 
-        $event->participants()->attach($participant->id, [
-            'status' => ParticipantStatus::Active->value,
-            'confirmed_at' => now(),
-        ]);
+        for ($i = 1; $i <= $participants; $i++) {
+            $participant = $this->participant('Participante '.$i, 'p'.$i.'@example.com');
 
-        return [$event, $participant];
+            $event->participants()->attach($participant->id, [
+                'status' => ParticipantStatus::Active->value,
+                'confirmed_at' => now(),
+            ]);
+
+            $first ??= $participant;
+        }
+
+        return [$event, $first];
     }
 
     public function test_la_pagina_de_eventos_muestra_tarjetas_y_acciones(): void
@@ -143,7 +150,7 @@ class EventosTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_crear_evento_con_participantes_activos(): void
+    public function test_crear_evento_con_presupuesto_y_invitaciones_pendientes(): void
     {
         $admin = $this->adminWithEventosModule();
         $ana = $this->participant('Ana Pérez', 'ana@example.com');
@@ -153,10 +160,8 @@ class EventosTest extends TestCase
             ->postJson('/eventos', [
                 'name' => 'Amigo Secreto 2026',
                 'exchange_at' => '2026-12-20',
+                'presupuesto' => 75.50,
                 'status_reason' => 'Intercambio de fin de año.',
-                'participants' => [
-                    $ana->id => ['notes' => 'Prefiere regalos de café.'],
-                ],
             ])
             ->assertOk()
             ->assertJson(['success' => true]);
@@ -165,11 +170,14 @@ class EventosTest extends TestCase
 
         $this->assertSame('Amigo Secreto 2026', $event->name);
         $this->assertSame(EventStatus::Registration, $event->status);
-        $this->assertSame(2, $event->participants()->count());
+        $this->assertSame('75.50', $event->max_value);
+        $this->assertSame(2, $event->participations()->count());
         $this->assertSame(
-            'Prefiere regalos de café.',
-            $event->participants()->whereKey($ana->id)->first()?->pivot?->notes
+            2,
+            $event->participations()->where('status', ParticipantStatus::Pending->value)->count()
         );
+        $this->assertNotNull($event->participations()->first()?->invitation_token);
+        $this->assertSame(0, $event->activeParticipationsCount());
     }
 
     public function test_no_permite_dos_eventos_en_el_mismo_anio(): void
@@ -187,6 +195,7 @@ class EventosTest extends TestCase
             ->postJson('/eventos', [
                 'name' => 'Otro evento',
                 'exchange_at' => '2026-12-24',
+                'presupuesto' => 50,
             ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['exchange_at']);
@@ -197,7 +206,7 @@ class EventosTest extends TestCase
         Mail::fake();
 
         $admin = $this->adminWithEventosModule();
-        [$event, $participant] = $this->eventWithParticipant();
+        [$event, $participant] = $this->eventWithParticipant(EventStatus::Registration, 2);
 
         $this->actingAs($admin)
             ->postJson('/eventos/' . $event->id . '/iniciar')

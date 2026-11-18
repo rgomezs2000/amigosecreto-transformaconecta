@@ -193,10 +193,12 @@ class ObsequiosAmigoTest extends TestCase
         $this->actingAs($this->ana)
             ->postJson('/amigo-secreto/ver-tu-amigo/obsequio', [
                 'nombre' => 'Libro de aventuras',
+                'descripcion' => 'Tapa dura, edición ilustrada',
                 'valor' => '25,50',
             ])
             ->assertOk()
             ->assertJsonPath('gift.nombre', 'Libro de aventuras')
+            ->assertJsonPath('gift.descripcion', 'Tapa dura, edición ilustrada')
             ->assertJsonPath('gift.valor_usd', 'US$ 25,50')
             ->assertJsonPath('gift.valor_bs', 'Bs. 23.246,31');
 
@@ -256,7 +258,7 @@ class ObsequiosAmigoTest extends TestCase
         $this->actingAs($this->ana)
             ->postJson('/amigo-secreto/ver-tu-amigo/obsequio', ['nombre' => 'Algo', 'valor' => 150])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'El valor del obsequio no puede superar US$ 100,00.');
+            ->assertJsonPath('message', 'El presupuesto del evento es US$ 100,00. El obsequio más los consumibles no puede superarlo.');
 
         $this->assertDatabaseCount('exchange_gifts', 0);
     }
@@ -282,9 +284,14 @@ class ObsequiosAmigoTest extends TestCase
     public function test_consumibles_se_paginan_y_permiten_crear_modificar_ver_y_eliminar(): void
     {
         $this->actingAs($this->ana)
-            ->postJson('/amigo-secreto/ver-tu-amigo/consumibles', ['nombre' => 'Chocolate', 'valor' => 5])
+            ->postJson('/amigo-secreto/ver-tu-amigo/consumibles', [
+                'nombre' => 'Chocolate',
+                'descripcion' => 'Chocolate oscuro 70%',
+                'valor' => 5,
+            ])
             ->assertOk()
             ->assertJsonPath('consumible.nombre', 'Chocolate')
+            ->assertJsonPath('consumible.descripcion', 'Chocolate oscuro 70%')
             ->assertJsonPath('consumible.valor_usd', 'US$ 5,00');
 
         $this->actingAs($this->ana)
@@ -298,7 +305,7 @@ class ObsequiosAmigoTest extends TestCase
             ->assertJsonPath('recordsFiltered', 2)
             ->assertJsonPath('puede_editar', true);
 
-        $chocolate = ConsumableGift::query()->where('description', 'Chocolate')->firstOrFail();
+        $chocolate = ConsumableGift::query()->where('name', 'Chocolate')->firstOrFail();
 
         $this->actingAs($this->ana)
             ->getJson('/amigo-secreto/ver-tu-amigo/consumibles/'.$chocolate->id)
@@ -340,7 +347,7 @@ class ObsequiosAmigoTest extends TestCase
         $this->actingAs($this->ana)
             ->postJson('/amigo-secreto/ver-tu-amigo/consumibles', ['nombre' => 'Café', 'valor' => 5])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'El tope de consumibles del evento es US$ 10,00. Te quedan US$ 4,00 disponibles.');
+            ->assertJsonPath('message', 'El presupuesto del evento es US$ 10,00. Te quedan US$ 4,00 disponibles para consumibles.');
 
         $this->assertDatabaseCount('consumable_gifts', 1);
     }

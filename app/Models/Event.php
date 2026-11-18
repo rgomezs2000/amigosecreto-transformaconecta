@@ -39,6 +39,8 @@ class Event extends Model
         'started_at',
         'suspended_at',
         'postponed_at',
+        'invitations_sent_at',
+        'finalized_at',
         'min_value',
         'max_value',
         'consumable_value_cap',
@@ -60,6 +62,8 @@ class Event extends Model
             'started_at' => 'datetime',
             'suspended_at' => 'datetime',
             'postponed_at' => 'datetime',
+            'invitations_sent_at' => 'datetime',
+            'finalized_at' => 'datetime',
             'min_value' => 'decimal:2',
             'max_value' => 'decimal:2',
             'consumable_value_cap' => 'decimal:2',
@@ -71,7 +75,16 @@ class Event extends Model
     public function participants(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'event_participants')
-            ->withPivot(['status', 'confirmed_at', 'notes'])
+            ->withPivot([
+                'status',
+                'confirmed_at',
+                'notes',
+                'invitation_token',
+                'invited_at',
+                'responded_at',
+                'status_reason',
+                'status_changed_at',
+            ])
             ->withTimestamps();
     }
 
@@ -101,6 +114,11 @@ class Event extends Model
         return $this->hasManyThrough(ConsumableGift::class, Assignment::class);
     }
 
+    public function wishItems(): HasMany
+    {
+        return $this->hasMany(WishItem::class);
+    }
+
     public function auditLogs(): HasMany
     {
         return $this->hasMany(AuditLog::class);
@@ -109,10 +127,16 @@ class Event extends Model
     public function scopeOpen(Builder $query): Builder
     {
         return $query->whereIn('status', [
-            EventStatus::Registration->value,
-            EventStatus::DrawEnabled->value,
-            EventStatus::Drawn->value,
+            EventStatus::Registration,
+            EventStatus::DrawEnabled,
+            EventStatus::Drawn,
         ]);
+    }
+
+    /** Presupuesto máximo por regalo, en USD. */
+    public function budget(): ?float
+    {
+        return $this->max_value !== null ? (float) $this->max_value : null;
     }
 
     public function isDrawEnabled(): bool
@@ -167,6 +191,56 @@ class Event extends Model
     }
 
     /**
+     * ¿Hoy es el día del intercambio (o ya pasó)? La gran revelación solo se
+     * abre a partir de la fecha exacta del evento.
+     */
+    public function isRevealDay(): bool
+    {
+        if ($this->exchange_at === null) {
+            return false;
+        }
+
+        return $this->exchange_at->copy()->startOfDay()->lte(now()->startOfDay());
+    }
+
+    /** La fecha del intercambio ya pasó: el evento queda finalizado. */
+    public function shouldBeFinalized(): bool
+    {
+        if ($this->exchange_at === null || $this->status === EventStatus::Closed) {
+            return false;
+        }
+
+        if (! in_array($this->status, [EventStatus::Drawn, EventStatus::Revealed], true)) {
+            return false;
+        }
+
+        return $this->exchange_at->copy()->startOfDay()->lt(now()->startOfDay());
+    }
+
+    /** Participaciones en espera de respuesta. */
+    public function pendingParticipationsCount(): int
+    {
+        return $this->participations()
+            ->where('status', ParticipantStatus::Pending->value)
+            ->count();
+    }
+
+    /** Participaciones activas (las que entran al sorteo). */
+    public function activeParticipationsCount(): int
+    {
+        return $this->participations()
+            ->where('status', ParticipantStatus::Active->value)
+            ->count();
+    }
+
+    /** El evento se puede iniciar si no queda nadie en espera. */
+    public function canStart(): bool
+    {
+        return $this->pendingParticipationsCount() === 0
+            && $this->activeParticipationsCount() >= 2;
+    }
+
+    /**
      * Etiqueta visible en las tarjetas del módulo de eventos.
      */
     public function statusLabel(): string
@@ -181,6 +255,10 @@ class Event extends Model
 
         if (in_array($this->status, [EventStatus::Draft, EventStatus::Registration], true)) {
             return 'Programado';
+        }
+
+        if ($this->status->isFinished()) {
+            return 'Finalizado';
         }
 
         return 'En curso';

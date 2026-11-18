@@ -22,6 +22,7 @@
         var eliminarVariosUrl = $config.attr('data-url-eliminar-varios');
         var indexUrl = $config.attr('data-url-index');
         var loginExisteUrl = $config.attr('data-url-login-existe');
+        var solicitudUrl = $config.attr('data-url-solicitud');
         var token = $('#usuarios-csrf').val();
 
         var formModalElement = document.getElementById('modal-user-form');
@@ -34,8 +35,11 @@
         var $emailError = $('#usuarios-email-error');
         var $usernameError = $('#usuarios-username-error');
         var $roleError = $('#usuarios-role-error');
+        var $solicitudEstado = $('#usuarios-solicitud-estado');
         var usernameAvailable = true;
         var usernameTimer = null;
+        var solicitudTimer = null;
+        var solicitudBloqueada = false;
 
         if (formModalElement) {
             formModalElement.addEventListener('shown.bs.modal', function () {
@@ -147,6 +151,11 @@
         });
 
         function checkUsername() {
+            if ($username.prop('disabled')) {
+                usernameAvailable = true;
+                return;
+            }
+
             var login = $.trim($username.val());
             var ignore = $('#usuarios-form-id').val();
 
@@ -162,6 +171,12 @@
                 ignore: ignore || undefined,
                 admin: 1
             }).done(function (response) {
+                if ($username.prop('disabled')) {
+                    usernameAvailable = true;
+                    $usernameError.text('').removeAttr('data-kind');
+                    return;
+                }
+
                 usernameAvailable = !!response.available;
                 $usernameError
                     .attr('data-kind', response.available ? 'ok' : 'error')
@@ -181,7 +196,85 @@
             window.clearTimeout(usernameTimer);
             $usernameError.text('');
             usernameTimer = window.setTimeout(checkUsername, 450);
+            programarBusquedaSolicitud();
         });
+
+        $email.on('blur', buscarSolicitud);
+        $email.on('input', programarBusquedaSolicitud);
+
+        function usuarioProfile() {
+            return $('#usuarios-role option[data-slug="usuario"]').first();
+        }
+
+        function bloquearFormularioPorSolicitud(solicitud, message) {
+            $name.val(solicitud.name || '');
+            $email.val(solicitud.email || '');
+            $username.val(solicitud.username || '');
+
+            var profile = usuarioProfile();
+
+            if (profile.length) {
+                $role.val(profile.val());
+            }
+
+            usernameAvailable = true;
+            $name.add($email).add($username).add($role).prop('disabled', true);
+            $('#modal-user-form-title').text('Formalizar registro');
+            $('#form-user input[name="solicitud"]').remove();
+            $('#form-user').append('<input type="hidden" name="solicitud" value="' + solicitud.id + '">');
+            $solicitudEstado.attr('data-kind', 'ok').text(message || 'Solicitud de registro encontrada.');
+        }
+
+        function buscarSolicitud() {
+            var email = $.trim($email.val()).toLowerCase();
+            var username = $.trim($username.val()).toLowerCase();
+
+            if ($('#usuarios-form-id').val() || (!email && !username) || $email.prop('disabled')) {
+                return;
+            }
+
+            if (!solicitudUrl) {
+                return;
+            }
+
+            $.getJSON(solicitudUrl, { email: email, username: username })
+                .done(function (response) {
+                    if (!response || !response.found) {
+                        if (!solicitudBloqueada) {
+                            $solicitudEstado.text('').removeAttr('data-kind');
+                        }
+
+                        return;
+                    }
+
+                    if (response.blocked) {
+                        solicitudBloqueada = true;
+                        $solicitudEstado
+                            .attr('data-kind', 'error')
+                            .text('La solicitud ya está tomada por ' + (response.taken_by || 'otro administrador') + '.');
+                        $emailError
+                            .attr('data-kind', 'error')
+                            .text('Ese correo o usuario pertenece a una solicitud tomada por otro administrador.');
+                        return;
+                    }
+
+                    solicitudBloqueada = false;
+                    bloquearFormularioPorSolicitud(
+                        response.solicitud || {},
+                        response.message || 'Solicitud encontrada y tomada por ti.'
+                    );
+                })
+                .fail(function () {
+                    $solicitudEstado
+                        .attr('data-kind', 'error')
+                        .text('No se pudo comprobar la solicitud de registro.');
+                });
+        }
+
+        function programarBusquedaSolicitud() {
+            window.clearTimeout(solicitudTimer);
+            solicitudTimer = window.setTimeout(buscarSolicitud, 500);
+        }
 
         function clearErrors() {
             $nameError.text('').removeAttr('data-kind');
@@ -193,7 +286,7 @@
         function openForm(user) {
             $('#usuarios-form-id').val(user ? user.id : '');
             $('#modal-user-form-title').text(user ? 'Modificar usuario' : 'Nuevo usuario');
-            $('#usuarios-name, #usuarios-email, #usuarios-username').prop('readonly', false);
+            $('#usuarios-name, #usuarios-email, #usuarios-username').prop('readonly', false).prop('disabled', false);
             $role.prop('disabled', false);
             $('#form-user input[name="solicitud"]').remove();
             $name.val(user ? user.name : '');
@@ -201,6 +294,9 @@
             $username.val(user ? user.username : '');
             $role.val(user ? user.profile_id : '');
             usernameAvailable = true;
+            solicitudBloqueada = false;
+            window.clearTimeout(solicitudTimer);
+            $solicitudEstado.text('').removeAttr('data-kind');
             clearErrors();
 
             if (formModal) {
@@ -217,24 +313,13 @@
         var $solicitud = $('#usuarios-solicitud');
 
         if ($solicitud.length) {
-            openForm({
+            openForm(null);
+            bloquearFormularioPorSolicitud({
+                id: $solicitud.attr('data-id'),
                 name: $solicitud.attr('data-name'),
                 email: $solicitud.attr('data-email'),
-                username: $solicitud.attr('data-username'),
-                profile_id: ''
-            });
-
-            $('#modal-user-form-title').text('Formalizar registro');
-            $('#usuarios-name, #usuarios-email, #usuarios-username').prop('readonly', true);
-            $('#form-user').append('<input type="hidden" name="solicitud" value="' + $solicitud.attr('data-id') + '">');
-
-            // El prerregistro siempre se formaliza como Usuario, nunca como
-            // administrador. El rol queda visible pero deshabilitado.
-            var usuarioProfile = $('#usuarios-role option[data-slug="usuario"]').first();
-
-            if (usuarioProfile.length) {
-                $role.val(usuarioProfile.val()).prop('disabled', true);
-            }
+                username: $solicitud.attr('data-username')
+            }, 'Solicitud de registro abierta. Revisa los datos y guarda para crear la cuenta.');
         }
 
         function showFieldError($field, $error, message) {
@@ -253,6 +338,13 @@
             var username = $.trim($username.val());
             var profileId = $role.val();
             var editing = !!id;
+
+            if (solicitudBloqueada) {
+                $solicitudEstado
+                    .attr('data-kind', 'error')
+                    .text('La solicitud está tomada por otro administrador. No puedes crear este usuario desde aquí.');
+                return;
+            }
 
             clearErrors();
 

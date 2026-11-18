@@ -10,6 +10,7 @@ use App\Models\ChatReaction;
 use App\Models\ChatReport;
 use App\Models\Conversation;
 use App\Models\Event;
+use App\Models\GroupBan;
 use App\Models\GroupInvitation;
 use App\Models\Module;
 use App\Models\Notification;
@@ -108,6 +109,62 @@ class ChatTest extends TestCase
 
         $this->assertTrue($message->is_moderation);
         $this->assertSame($admin->id, $message->user_id);
+    }
+
+    public function test_el_administrador_miembro_puede_escribir_en_modo_moderacion(): void
+    {
+        $admin = $this->userWithChat('Admin', UserRole::Admin);
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+
+        $group = Conversation::create([
+            'name' => 'Grupo moderado',
+            'type' => 'group',
+            'created_by' => $admin->id,
+        ]);
+        $group->users()->attach([$admin->id, $ana->id]);
+
+        // Aunque sea miembro, al escribir desde moderación el mensaje se
+        // marca como moderación y lleva el nombre real del moderador.
+        $this->actingAs($admin)
+            ->postJson('/chat/'.$group->id.'/mensajes', [
+                'body' => 'Aviso de moderación',
+                'moderation' => 1,
+            ])
+            ->assertOk()
+            ->assertJsonPath('message.is_moderation', true)
+            ->assertJsonPath('message.sender', 'Admin');
+
+        $message = ChatMessage::query()->where('conversation_id', $group->id)->latest('id')->firstOrFail();
+
+        $this->assertTrue($message->is_moderation);
+        $this->assertSame($admin->id, $message->user_id);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$group->id.'/mensajes')
+            ->assertOk()
+            ->assertJsonPath('messages.0.body', 'Aviso de moderación')
+            ->assertJsonPath('messages.0.is_moderation', true)
+            ->assertJsonPath('messages.0.sender', 'Admin')
+            ->assertJsonPath('messages.0.sender_is_admin', false)
+            ->assertJsonPath('messages.0.sender_is_system', false);
+
+        // Sin el modo moderación, el mismo administrador escribe como un
+        // participante normal.
+        $this->actingAs($admin)
+            ->postJson('/chat/'.$group->id.'/mensajes', [
+                'body' => 'Mensaje normal',
+            ])
+            ->assertOk()
+            ->assertJsonPath('message.is_moderation', false);
+
+        // Un participante no puede activar el modo moderación.
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$group->id.'/mensajes', [
+                'body' => 'Intento',
+                'moderation' => 1,
+            ])
+            ->assertOk()
+            ->assertJsonPath('message.is_moderation', false);
     }
 
     public function test_el_administrador_ve_grupos_sin_participar(): void
@@ -1147,7 +1204,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('unread', 1);
     }
 
-    public function test_bloquear_corta_el_acceso_y_desbloquear_lo_devuelve(): void
+    public function test_bloquear_bloquea_el_mensaje_pero_permite_abrir_la_conversacion(): void
     {
         $ana = $this->userWithChat('Ana', UserRole::Participant);
         $luis = $this->userWithChat('Luis', UserRole::Participant);
@@ -1162,19 +1219,32 @@ class ChatTest extends TestCase
             ->assertOk()
             ->assertJsonPath('users.0.blocked', true);
 
-        // Bloqueado: no se puede abrir ni entrar al chat.
-        $this->actingAs($ana)
+        // Se puede abrir y leer el chat, pero no escribir.
+        $opened = $this->actingAs($ana)
             ->postJson('/chat/abrir', ['user_id' => $luis->id])
-            ->assertStatus(422);
+            ->assertOk()
+            ->assertJsonPath('conversation.blocked', true);
+
+        $conversationId = $opened->json('conversation.id');
 
         $this->actingAs($luis)
             ->postJson('/chat/abrir', ['user_id' => $ana->id])
-            ->assertStatus(422);
+            ->assertOk()
+            ->assertJsonPath('conversation.blocked_by', true);
 
         $this->actingAs($ana)
-            ->getJson('/chat/resumen')
-            ->assertOk()
-            ->assertJsonCount(0, 'conversations');
+            ->postJson('/chat/'.$conversationId.'/mensajes', ['body' => 'No debería enviarse'])
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'Has bloqueado a Luis. Desbloquea para enviar mensajes.');
+
+        $this->actingAs($luis)
+            ->postJson('/chat/'.$conversationId.'/mensajes', ['body' => 'No debería enviarse'])
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'Ana te ha bloqueado. No puedes enviarle mensajes.');
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversationId.'/mensajes')
+            ->assertOk();
 
         // El bloqueado tampoco puede reportar mientras dure el bloqueo.
         $this->actingAs($ana)
@@ -1187,8 +1257,13 @@ class ChatTest extends TestCase
             ->assertJsonPath('blocked', false);
 
         $this->actingAs($ana)
-            ->postJson('/chat/abrir', ['user_id' => $luis->id])
+            ->postJson('/chat/'.$conversationId.'/mensajes', ['body' => 'Ya se puede enviar'])
             ->assertOk();
+
+        $this->actingAs($ana)
+            ->postJson('/chat/abrir', ['user_id' => $luis->id])
+            ->assertOk()
+            ->assertJsonPath('conversation.blocked', false);
 
         $this->actingAs($ana)
             ->getJson('/chat/resumen')
@@ -1196,7 +1271,7 @@ class ChatTest extends TestCase
             ->assertJsonPath('users.0.blocked', false);
     }
 
-    public function test_estando_bloqueado_no_se_pueden_leer_los_mensajes(): void
+    public function test_estando_bloqueado_se_puede_leer_pero_no_escribir(): void
     {
         $ana = $this->userWithChat('Ana', UserRole::Participant);
         $luis = $this->userWithChat('Luis', UserRole::Participant);
@@ -1216,7 +1291,163 @@ class ChatTest extends TestCase
 
         $this->actingAs($ana)
             ->getJson('/chat/'.$conversation->id.'/mensajes')
-            ->assertForbidden();
+            ->assertOk()
+            ->assertJsonPath('messages.0.body', 'Hola');
+
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/mensajes', ['body' => 'Respuesta'])
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'Luis te ha bloqueado. No puedes enviarle mensajes.');
+    }
+
+    public function test_un_bloqueo_entre_miembros_avisa_en_el_grupo_sin_expulsarlos(): void
+    {
+        $owner = $this->userWithChat('Pedro', UserRole::Participant);
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $group = Conversation::create([
+            'name' => 'Grupo de tres',
+            'type' => 'group',
+            'created_by' => $owner->id,
+        ]);
+        $group->users()->attach([$owner->id, $ana->id, $luis->id]);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/usuarios/'.$luis->id.'/bloquear')
+            ->assertOk();
+
+        // El dueño no es parte del bloqueo: nadie sale del grupo.
+        $this->assertTrue($group->fresh('users')->users->contains('id', $ana->id));
+        $this->assertTrue($group->fresh('users')->users->contains('id', $luis->id));
+        $this->assertFalse(GroupBan::query()->where('conversation_id', $group->id)->exists());
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$group->id.'/mensajes')
+            ->assertOk()
+            ->assertJsonPath('conversation.group_blocks.0.name', 'Luis')
+            ->assertJsonPath('conversation.group_blocks.0.blocked', true);
+
+        $this->actingAs($luis)
+            ->getJson('/chat/'.$group->id.'/mensajes')
+            ->assertOk()
+            ->assertJsonPath('conversation.group_blocks.0.name', 'Ana')
+            ->assertJsonPath('conversation.group_blocks.0.blocked_by', true);
+    }
+
+    public function test_un_bloqueo_entre_dueno_y_miembro_lo_saca_del_grupo_y_de_la_sala(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        foreach ([false, true] as $closed) {
+            $group = Conversation::create([
+                'name' => $closed ? null : 'Grupo con bloqueo',
+                'type' => 'group',
+                'created_by' => $ana->id,
+                'is_closed' => $closed,
+            ]);
+            $group->users()->attach([$ana->id, $luis->id]);
+
+            $this->actingAs($ana)
+                ->postJson('/chat/usuarios/'.$luis->id.'/bloquear')
+                ->assertOk();
+
+            $this->assertFalse($group->fresh('users')->users->contains('id', $luis->id));
+            $this->assertTrue(GroupBan::query()
+                ->where('conversation_id', $group->id)
+                ->where('user_id', $luis->id)
+                ->where('reason', 'Bloqueo entre miembros')
+                ->exists());
+
+            $this->actingAs($ana)
+                ->deleteJson('/chat/usuarios/'.$luis->id.'/bloquear')
+                ->assertOk();
+        }
+    }
+
+    public function test_si_el_miembro_bloquea_al_dueno_tambien_es_expulsado(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $group = Conversation::create([
+            'name' => 'Grupo con dueño',
+            'type' => 'group',
+            'created_by' => $ana->id,
+        ]);
+        $group->users()->attach([$ana->id, $luis->id]);
+
+        $this->actingAs($luis)
+            ->postJson('/chat/usuarios/'.$ana->id.'/bloquear')
+            ->assertOk();
+
+        $this->assertFalse($group->fresh('users')->users->contains('id', $luis->id));
+        $this->assertTrue(GroupBan::query()
+            ->where('conversation_id', $group->id)
+            ->where('user_id', $luis->id)
+            ->where('reason', 'Bloqueo entre miembros')
+            ->exists());
+    }
+
+    public function test_bloquear_a_un_destinatario_lo_saca_de_la_difusion(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $broadcast = Conversation::create([
+            'type' => 'broadcast',
+            'created_by' => $ana->id,
+        ]);
+        $broadcast->users()->attach($ana->id);
+        $broadcast->broadcastRecipients()->attach($luis->id);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/usuarios/'.$luis->id.'/bloquear')
+            ->assertOk();
+
+        $this->assertFalse($broadcast->broadcastRecipients()->whereKey($luis->id)->exists());
+    }
+
+    public function test_no_se_pueden_agregar_personas_bloqueadas_a_grupos_salas_ni_difusiones(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/usuarios/'.$luis->id.'/bloquear')
+            ->assertOk();
+
+        $this->actingAs($ana)
+            ->postJson('/chat/grupo', [
+                'name' => 'Grupo con bloqueado',
+                'user_ids' => [$luis->id],
+            ])
+            ->assertStatus(422);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/sala', [
+                'user_ids' => [$luis->id, $this->userWithChat('Pedro', UserRole::Participant)->id],
+            ])
+            ->assertStatus(422);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/broadcast', [
+                'user_ids' => [$luis->id],
+            ])
+            ->assertStatus(422);
+
+        $room = Conversation::create([
+            'name' => null,
+            'type' => 'group',
+            'created_by' => $ana->id,
+            'is_closed' => true,
+        ]);
+        $room->users()->attach($ana->id);
+
+        $this->actingAs($ana)
+            ->postJson('/chat/sala/'.$room->id.'/miembros', ['user_id' => $luis->id])
+            ->assertStatus(422);
     }
 
     public function test_reportar_a_un_usuario_avisa_al_beneficiario_y_a_la_administracion(): void
@@ -1599,6 +1830,185 @@ class ChatTest extends TestCase
             ->assertSee('Fijar mensaje')
             ->assertSee('Desfijar mensaje')
             ->assertDontSee('Borrar de mi lado');
+    }
+
+    public function test_el_chat_incluye_la_barra_de_busqueda_y_el_menu_del_boton(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+
+        $this->actingAs($ana)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertSee('id="chat-search"', false)
+            ->assertSee('id="chat-search-input"', false)
+            ->assertSee('id="chat-search-close"', false)
+            ->assertSee('id="chat-search-results"', false)
+            ->assertSee('id="chat-more-menu"', false)
+            ->assertSee('data-more-action="search"', false)
+            ->assertSee('Buscar');
+    }
+
+    public function test_la_busqueda_del_chat_encuentra_texto_en_todo_el_historial(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $viejo = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $luis->id,
+            'body' => 'El amigo secreto trajo un regalo',
+        ]);
+        $viejo->forceFill(['created_at' => now()->subDays(2)])->save();
+
+        $nuevo = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $ana->id,
+            'body' => 'Gracias por el regalo del amigo secreto',
+        ]);
+
+        ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $luis->id,
+            'body' => 'Un mensaje sobre otra cosa',
+        ]);
+
+        // Un mensaje eliminado no debe aparecer aunque conserve el texto en la
+        // base: para el usuario ya no existe.
+        $eliminado = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $luis->id,
+            'body' => 'Amigo secreto eliminado',
+        ]);
+        $eliminado->update(['deleted_at' => now()]);
+
+        $response = $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/buscar?q=amigo+secreto')
+            ->assertOk()
+            ->assertJsonPath('total', 2)
+            ->assertJsonCount(2, 'items')
+            ->assertJsonPath('limited', false)
+            ->assertJsonPath('items.0.id', $nuevo->id)
+            ->assertJsonPath('items.1.id', $viejo->id)
+            ->assertJsonPath('items.1.sender', 'Luis');
+
+        $this->assertStringContainsString('amigo secreto', mb_strtolower($response->json('items.0.body')));
+
+        // Menos de dos letras no consulta ni devuelve el historial completo.
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/buscar?q=a')
+            ->assertOk()
+            ->assertJsonCount(0, 'items')
+            ->assertJsonPath('total', 0);
+    }
+
+    public function test_la_busqueda_respeta_lo_vaciado_y_solo_entra_quien_participa(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+        $pedro = $this->userWithChat('Pedro', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $mensaje = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $luis->id,
+            'body' => 'Hola desde el chat',
+        ]);
+        $mensaje->forceFill(['created_at' => now()->subMinutes(10)])->save();
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/buscar?q=hola')
+            ->assertOk()
+            ->assertJsonCount(1, 'items');
+
+        // Alguien ajeno a la conversación no puede leer ni buscar su historial.
+        $this->actingAs($pedro)
+            ->getJson('/chat/'.$conversation->id.'/buscar?q=hola')
+            ->assertForbidden();
+
+        // Ana vació el chat de su lado: la búsqueda tampoco resucita el texto.
+        $this->actingAs($ana)
+            ->postJson('/chat/'.$conversation->id.'/vaciar')
+            ->assertOk();
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/buscar?q=hola')
+            ->assertOk()
+            ->assertJsonCount(0, 'items')
+            ->assertJsonPath('total', 0);
+
+        // Luis sigue viendo su historial: el vaciado es de cada lado.
+        $this->actingAs($luis)
+            ->getJson('/chat/'.$conversation->id.'/buscar?q=hola')
+            ->assertOk()
+            ->assertJsonCount(1, 'items');
+    }
+
+    public function test_la_ventana_de_contexto_abre_un_mensaje_fuera_del_historial_reciente(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+        $luis = $this->userWithChat('Luis', UserRole::Participant);
+
+        $conversation = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $conversation->users()->attach([$ana->id, $luis->id]);
+
+        $antiguo = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $luis->id,
+            'body' => 'Mensaje antiguo que quiero encontrar',
+        ]);
+
+        // Suficientes mensajes para que el antiguo quede fuera de los últimos
+        // cien que carga la conversación al abrirse.
+        for ($i = 0; $i < 105; $i++) {
+            ChatMessage::create([
+                'conversation_id' => $conversation->id,
+                'user_id' => $luis->id,
+                'body' => 'Relleno '.$i,
+            ]);
+        }
+
+        $recientes = $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/mensajes')
+            ->assertOk()
+            ->json('messages');
+
+        $this->assertNotContains($antiguo->id, array_column($recientes, 'id'));
+
+        $respuesta = $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/mensajes?focus_id='.$antiguo->id)
+            ->assertOk()
+            ->assertJsonPath('delta', false)
+            ->assertJsonPath('conversation.id', $conversation->id)
+            ->assertJsonPath('new_count', 0);
+
+        $ids = array_column($respuesta->json('messages'), 'id');
+
+        $this->assertContains($antiguo->id, $ids);
+        $this->assertSame(count($ids), count(array_unique($ids)));
+
+        $ordenados = $ids;
+        sort($ordenados);
+
+        $this->assertSame($ordenados, $ids);
+
+        // El contexto no puede saltar a un mensaje de otra conversación.
+        $otra = Conversation::create(['type' => 'direct', 'created_by' => $ana->id]);
+        $otra->users()->attach([$ana->id, $luis->id]);
+
+        $ajeno = ChatMessage::create([
+            'conversation_id' => $otra->id,
+            'user_id' => $luis->id,
+            'body' => 'Mensaje de otra conversación',
+        ]);
+
+        $this->actingAs($ana)
+            ->getJson('/chat/'.$conversation->id.'/mensajes?focus_id='.$ajeno->id)
+            ->assertNotFound();
     }
 
     public function test_vaciar_limpia_el_chat_pero_la_conversacion_sigue_en_la_lista(): void

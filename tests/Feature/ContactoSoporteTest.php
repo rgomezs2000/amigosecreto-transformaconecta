@@ -176,6 +176,28 @@ class ContactoSoporteTest extends TestCase
             ->assertJsonPath('data.0.reason', 'Caso de Ana');
     }
 
+    public function test_el_usuario_puede_crear_un_caso_de_usuarios_sin_chat(): void
+    {
+        $user = $this->usuario('Ana');
+
+        $this->actingAs($user)
+            ->get('/ayuda/contacto-soporte')
+            ->assertOk()
+            ->assertSee('<option value="registro">Usuarios</option>', false);
+
+        $response = $this->actingAs($user)->post('/contacto-soporte/reportes', [
+            'type' => ChatReport::TYPE_USER_REGISTRATION,
+            'reason' => 'Necesito una cuenta',
+            'message' => 'No puedo acceder con mi cuenta.',
+        ])->assertOk()->assertJsonPath('conversation_id', null);
+
+        $report = ChatReport::query()->latest('id')->firstOrFail();
+
+        $response->assertJsonPath('ticket', $report->id);
+        $this->assertSame(ChatReport::TYPE_USER_REGISTRATION, $report->type);
+        $this->assertDatabaseMissing('chat_conversations', ['report_id' => $report->id]);
+    }
+
     public function test_el_usuario_descarga_sus_adjuntos_pero_no_los_de_otro(): void
     {
         $ana = $this->usuario('Ana');

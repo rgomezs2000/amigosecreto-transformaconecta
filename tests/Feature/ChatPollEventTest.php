@@ -362,7 +362,7 @@ class ChatPollEventTest extends TestCase
             ->assertOk()
             ->assertJsonPath('message.type', 'event')
             ->assertJsonPath('message.event.name', 'Amigo secreto 2026')
-            ->assertJsonPath('message.event.status', 'Inscripción');
+            ->assertJsonPath('message.event.status', 'Unión');
 
         $message = ChatMessage::query()->where('type', 'event')->firstOrFail();
         $this->assertSame($event->id, $message->event_id);

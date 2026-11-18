@@ -12,7 +12,7 @@
         body {
             background-color: #F3F4F6;
             color: #334155;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            font-family: Arial, 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 16px;
             line-height: 1.6;
             -webkit-text-size-adjust: 100%;
@@ -83,7 +83,7 @@
                                     <tr>
                                         <td align="center" bgcolor="#2F6F62" style="border-radius:10px;background-color:#2F6F62;">
                                             <a href="{{ $action['url'] }}" target="_blank" rel="noopener"
-                                               style="display:inline-block;padding:15px 26px;color:#FFFFFF;font-family:'Inter',Arial,sans-serif;font-size:16px;font-weight:700;line-height:1.25;text-decoration:none;border-radius:10px;mso-padding-alt:15px 26px;">
+                                               style="display:inline-block;padding:15px 26px;color:#FFFFFF;font-family:Arial,'Montserrat',sans-serif;font-size:16px;font-weight:700;line-height:1.25;text-decoration:none;border-radius:10px;mso-padding-alt:15px 26px;">
                                                 {{ $action['label'] }}
                                             </a>
                                         </td>
@@ -112,3 +112,4 @@
     </table>
 </body>
 </html>
+

@@ -8,8 +8,12 @@ use App\Http\Controllers\DinamicaController;
 use App\Http\Controllers\EventoReinicioController;
 use App\Http\Controllers\EventosController;
 use App\Http\Controllers\GoogleAuthController;
+use App\Http\Controllers\GranRevelacionController;
 use App\Http\Controllers\GroupModerationController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\IntercambioPistasController;
+use App\Http\Controllers\InvitacionController;
+use App\Http\Controllers\ListaDeseosController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\LogoutController;
 use App\Http\Controllers\MatrizPerfilesController;
@@ -278,11 +282,22 @@ Route::post('/chat/grupo', [ChatController::class, 'grupo'])
     ->middleware('auth')
     ->name('chat.grupo');
 
+// Sala cerrada: grupo con usuarios elegidos, sin enlace de invitación.
+Route::post('/chat/sala', [ChatController::class, 'sala'])
+    ->middleware('auth')
+    ->name('chat.sala');
+
 // Reenvío de mensajes: destinos posibles (grupos, administradores, amigos
 // secretos y personas) y envío del mensaje a los elegidos.
 Route::get('/chat/destinatarios', [ChatController::class, 'destinatarios'])
     ->middleware('auth')
     ->name('chat.destinatarios');
+
+// Sala de difusión: conversación del dueño con destinatarios que reciben
+// copia en su chat individual sin pertenecer a la conversación.
+Route::post('/chat/broadcast', [ChatController::class, 'crearBroadcast'])
+    ->middleware('auth')
+    ->name('chat.broadcast.crear');
 
 Route::post('/chat/mensajes/{message}/reenviar', [ChatController::class, 'reenviar'])
     ->middleware('auth')
@@ -291,6 +306,11 @@ Route::post('/chat/mensajes/{message}/reenviar', [ChatController::class, 'reenvi
 Route::get('/chat/{conversation}/mensajes', [ChatController::class, 'mensajes'])
     ->middleware('auth')
     ->name('chat.mensajes');
+
+// Búsqueda en el historial de la conversación (barra bajo la cabecera).
+Route::get('/chat/{conversation}/buscar', [ChatController::class, 'buscar'])
+    ->middleware('auth')
+    ->name('chat.buscar');
 
 // Encuestas y eventos adjuntos: solo en chats directos y salas de grupo.
 Route::post('/chat/{conversation}/encuestas', [ChatController::class, 'crearEncuesta'])
@@ -367,10 +387,18 @@ Route::delete('/chat/{conversation}/mensaje-fijado', [ChatController::class, 'de
     ->middleware('auth')
     ->name('chat.mensaje.desfijar');
 
+Route::delete('/chat/{conversation}/mensaje-fijado/{message}', [ChatController::class, 'desfijarMensaje'])
+    ->middleware('auth')
+    ->name('chat.mensaje.desfijar.uno');
+
 // Acciones por persona desde la pestaña Usuarios.
 Route::post('/chat/usuarios/{user}/silenciar', [ChatController::class, 'silenciarUsuario'])
     ->middleware('auth')
     ->name('chat.usuarios.silenciar');
+
+Route::post('/chat/usuarios/{user}/conversacion', [ChatController::class, 'abrirConversacion'])
+    ->middleware('auth')
+    ->name('chat.usuarios.conversacion');
 
 Route::post('/chat/usuarios/{user}/reportar', [ChatController::class, 'reportarUsuario'])
     ->middleware('auth')
@@ -395,6 +423,10 @@ Route::post('/chat/{conversation}/reportar-conversacion', [ChatController::class
 Route::post('/chat/{conversation}/expulsar/{user}', [ChatController::class, 'expulsar'])
     ->middleware('auth')
     ->name('chat.expulsar');
+
+Route::post('/chat/sala/{conversation}/miembros', [ChatController::class, 'agregarMiembroSala'])
+    ->middleware('auth')
+    ->name('chat.sala.miembros.agregar');
 
 Route::delete('/chat/{conversation}', [ChatController::class, 'eliminarConversacion'])
     ->middleware('auth')
@@ -463,6 +495,10 @@ Route::post('/chat/mensajes/{message}/reaccionar', [ChatController::class, 'reac
     ->middleware('auth')
     ->name('chat.reaccionar');
 
+Route::post('/chat/mensajes/{message}/favorito', [ChatController::class, 'favoritoMensaje'])
+    ->middleware('auth')
+    ->name('chat.mensaje.favorito');
+
 Route::post('/chat/mensajes/{message}/reportar', [ChatController::class, 'reportar'])
     ->middleware('auth')
     ->name('chat.reportar');
@@ -486,6 +522,87 @@ Route::get('/chat/{conversation}/media', [ChatController::class, 'media'])
 Route::get('/chat/{conversation}/perfil', [ChatController::class, 'perfil'])
     ->middleware('auth')
     ->name('chat.perfil');
+
+Route::post('/chat/{conversation}/grupos/agregar', [ChatController::class, 'agregarAGrupos'])
+    ->middleware('auth')
+    ->name('chat.grupos.agregar');
+
+// Invitación personal al evento. El enlace es público: sin sesión manda al
+// acceso y, después de entrar, vuelve a la invitación.
+Route::get('/invitacion/{token}', [InvitacionController::class, 'abrir'])
+    ->name('invitacion.abrir');
+
+Route::get('/invitacion/{token}/datos', [InvitacionController::class, 'datos'])
+    ->middleware('auth')
+    ->name('invitacion.datos');
+
+Route::post('/invitacion/{token}/aceptar', [InvitacionController::class, 'aceptar'])
+    ->middleware('auth')
+    ->name('invitacion.aceptar');
+
+Route::post('/invitacion/{token}/rechazar', [InvitacionController::class, 'rechazar'])
+    ->middleware('auth')
+    ->name('invitacion.rechazar');
+
+// Retiro voluntario del participante desde «Ver tu amigo».
+Route::post('/amigo-secreto/ver-tu-amigo/retirar', [InvitacionController::class, 'retirar'])
+    ->middleware('auth')
+    ->name('ver-tu-amigo.retirar');
+
+// Lista de deseos del participante: se activa al aceptar la invitación.
+// La página la sirve el enrutador de módulos; aquí quedan sus acciones.
+Route::get('/lista-de-deseos/datos', [ListaDeseosController::class, 'datos'])
+    ->middleware('auth')
+    ->name('lista-deseos.datos');
+
+Route::post('/lista-de-deseos', [ListaDeseosController::class, 'crear'])
+    ->middleware('auth')
+    ->name('lista-deseos.crear');
+
+Route::get('/lista-de-deseos/{item}', [ListaDeseosController::class, 'ver'])
+    ->middleware('auth')
+    ->whereNumber('item')
+    ->name('lista-deseos.ver');
+
+Route::put('/lista-de-deseos/{item}', [ListaDeseosController::class, 'modificar'])
+    ->middleware('auth')
+    ->whereNumber('item')
+    ->name('lista-deseos.modificar');
+
+Route::delete('/lista-de-deseos/{item}', [ListaDeseosController::class, 'eliminar'])
+    ->middleware('auth')
+    ->whereNumber('item')
+    ->name('lista-deseos.eliminar');
+
+// Intercambio de pistas: dos pestañas (enviadas y recibidas).
+// La página la sirve el enrutador de módulos; aquí quedan sus acciones.
+Route::get('/intercambio-de-pistas/datos', [IntercambioPistasController::class, 'datos'])
+    ->middleware('auth')
+    ->name('intercambio-pistas.datos');
+
+Route::post('/intercambio-de-pistas', [IntercambioPistasController::class, 'crear'])
+    ->middleware('auth')
+    ->name('intercambio-pistas.crear');
+
+Route::get('/intercambio-de-pistas/{clue}', [IntercambioPistasController::class, 'ver'])
+    ->middleware('auth')
+    ->whereNumber('clue')
+    ->name('intercambio-pistas.ver');
+
+Route::put('/intercambio-de-pistas/{clue}', [IntercambioPistasController::class, 'modificar'])
+    ->middleware('auth')
+    ->whereNumber('clue')
+    ->name('intercambio-pistas.modificar');
+
+Route::delete('/intercambio-de-pistas/{clue}', [IntercambioPistasController::class, 'eliminar'])
+    ->middleware('auth')
+    ->whereNumber('clue')
+    ->name('intercambio-pistas.eliminar');
+
+// Gran revelación: se abre el día exacto del intercambio.
+Route::get('/gran-revelacion/datos', [GranRevelacionController::class, 'datos'])
+    ->middleware('auth')
+    ->name('gran-revelacion.datos');
 
 // Sorteo ciego del participante: descubrir, volver a ver y avanzar.
 // La página la sirve el enrutador de módulos; aquí quedan sus acciones.
@@ -562,6 +679,26 @@ Route::post('/eventos/{event}/iniciar', [EventosController::class, 'iniciar'])
     ->middleware('auth')
     ->name('eventos.iniciar');
 
+// Fase Unión: envío de invitaciones y gestión de la participación.
+Route::post('/eventos/{event}/invitar', [EventosController::class, 'invitar'])
+    ->middleware('auth')
+    ->name('eventos.invitar');
+
+Route::post('/eventos/{event}/participantes/{user}/invitar', [EventosController::class, 'invitarParticipante'])
+    ->middleware('auth')
+    ->whereNumber('user')
+    ->name('eventos.participantes.invitar');
+
+Route::post('/eventos/{event}/participantes/{user}/expulsar', [EventosController::class, 'expulsar'])
+    ->middleware('auth')
+    ->whereNumber('user')
+    ->name('eventos.participantes.expulsar');
+
+Route::post('/eventos/{event}/participantes/{user}/descartar', [EventosController::class, 'descartar'])
+    ->middleware('auth')
+    ->whereNumber('user')
+    ->name('eventos.participantes.descartar');
+
 Route::post('/eventos/{event}/suspender', [EventosController::class, 'suspender'])
     ->middleware('auth')
     ->name('eventos.suspender');
@@ -589,6 +726,10 @@ Route::post('/eventos/{event}/sorteo/reiniciar', [EventosController::class, 'rei
 Route::get('/usuarios/datos', [UsuariosController::class, 'datos'])
     ->middleware('auth')
     ->name('usuarios.datos');
+
+Route::get('/usuarios/solicitud', [UsuariosController::class, 'solicitud'])
+    ->middleware('auth')
+    ->name('usuarios.solicitud');
 
 Route::post('/usuarios', [UsuariosController::class, 'crear'])
     ->middleware('auth')

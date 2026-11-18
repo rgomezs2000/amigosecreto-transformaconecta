@@ -29,7 +29,10 @@
             listaDeseos: $config.attr('data-url-lista-deseos'),
             pistas: $config.attr('data-url-pistas'),
             obsequios: $config.attr('data-url-obsequios'),
-            consumibles: $config.attr('data-url-consumibles')
+            consumibles: $config.attr('data-url-consumibles'),
+            invitar: $config.attr('data-url-invitar'),
+            expulsar: $config.attr('data-url-expulsar'),
+            descartar: $config.attr('data-url-descartar')
         };
 
         var defaultEvent = String($config.attr('data-evento-actual') || '');
@@ -512,6 +515,125 @@
             obsequiosModal.addEventListener('hidden.bs.modal', function () {
                 destroyConsumibles();
             });
+        }
+
+        /* ---------- Fase Unión: invitar, descartar y expulsar ---------- */
+
+        function adminUrl(template, id) {
+            return String(template || '')
+                .replace('__EVENT__', encodeURIComponent(eventoActual()))
+                .replace('__ID__', encodeURIComponent(id));
+        }
+
+        function adminPost(url, data) {
+            return $.ajax({
+                url: url,
+                method: 'POST',
+                dataType: 'json',
+                data: $.extend({ _token: $config.attr('data-csrf'), evento: eventoActual() }, data || {})
+            });
+        }
+
+        function reloadTable() {
+            table.ajax.reload(null, false);
+        }
+
+        function copyLink(text) {
+            if (!text) {
+                return;
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text);
+                return;
+            }
+
+            var $temp = $('<textarea>').val(text).appendTo('body').select();
+            document.execCommand('copy');
+            $temp.remove();
+        }
+
+        participantsTable.on('click', '.btn-participant-link', function () {
+            copyLink($(this).data('url'));
+            window.AppDialog.success('Enlace personal copiado al portapapeles.');
+        });
+
+        participantsTable.on('click', '.btn-participant-invite', function () {
+            var id = $(this).data('id');
+
+            adminPost(adminUrl(urls.invitar, id), {})
+                .done(function (response) {
+                    if (response.invitation_url) {
+                        copyLink(response.invitation_url);
+                    }
+
+                    window.AppDialog.success('Invitación enviada. El enlace personal se copió al portapapeles.');
+                    reloadTable();
+                })
+                .fail(showError);
+        });
+
+        participantsTable.on('click', '.btn-participant-discard', function () {
+            var id = $(this).data('id');
+
+            window.AppDialog.prompt(
+                'Motivo por el que se descarta la invitación (opcional):',
+                function (reason) {
+                    window.AppDialog.confirm(
+                        '¿Desea descartar esta invitación? La persona ya no contará como pendiente.',
+                        function () {
+                            adminPost(adminUrl(urls.descartar, id), { reason: reason || '' })
+                                .done(function () {
+                                    reloadTable();
+                                })
+                                .fail(showError);
+                        }
+                    );
+                },
+                { title: 'Descartar invitación', required: false, maxlength: 1000 }
+            );
+        });
+
+        participantsTable.on('click', '.btn-participant-expel', function () {
+            var id = $(this).data('id');
+
+            expulsarParticipante(id);
+        });
+
+        // La ficha también permite expulsar al participante activo.
+        $(document).on('click', '.btn-ficha-expel', function () {
+            expulsarParticipante($(this).data('id'));
+        });
+
+        function expulsarParticipante(id) {
+            window.AppDialog.prompt(
+                'Motivo de la expulsión (obligatorio):',
+                function (reason) {
+                    if (!$.trim(reason)) {
+                        window.AppDialog.error('Escribe el motivo de la expulsión.');
+                        return;
+                    }
+
+                    window.AppDialog.confirm(
+                        '¿Desea expulsar al participante del evento?',
+                        function () {
+                            adminPost(adminUrl(urls.expulsar, id), { reason: reason })
+                                .done(function () {
+                                    var fichaModal = modalFor('modal-participante-ficha');
+
+                                    if (fichaModal) {
+                                        fichaModal.hide();
+                                    }
+
+                                    reloadTable();
+                                })
+                                .fail(showError);
+                        },
+                        { danger: true, confirmLabel: 'Expulsar' }
+                    );
+                },
+                { title: 'Expulsar participante', required: true, maxlength: 1000 }
+            );
         }
     });
 })(window.jQuery);

@@ -1,5 +1,5 @@
 @php($cuentaInactiva = ! $participant->is_active || $participant->locked_until !== null)
-@php($retirado = $participation->status === \App\Enums\ParticipantStatus::Withdrawn)
+@php($status = $participation->status)
 
 <div class="participantes-modal">
     <p class="participantes-modal__eyebrow">Participante</p>
@@ -45,15 +45,23 @@
         <div class="perfil-data__item">
             <dt>Participación</dt>
             <dd>
-                <span class="status-badge {{ $retirado ? 'status-badge--inactive' : 'status-badge--active' }}">
-                    {{ $participation->status->label() }}
-                </span>
+                <span class="status-badge {{ $status->badgeClass() }}">{{ $status->label() }}</span>
             </dd>
         </div>
 
         <div class="perfil-data__item">
             <dt>Amigo secreto</dt>
             <dd>@include('participantes.partials.estado-amigo', ['assignment' => $assignment])</dd>
+        </div>
+
+        <div class="perfil-data__item">
+            <dt>Invitación enviada</dt>
+            <dd>{{ format_date($participation->invited_at, 'd/m/Y H:i') }}</dd>
+        </div>
+
+        <div class="perfil-data__item">
+            <dt>Respondió</dt>
+            <dd>{{ format_date($participation->responded_at, 'd/m/Y H:i') }}</dd>
         </div>
 
         <div class="perfil-data__item">
@@ -66,11 +74,28 @@
             <dd>{{ format_date($participant->created_at) }}</dd>
         </div>
 
+        @if ($participation->status_reason)
+            <div class="perfil-data__item perfil-data__item--wide">
+                <dt>Motivo del estado</dt>
+                <dd class="participantes-text">{{ $participation->status_reason }}</dd>
+            </div>
+        @endif
+
         <div class="perfil-data__item perfil-data__item--wide">
             <dt>Observaciones</dt>
             <dd class="participantes-text">{{ format_text($participation->notes, 'Sin observaciones') }}</dd>
         </div>
     </dl>
+
+    @if ($status === \App\Enums\ParticipantStatus::Active)
+        <div class="sorteo-actions">
+            <button type="button" class="btn btn-outline-danger btn-ficha-expel"
+                    data-id="{{ $participant->id }}">
+                <i class="fa-solid fa-user-slash" aria-hidden="true"></i>
+                <span>Expulsar del evento</span>
+            </button>
+        </div>
+    @endif
 
     <p class="participantes-modal__phase">
         <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>

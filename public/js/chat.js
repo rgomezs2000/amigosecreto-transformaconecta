@@ -66,6 +66,8 @@
 
         var currentId = null;
         var currentModeration = false;
+        var conversationBlocked = false;
+        var conversationBlockLabel = '';
         // Si la conversación abierta es un chat de caso (ticket), al volver se
         // deja la pestaña Reportes a la vista.
         var currentIsReport = false;
@@ -91,8 +93,52 @@
         var mentionActive = 0;
         var mentionRange = null;
 
+        /** Búsqueda en el historial de la conversación abierta. */
+        var searchOpen = false;
+        var searchTerm = '';
+        var searchTimer = null;
+        var searchRequest = null;
+        var searchResults = [];
+        var searchTotal = 0;
+        /** Mensaje abierto desde un resultado: al cerrar se vuelve al final. */
+        var searchFocusId = null;
+
+        /** Selección múltiple de mensajes. */
+        var selectionMode = false;
+        var selectedMessages = {};
+        /** Ancla para Shift+clic y último mensaje tocado. */
+        var selectionAnchorId = null;
+        var lastSelectionId = null;
+        var lastClickedMessageId = null;
+
         function escape(value) {
             return $('<div>').text(value == null ? '' : value).html();
+        }
+
+        function escapeRegExp(value) {
+            return String(value == null ? '' : value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        /**
+         * Texto ya escapado con el término de búsqueda resaltado. Se usa en los
+         * resultados: el cuerpo del mensaje puede traer HTML y no se interpreta.
+         */
+        function markSearchText(value, term) {
+            var escaped = escape(value);
+            var needle = escape(term);
+
+            if (!needle) {
+                return escaped;
+            }
+
+            try {
+                return escaped.replace(
+                    new RegExp('(' + escapeRegExp(needle) + ')', 'gi'),
+                    '<mark class="chat-search__hit">$1</mark>'
+                );
+            } catch (error) {
+                return escaped;
+            }
         }
 
         function chatBody() {
@@ -402,6 +448,66 @@
                 escape(reaction.emoji) + ' ' + reaction.count + '</button>';
         }
 
+        var SENDER_COLORS = ['#0F766E', '#7C3AED', '#B45309', '#BE123C', '#1D4ED8', '#4D7C0F', '#9333EA', '#C2410C', '#0E7490', '#A21CAF'];
+        var chatAssetsBase = chatBase.replace(/\/chat$/, '');
+
+        function senderColor(id) {
+            var n = Math.abs(parseInt(id, 10) || 0);
+
+            return SENDER_COLORS[n % SENDER_COLORS.length];
+        }
+
+        function senderInitials(name) {
+            return String(name || '?').trim().split(/\s+/).slice(0, 2).map(function (part) {
+                return part.charAt(0).toUpperCase();
+            }).join('');
+        }
+
+        function senderAvatar(message) {
+            var isSystem = message.sender_is_system || message.sender === 'Sistema' || message.sender === 'Soporte';
+            var isSecret = message.conversation_type === 'secret';
+            var color = message.is_moderation
+                ? '#B45309'
+                : (isSystem ? '#14532D' : (isSecret ? '#DB2777' : senderColor(message.sender_id)));
+            var inner;
+
+            if (message.is_moderation) {
+                inner = '<img src="' + chatAssetsBase + '/images/chat-moderacion.png" alt="">';
+            } else if (isSystem) {
+                inner = '<img src="' + chatAssetsBase + '/images/chat-soporte.png" alt="">';
+            } else if (isSecret) {
+                inner = '<img src="' + chatAssetsBase + '/images/chat-amigo-secreto.png" alt="">';
+            } else {
+                inner = escape(senderInitials(message.sender));
+            }
+
+            return '<span class="chat-message__avatar chat-avatar' +
+                (message.conversation_type === 'group' ? ' chat-message__avatar--group' : '') +
+                (message.is_moderation ? ' chat-avatar--moderation' : '') + '"' +
+                ' style="background:' + color + '"' +
+                (message.sender_id ? ' data-chat-open-profile="' + Number(message.sender_id) + '"' : '') +
+                ' data-sender-name="' + escape(message.sender) + '"' +
+                ' data-group="' + (message.conversation_type === 'group' ? '1' : '0') + '">' + inner + '</span>';
+        }
+
+        function senderLabel(message) {
+            var isSystem = message.sender_is_system || message.sender === 'Sistema' || message.sender === 'Soporte';
+            var isSecret = message.conversation_type === 'secret';
+            var color = message.is_moderation
+                ? '#B45309'
+                : (isSystem ? '#14532D' : (isSecret ? '#DB2777' : senderColor(message.sender_id)));
+            var clickable = message.sender_id && !isSystem && !message.is_moderation && !message.mine;
+
+            return '<span class="chat-message__sender">' +
+                '<span class="chat-sender' + (clickable ? ' chat-sender--link' : '') + '" style="color:' + color + '"' +
+                (clickable ? ' data-chat-open-profile="' + Number(message.sender_id) + '"' : '') +
+                ' data-sender-name="' + escape(message.sender) + '"' +
+                ' data-group="' + (message.conversation_type === 'group' ? '1' : '0') + '">' +
+                escape(message.sender) + '</span>' +
+                (isSystem ? ' <span class="chat-sender__tag">Soporte</span>' : '') +
+                (message.is_moderation ? ' <span class="chat-sender__tag chat-sender__tag--moderation">Moderación</span>' : '') +
+                '</span>';
+        }
         function messageHtml(message) {
             var attachment = '';
             var pollCard = pollHtml(message.poll, message.id);
@@ -527,6 +633,17 @@
             var forwarded = message.forwarded
                 ? '<span class="chat-message__forwarded">Reenviado</span> '
                 : '';
+            var broadcast = message.broadcast
+                ? '<span class="chat-message__broadcast">Difusión</span> '
+                : '';
+            var pinMark = message.pinned
+                ? '<span class="chat-message__pin" title="Mensaje fijado" aria-label="Mensaje fijado">' +
+                    '<i class="fa-solid fa-thumbtack" aria-hidden="true"></i></span> '
+                : '';
+            var favoriteMark = message.favorite
+                ? '<span class="chat-message__favorite" title="Favorito" aria-label="Favorito">' +
+                    '<i class="fa-solid fa-star" aria-hidden="true"></i></span> '
+                : '';
 
             return '<div class="chat-message' +
                 (message.mine ? ' chat-message--mine' : '') +
@@ -538,13 +655,20 @@
                 ' data-deleted="' + (message.deleted ? '1' : '0') + '"' +
                 ' data-can-edit="' + (message.can_edit ? '1' : '0') + '"' +
                 ' data-can-delete="' + (message.can_delete ? '1' : '0') + '"' +
+                ' data-pinned="' + (message.pinned ? '1' : '0') + '"' +
+                ' data-favorite="' + (message.favorite ? '1' : '0') + '"' +
                 ' data-reported="' + (message.reported ? '1' : '0') + '">' +
+                (!message.mine && !message.deleted ? senderAvatar(message) : '') +
                 quote + pollCard + eventCard + attachment + body + linkCard +
-                '<p class="chat-message__meta">' + escape(message.sender) +
-                (adminBadge ? ' ' + adminBadge : '') +
-                ' · ' + escape(message.created_at) + ' ' +
-                forwarded +
-                (message.edited ? '<span class="chat-message__edited">editado</span> ' : '') + check + '</p>' +
+                '<p class="chat-message__meta">' +
+                (message.deleted ? '' : (
+                    (!message.mine || message.is_moderation
+                        ? senderLabel(message) + (adminBadge ? ' ' + adminBadge : '') + ' · '
+                        : '') +
+                    escape(message.created_at) + ' ' + forwarded + broadcast + pinMark + favoriteMark +
+                    (message.edited ? '<span class="chat-message__edited">editado</span> ' : '') + check
+                )) +
+                '</p>' +
                 (reactions ? '<div class="chat-message__reactions">' + reactions + '</div>' : '') +
                 '</div>';
         }
@@ -627,11 +751,17 @@
                     '<span class="chat-quote__body">' + escape(pending.reply.body) + '</span></div>'
                 : '';
 
-            return '<div class="chat-message chat-message--mine chat-message--pending" data-pending-id="' + pending.id + '"' +
+            return '<div class="chat-message chat-message--mine chat-message--pending' +
+                (pending.moderation ? ' chat-message--moderation' : '') +
+                '" data-pending-id="' + pending.id + '"' +
                 ' data-body="' + escape(content) + '">' +
                 quote +
                 '<p class="chat-message__body">' + escape(content) + '</p>' +
-                '<p class="chat-message__meta">Tú · ' + indicator + '</p></div>';
+                '<p class="chat-message__meta">' +
+                (pending.moderation
+                    ? '<span class="chat-sender__tag chat-sender__tag--moderation">Moderación</span> · '
+                    : 'Tú · ') +
+                indicator + '</p></div>';
         }
 
         function paintPending() {
@@ -725,6 +855,7 @@
 
             $('#chat-messages').append(divider + messageHtml(message));
             rememberMessage(message);
+            applySelectionState();
         }
 
         function updateMessageNode(message) {
@@ -761,6 +892,9 @@
                 before.edited !== message.edited ||
                 before.deleted_label !== message.deleted_label ||
                 before.forwarded !== message.forwarded ||
+                before.pinned !== message.pinned ||
+                before.favorite !== message.favorite ||
+                before.broadcast !== message.broadcast ||
                 before.sender_is_admin !== message.sender_is_admin ||
                 JSON.stringify(before.reply) !== JSON.stringify(message.reply) ||
                 JSON.stringify(before.attachments) !== JSON.stringify(message.attachments) ||
@@ -853,6 +987,7 @@
             }
 
             renderPinned();
+            applySelectionState();
             drawWaveforms();
         }
 
@@ -922,6 +1057,7 @@
             }
 
             drawWaveforms();
+            applySelectionState();
         }
 
         // Vuelve a cargar la conversación desde cero. Necesario tras «vaciar»:
@@ -1112,7 +1248,7 @@
         }
 
         function loadMessages() {
-            if (!currentId || !isPanelOpen() || messageRequestPending) {
+            if (!currentId || !isPanelOpen() || messageRequestPending || searchOpen) {
                 return;
             }
 
@@ -1138,6 +1274,13 @@
                         return;
                     }
 
+                    // La búsqueda manda sobre el sondeo: una respuesta que
+                    // salió antes no debe pintar encima de los resultados ni
+                    // de la ventana del mensaje abierto.
+                    if (searchOpen) {
+                        return;
+                    }
+
                     // Respuesta anterior al último cambio propio: se descarta
                     // para no revertir la reacción o el voto recién aplicado.
                     if (requestedAt < lastLocalMutationAt) {
@@ -1148,7 +1291,11 @@
                     // El solo lectura se refresca en cada respuesta: un caso
                     // cerrado deshabilita el chat sin recargar la página.
                     if (typeof response.read_only !== 'undefined') {
-                        applyReadOnlyState(response.read_only, response.read_only_label);
+                        if (conversationBlocked) {
+                            applyReadOnlyState(true, conversationBlockLabel);
+                        } else {
+                            applyReadOnlyState(response.read_only, response.read_only_label);
+                        }
                     }
 
                     if (!painted) {
@@ -1186,7 +1333,7 @@
             window.clearTimeout(messageTimer);
             messageTimer = null;
 
-            if (!currentId || !isPanelOpen()) {
+            if (!currentId || !isPanelOpen() || searchOpen) {
                 return;
             }
 
@@ -1284,8 +1431,101 @@
         // del sistema junto al nombre en la barra del chat.
         function applyConversation(conversation) {
             currentIsReport = !!(conversation && conversation.is_report);
-            applyReadOnlyState(conversation && conversation.read_only, conversation && conversation.read_only_label);
+
+            var blocked = !!(conversation && (conversation.blocked || conversation.blocked_by));
+
+            conversationBlocked = blocked;
+            conversationBlockLabel = '';
+
+            if (blocked) {
+                var name = $.trim($('#chat-title').text()) || 'Este usuario';
+                var label;
+
+                if (conversation.blocked && conversation.blocked_by) {
+                    label = 'Has bloqueado a ' + name + ' y ' + name + ' te ha bloqueado. No pueden enviarse mensajes.';
+                } else if (conversation.blocked) {
+                    label = 'Has bloqueado a ' + name + '. Desbloquea para enviar mensajes.';
+                } else {
+                    label = name + ' te ha bloqueado. No puedes enviarle mensajes.';
+                }
+
+                conversationBlockLabel = label;
+                applyReadOnlyState(true, label);
+            } else {
+                applyReadOnlyState(conversation && conversation.read_only, conversation && conversation.read_only_label);
+            }
+
+            $('#chat-widget').toggleClass('is-blocked', blocked);
             $('#chat-title-badge').prop('hidden', !(conversation && conversation.other_is_admin));
+
+            if (conversation && conversation.group_blocks && conversation.group_blocks.length) {
+                promptGroupBlocks(conversation);
+            }
+        }
+
+        function promptGroupBlocks(conversation) {
+            if (!currentId || blockedPromptConversationId === currentId) {
+                return;
+            }
+
+            blockedPromptConversationId = currentId;
+
+            var mine = [];
+            var theirs = [];
+
+            conversation.group_blocks.forEach(function (item) {
+                if (item.blocked) {
+                    mine.push(item.name);
+                }
+
+                if (item.blocked_by) {
+                    theirs.push(item.name);
+                }
+            });
+
+            var parts = [];
+
+            if (mine.length) {
+                parts.push('Has bloqueado a ' + mine.join(', '));
+            }
+
+            if (theirs.length) {
+                parts.push(theirs.join(', ') + (theirs.length === 1 ? ' te ha bloqueado' : ' te han bloqueado'));
+            }
+
+            var leavePhrase = conversation.is_closed ? 'de la sala' : 'del grupo';
+
+            AppDialog.custom({
+                title: conversation.is_closed ? 'Bloqueo en la sala' : 'Bloqueo en el grupo',
+                centerVertical: true,
+                // Sin X, sin Escape y sin cierre por fondo: hay que elegir
+                // explícitamente entre entrar o salir.
+                closeButton: false,
+                backdrop: 'static',
+                onEscape: false,
+                message: '<p>' + escape(parts.join(' y ')) + '. ¿Deseas entrar al chat o salir ' + leavePhrase + '?</p>'
+                    + '<p class="chat-hint">Elige <strong>Entrar</strong> o <strong>Salir</strong> para continuar.</p>',
+                buttons: {
+                    cancel: {
+                        label: 'Entrar',
+                        className: 'btn-primary'
+                    },
+                    leave: {
+                        label: 'Salir',
+                        className: 'btn-outline-danger',
+                        callback: function () {
+                            post(chatBase + '/' + currentId + '/salir', {})
+                                .done(function () {
+                                    showList();
+                                    refresh();
+                                })
+                                .fail(function (xhr) {
+                                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo salir.');
+                                });
+                        }
+                    }
+                }
+            });
         }
 
         function isReadOnlyChat() {
@@ -1377,9 +1617,800 @@
             }, 1400);
         }
 
+        /* ------------------------------------------------------------------
+           Buscar en la conversación
+           ------------------------------------------------------------------ */
+
+        /**
+         * Devuelve la barra y el panel de resultados a su estado inicial. No
+         * toca los mensajes: quien cierra decide si recarga el final.
+         */
+        function resetChatSearch() {
+            searchOpen = false;
+            searchTerm = '';
+            searchFocusId = null;
+            searchResults = [];
+            searchTotal = 0;
+
+            window.clearTimeout(searchTimer);
+            searchTimer = null;
+
+            if (searchRequest && typeof searchRequest.abort === 'function') {
+                try {
+                    searchRequest.abort();
+                } catch (error) {
+                    // La petición ya había terminado.
+                }
+            }
+
+            searchRequest = null;
+
+            $('#chat-search').prop('hidden', true);
+            $('#chat-search-input').val('');
+            $('#chat-search-count').text('');
+            $('#chat-search-results').prop('hidden', true).empty();
+            $('#chat-conversation').removeClass('is-searching');
+            clearSearchMarks();
+        }
+
+        /**
+         * Abre la barra bajo la cabecera. La conversación se oculta y deja su
+         * sitio a los resultados; la X devuelve a los mensajes.
+         */
+        function openChatSearch() {
+            if (!currentId) {
+                return;
+            }
+
+            exitSelectionMode();
+            resetChatSearch();
+            hideMoreMenu();
+            hideContextMenu();
+            hideListMenu();
+            hideUserMenu();
+            hideContentMenu();
+
+            searchOpen = true;
+
+            // Mientras se busca no se sondea el historial: una respuesta
+            // incremental podría pisar la ventana del mensaje abierto.
+            window.clearTimeout(messageTimer);
+            messageTimer = null;
+
+            $('#chat-search').prop('hidden', false);
+            $('#chat-conversation').addClass('is-searching');
+            renderSearchHint('Escribe al menos dos letras para buscar en esta conversación.');
+            $('#chat-search-input').trigger('focus');
+        }
+
+        /**
+         * Cierra la búsqueda y vuelve a la conversación. Si se había abierto un
+         * resultado fuera de la ventana reciente, se recarga el final para no
+         * dejar un tramo suelto.
+         */
+        function closeChatSearch() {
+            var hadFocus = searchFocusId !== null;
+            var conversationId = currentId;
+
+            resetChatSearch();
+
+            if (!conversationId || !isPanelOpen()) {
+                return;
+            }
+
+            if (hadFocus) {
+                reloadConversationMessages();
+            }
+
+            startMessagePolling();
+        }
+
+        function renderSearchHint(message) {
+            $('#chat-conversation').addClass('is-searching');
+            $('#chat-search-results')
+                .prop('hidden', false)
+                .html('<p class="chat-search__empty">' + escape(message) + '</p>');
+        }
+
+        function scheduleChatSearch() {
+            if (!searchOpen || !currentId) {
+                return;
+            }
+
+            var term = $.trim(String($('#chat-search-input').val() || ''));
+
+            searchTerm = term;
+            window.clearTimeout(searchTimer);
+            searchTimer = null;
+
+            if (term.length < 2) {
+                $('#chat-search-count').text('');
+                renderSearchHint(term.length === 0
+                    ? 'Escribe al menos dos letras para buscar en esta conversación.'
+                    : 'Escribe una letra más para empezar la búsqueda.');
+                return;
+            }
+
+            searchTimer = window.setTimeout(function () {
+                runChatSearch(term);
+            }, 220);
+        }
+
+        function runChatSearch(term) {
+            if (!searchOpen || !currentId || term !== searchTerm) {
+                return;
+            }
+
+            var conversationId = currentId;
+
+            if (searchRequest && typeof searchRequest.abort === 'function') {
+                try {
+                    searchRequest.abort();
+                } catch (error) {
+                    // La petición anterior ya había terminado.
+                }
+            }
+
+            $('#chat-search-count').text('Buscando...');
+
+            searchRequest = $.getJSON(chatBase + '/' + conversationId + '/buscar', {
+                q: term,
+                _ts: Date.now()
+            }).done(function (response) {
+                searchRequest = null;
+
+                if (!searchOpen || currentId !== conversationId || term !== searchTerm) {
+                    return;
+                }
+
+                renderSearchResults(response.items || [], response.total || 0, response.limited === true, term);
+            }).fail(function (xhr, status) {
+                searchRequest = null;
+
+                if (status === 'abort' || !searchOpen || currentId !== conversationId) {
+                    return;
+                }
+
+                $('#chat-search-count').text('');
+                renderSearchHint('No se pudo buscar. Intenta de nuevo.');
+            });
+        }
+
+        function renderSearchResults(items, total, limited, term) {
+            searchResults = items;
+            searchTotal = total;
+
+            $('#chat-conversation').addClass('is-searching');
+            $('#chat-search-results').prop('hidden', false);
+
+            if (!items.length) {
+                $('#chat-search-count').text('Sin resultados');
+                $('#chat-search-results').html(
+                    '<p class="chat-search__empty">No se encontraron mensajes con «' + escape(term) + '».</p>'
+                );
+
+                return;
+            }
+
+            $('#chat-search-count').text(
+                total === 1 ? '1 resultado' : total + ' resultados'
+            );
+
+            var html = items.map(function (item) {
+                var sender = item.mine ? 'Tú' : (item.sender || 'Sistema');
+                var meta = [sender, dateLabel(item.created_date), item.created_at]
+                    .filter(function (part) { return !!part; })
+                    .join(' · ');
+                var fallback = item.has_attachment ? 'Mensaje con adjunto' : 'Mensaje sin texto';
+
+                return '<button type="button" class="chat-search__result" data-id="' + item.id + '">' +
+                    '<span class="chat-avatar chat-search__avatar" style="background:' +
+                        (item.is_moderation ? '#B45309' : senderColor(item.sender_id)) + '">' +
+                        escape(senderInitials(item.sender)) + '</span>' +
+                    '<span class="chat-search__content">' +
+                        '<span class="chat-search__meta">' + escape(meta) + '</span>' +
+                        '<span class="chat-search__snippet">' +
+                            markSearchText(item.body || fallback, term) +
+                        '</span>' +
+                    '</span>' +
+                    '</button>';
+            }).join('');
+
+            if (limited) {
+                html += '<p class="chat-search__note">Se muestran los ' + items.length +
+                    ' más recientes de ' + total + ' coincidencias. Afina la búsqueda para ver las demás.</p>';
+            }
+
+            $('#chat-search-results').html(html);
+        }
+
+        function clearSearchMarks() {
+            $('#chat-messages mark.chat-search__hit').each(function () {
+                var parent = this.parentNode;
+
+                if (!parent) {
+                    return;
+                }
+
+                parent.replaceChild(document.createTextNode(this.textContent || ''), this);
+                parent.normalize();
+            });
+        }
+
+        /**
+         * Resalta el término dentro de las burbujas ya pintadas. Se usa al
+         * abrir un resultado para que el mensaje encontrado se vea marcado.
+         */
+        function markSearchInMessages(term) {
+            if (!term) {
+                return;
+            }
+
+            var regex;
+
+            try {
+                regex = new RegExp(escapeRegExp(term), 'gi');
+            } catch (error) {
+                return;
+            }
+
+            $('#chat-messages .chat-message__body, #chat-messages .chat-quote__body').each(function () {
+                markTextNodes(this, regex);
+            });
+        }
+
+        function markTextNodes(root, regex) {
+            var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+            var nodes = [];
+            var node;
+
+            while ((node = walker.nextNode())) {
+                if (node.nodeValue && node.nodeValue.length) {
+                    nodes.push(node);
+                }
+            }
+
+            nodes.forEach(function (textNode) {
+                if (!textNode.parentNode || $(textNode.parentNode).closest('mark').length) {
+                    return;
+                }
+
+                var text = textNode.nodeValue;
+                var fragment = document.createDocumentFragment();
+                var lastIndex = 0;
+                var match;
+
+                regex.lastIndex = 0;
+
+                while ((match = regex.exec(text)) !== null) {
+                    if (match[0] === '') {
+                        regex.lastIndex += 1;
+                        continue;
+                    }
+
+                    fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+
+                    var mark = document.createElement('mark');
+                    mark.className = 'chat-search__hit';
+                    mark.textContent = match[0];
+                    fragment.appendChild(mark);
+
+                    lastIndex = match.index + match[0].length;
+                }
+
+                if (lastIndex === 0) {
+                    return;
+                }
+
+                fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+                textNode.parentNode.replaceChild(fragment, textNode);
+            });
+        }
+
+        /**
+         * Abre un resultado. Si la burbuja ya está en pantalla se salta a ella;
+         * si es historial anterior, se pide una ventana centrada en el mensaje.
+         */
+        function jumpToSearchResult(id) {
+            var messageId = parseInt(id, 10);
+
+            if (!messageId || !currentId) {
+                return;
+            }
+
+            var conversationId = currentId;
+            var $existing = $('#chat-messages .chat-message[data-message-id="' + messageId + '"]');
+
+            $('#chat-search-results').prop('hidden', true);
+            $('#chat-conversation').removeClass('is-searching');
+
+            if ($existing.length) {
+                goToMessage(messageId);
+                markSearchInMessages(searchTerm);
+
+                return;
+            }
+
+            $('#chat-messages').html('<p class="chat-hint">Buscando el mensaje...</p>');
+            $('#chat-search-count').text('Abriendo resultado...');
+
+            $.getJSON(chatBase + '/' + conversationId + '/mensajes', {
+                focus_id: messageId,
+                _ts: Date.now()
+            }).done(function (response) {
+                if (!searchOpen || currentId !== conversationId) {
+                    return;
+                }
+
+                searchFocusId = messageId;
+                lastData = response;
+
+                applyConversation(response.conversation);
+                refreshAttachExtras();
+                setMentionCatalog(response.mentionables || []);
+                renderMessages();
+                goToMessage(messageId);
+                markSearchInMessages(searchTerm);
+
+                $('#chat-search-count').text(
+                    searchTotal === 1 ? '1 resultado' : searchTotal + ' resultados'
+                );
+            }).fail(function (xhr) {
+                if (!searchOpen || currentId !== conversationId) {
+                    return;
+                }
+
+                $('#chat-messages').html('<p class="chat-hint">No se pudo abrir el mensaje. Escribe de nuevo para buscar.</p>');
+                $('#chat-search-count').text('');
+            });
+        }
+
+        /* ------------------------------------------------------------------
+           Selección múltiple de mensajes
+           ------------------------------------------------------------------ */
+
+        function enterSelectionMode() {
+            if (!currentId) {
+                return;
+            }
+
+            if (searchOpen) {
+                closeChatSearch();
+            }
+
+            hideMoreMenu();
+            hideContextMenu();
+            hideListMenu();
+            hideUserMenu();
+            hideContentMenu();
+            clearReply();
+
+            selectionMode = true;
+            selectedMessages = {};
+            selectionAnchorId = null;
+            lastSelectionId = null;
+
+            $('#chat-conversation').addClass('is-selecting');
+            $('#chat-selection').prop('hidden', false);
+            applySelectionState();
+            updateSelectionBar();
+        }
+
+        function exitSelectionMode() {
+            selectionMode = false;
+            selectedMessages = {};
+            selectionAnchorId = null;
+            lastSelectionId = null;
+
+            $('#chat-conversation').removeClass('is-selecting');
+            $('#chat-selection').prop('hidden', true);
+            $('#chat-messages .chat-message').removeClass('is-selected');
+            updateSelectionBar();
+        }
+
+        function selectedIds() {
+            return Object.keys(selectedMessages).map(function (id) {
+                return parseInt(id, 10);
+            }).filter(function (id) {
+                return !isNaN(id);
+            });
+        }
+
+        function updateSelectionBar() {
+            var count = selectedIds().length;
+            var deletable = selectedIds().filter(function (id) {
+                return selectedMessages[id] && selectedMessages[id].canDelete;
+            }).length;
+            var allFavorite = count > 0 && selectedIds().every(function (id) {
+                return $('#chat-messages .chat-message[data-message-id="' + id + '"]').data('favorite') === 1;
+            });
+
+            $('#chat-selection-count').text(
+                count === 1 ? '1 sel.' : count + ' sel.'
+            ).attr(
+                'title',
+                count === 1 ? '1 mensaje seleccionado' : count + ' mensajes seleccionados'
+            );
+
+            $('#chat-selection [data-selection-action="reply"], ' +
+                '#chat-selection [data-selection-action="favorite"], ' +
+                '#chat-selection [data-selection-action="pin"]').prop('disabled', count === 0);
+            $('#chat-selection [data-selection-action="delete"]').prop('disabled', deletable === 0);
+            $('#chat-selection [data-selection-action="favorite"] span')
+                .text(allFavorite ? 'Quitar favorito' : 'Favorito');
+            $('#chat-selection [data-selection-action="favorite"] i')
+                .toggleClass('fa-solid', allFavorite)
+                .toggleClass('fa-regular', !allFavorite);
+        }
+
+        function applySelectionState() {
+            if (!selectionMode) {
+                return;
+            }
+
+            $('#chat-messages .chat-message').each(function () {
+                var id = String($(this).data('message-id'));
+
+                $(this).toggleClass('is-selected', !!selectedMessages[id]);
+            });
+        }
+
+        function toggleSelection($message, setAnchor) {
+            var id = String($message.data('message-id'));
+
+            if (!id
+                || $message.hasClass('chat-message--deleted')
+                || $message.hasClass('chat-message--pending')) {
+                return;
+            }
+
+            if (selectedMessages[id]) {
+                delete selectedMessages[id];
+            } else {
+                selectedMessages[id] = {
+                    id: parseInt(id, 10),
+                    body: $.trim($message.find('.chat-message__body').first().text()),
+                    canDelete: $message.data('can-delete') === 1
+                };
+            }
+
+            lastSelectionId = parseInt(id, 10);
+
+            if (setAnchor !== false) {
+                selectionAnchorId = lastSelectionId;
+            }
+
+            $message.toggleClass('is-selected', !!selectedMessages[id]);
+
+            if (!selectedIds().length) {
+                exitSelectionMode();
+
+                return;
+            }
+
+            updateSelectionBar();
+        }
+
+        function selectionNodes() {
+            return $('#chat-messages .chat-message').filter(function () {
+                return !$(this).hasClass('chat-message--deleted')
+                    && !$(this).hasClass('chat-message--pending');
+            }).toArray();
+        }
+
+        function selectRangeTo($message) {
+            var id = parseInt($message.data('message-id'), 10);
+
+            if (!id) {
+                return;
+            }
+
+            var nodes = selectionNodes();
+            var anchorIndex = -1;
+            var targetIndex = -1;
+
+            nodes.forEach(function (node, index) {
+                var nodeId = parseInt($(node).data('message-id'), 10);
+
+                if (nodeId === selectionAnchorId) {
+                    anchorIndex = index;
+                }
+
+                if (nodeId === id) {
+                    targetIndex = index;
+                }
+            });
+
+            if (targetIndex === -1) {
+                return;
+            }
+
+            if (anchorIndex === -1) {
+                anchorIndex = targetIndex;
+            }
+
+            var start = Math.min(anchorIndex, targetIndex);
+            var end = Math.max(anchorIndex, targetIndex);
+
+            for (var index = start; index <= end; index++) {
+                var $node = $(nodes[index]);
+                var nodeId = String($node.data('message-id'));
+
+                if (!selectedMessages[nodeId]) {
+                    selectedMessages[nodeId] = {
+                        id: parseInt(nodeId, 10),
+                        body: $.trim($node.find('.chat-message__body').first().text()),
+                        canDelete: $node.data('can-delete') === 1
+                    };
+                }
+
+                $node.addClass('is-selected');
+            }
+
+            lastSelectionId = id;
+            updateSelectionBar();
+        }
+
+        function replySelectedMessages() {
+            var ids = selectedIds();
+
+            if (!ids.length) {
+                return;
+            }
+
+            var targetId = lastSelectionId || ids[0];
+            var $target = $('#chat-messages .chat-message[data-message-id="' + targetId + '"]');
+
+            if (!$target.length) {
+                return;
+            }
+
+            exitSelectionMode();
+            showReply({
+                id: targetId,
+                sender: $target.data('sender') || '',
+                body: messageSummary($target)
+            });
+            $('#chat-input').trigger('focus');
+        }
+
+        function favoriteSelectedMessages() {
+            var ids = selectedIds();
+
+            if (!ids.length) {
+                return;
+            }
+
+            var allFavorite = ids.every(function (id) {
+                return $('#chat-messages .chat-message[data-message-id="' + id + '"]').data('favorite') === 1;
+            });
+            var favorite = !allFavorite;
+            var pending = ids.slice();
+
+            function next() {
+                if (!pending.length) {
+                    refreshMessages(ids);
+                    updateSelectionBar();
+                    return;
+                }
+
+                var id = pending.shift();
+
+                post(chatBase + '/mensajes/' + id + '/favorito', { favorite: favorite ? 1 : 0 })
+                    .done(function () {
+                        $('#chat-messages .chat-message[data-message-id="' + id + '"]')
+                            .attr('data-favorite', favorite ? '1' : '0');
+                        next();
+                    })
+                    .fail(function (xhr) {
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo cambiar el favorito.');
+                        pending = [];
+                        next();
+                    });
+            }
+
+            next();
+        }
+
+        function pinSelectedMessages() {
+            var ids = selectedIds();
+
+            if (!ids.length || !currentId) {
+                return;
+            }
+
+            var targetId = lastSelectionId || ids[0];
+            var previousId = lastData && lastData.conversation && lastData.conversation.pinned_message
+                ? parseInt(lastData.conversation.pinned_message.id, 10)
+                : null;
+
+            post(chatBase + '/' + currentId + '/fijar-mensaje/' + targetId, {})
+                .done(function (response) {
+                    if (lastData && lastData.conversation) {
+                        lastData.conversation.pinned_message = response.pinned_message || null;
+                    }
+
+                    var refreshIds = [targetId];
+
+                    if (previousId && previousId !== targetId) {
+                        refreshIds.push(previousId);
+                    }
+
+                    exitSelectionMode();
+                    refreshMessages(refreshIds);
+                    renderPinned();
+                })
+                .fail(function (xhr) {
+                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo fijar el mensaje.');
+                });
+        }
+
+        function deleteSelectedMessages() {
+            var ids = selectedIds().filter(function (id) {
+                return selectedMessages[id] && selectedMessages[id].canDelete;
+            });
+
+            if (!ids.length) {
+                AppDialog.alert('No puedes eliminar los mensajes seleccionados.');
+                return;
+            }
+
+            AppDialog.confirm(
+                ids.length === 1
+                    ? '¿Eliminar el mensaje seleccionado?'
+                    : '¿Eliminar los ' + ids.length + ' mensajes seleccionados?',
+                function () {
+                    var pending = ids.slice();
+                    var deleted = [];
+                    var failed = 0;
+
+                    function next() {
+                        if (!pending.length) {
+                            exitSelectionMode();
+
+                            if (deleted.length) {
+                                var pinnedId = lastData && lastData.conversation && lastData.conversation.pinned_message
+                                    ? parseInt(lastData.conversation.pinned_message.id, 10)
+                                    : null;
+
+                                if (pinnedId && deleted.indexOf(pinnedId) !== -1) {
+                                    lastData.conversation.pinned_message = null;
+                                    renderPinned();
+                                }
+
+                                refreshMessages(deleted);
+                            }
+
+                            refresh();
+
+                            if (failed > 0) {
+                                AppDialog.alert(
+                                    'Se eliminaron ' + deleted.length + ' mensajes; ' +
+                                    failed + ' no se pudieron eliminar.'
+                                );
+                            }
+
+                            return;
+                        }
+
+                        var id = pending.shift();
+
+                        post(chatBase + '/mensajes/' + id + '/eliminar', {})
+                            .done(function () {
+                                deleted.push(id);
+                                next();
+                            })
+                            .fail(function () {
+                                failed += 1;
+                                next();
+                            });
+                    }
+
+                    next();
+                }
+            );
+        }
+
+        $('#chat-selection-cancel').on('click', exitSelectionMode);
+
+        $('#chat-selection').on('click', '[data-selection-action]', function () {
+            var action = $(this).data('selection-action');
+
+            if (action === 'reply') {
+                replySelectedMessages();
+            } else if (action === 'favorite') {
+                favoriteSelectedMessages();
+            } else if (action === 'pin') {
+                pinSelectedMessages();
+            } else if (action === 'delete') {
+                deleteSelectedMessages();
+            }
+        });
+
+        var chatMessagesElement = document.getElementById('chat-messages');
+
+        if (chatMessagesElement) {
+            // Evita que Ctrl/Shift + clic seleccione el texto de la burbuja
+            // antes de que llegue el evento click.
+            chatMessagesElement.addEventListener('mousedown', function (event) {
+                var node = event.target && event.target.closest
+                    ? event.target.closest('.chat-message')
+                    : null;
+
+                if (node && (event.ctrlKey || event.metaKey || event.shiftKey)) {
+                    event.preventDefault();
+                }
+            }, true);
+
+            // Ctrl/Cmd o Shift sobre una burbuja entra en selección. En modo
+            // selección, el clic normal sigue alternando la burbuja.
+            chatMessagesElement.addEventListener('click', function (event) {
+                var node = event.target && event.target.closest
+                    ? event.target.closest('.chat-message')
+                    : null;
+
+                if (!node) {
+                    return;
+                }
+
+                var modifier = event.ctrlKey || event.metaKey || event.shiftKey;
+                var clickedId = parseInt(node.getAttribute('data-message-id'), 10);
+
+                if (!modifier) {
+                    if (!selectionMode) {
+                        // Recuerda el último clic normal para que Shift+clic
+                        // pueda marcar un rango sin entrar antes al modo.
+                        lastClickedMessageId = clickedId || null;
+
+                        return;
+                    }
+                }
+
+                if (!selectionMode && !modifier) {
+                    return;
+                }
+
+                var shiftAnchor = event.shiftKey && !selectionMode ? lastClickedMessageId : null;
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                if (!selectionMode) {
+                    enterSelectionMode();
+                }
+
+                if (event.shiftKey) {
+                    if (selectionAnchorId === null && shiftAnchor !== null) {
+                        selectionAnchorId = shiftAnchor;
+                    }
+
+                    if (selectionAnchorId !== null) {
+                        selectRangeTo($(node));
+                    } else {
+                        toggleSelection($(node));
+                    }
+                } else {
+                    toggleSelection($(node));
+
+                    if (!event.ctrlKey && !event.metaKey) {
+                        lastClickedMessageId = clickedId || null;
+                    }
+                }
+            }, true);
+        }
+
         function openConversation(id, title, subtitle, moderation) {
+            resetChatSearch();
+            exitSelectionMode();
+            lastClickedMessageId = null;
             currentId = id;
             currentModeration = moderation === true;
+            conversationBlocked = false;
+            conversationBlockLabel = '';
+            profileStandalone = false;
+            profileOrigin = 'conversation';
+            currentMemberProfile = null;
+            blockedPromptConversationId = null;
             closeChatProfile();
             // La respuesta en curso es de la conversación anterior: no viaja.
             applyConversation(null);
@@ -1458,7 +2489,11 @@
         }
 
         function conversationItemHtml(item) {
-            var label = item.subtitle || (item.is_group ? 'Grupo' : 'Conversación directa');
+            var isRoom = item.is_group && item.is_closed;
+            var isBroadcast = !!item.is_broadcast;
+            var label = item.subtitle || (isBroadcast
+                ? 'Difusión'
+                : (item.is_group ? (isRoom ? 'Sala' : 'Grupo') : 'Conversación directa'));
             var muted = item.muted ? '1' : '0';
             var blocked = item.blocked ? '1' : '0';
             var moderation = item.is_moderation ? '1' : '0';
@@ -1487,6 +2522,8 @@
                 ' data-owner="' + (item.is_owner ? '1' : '0') + '"' +
                 ' data-user-id="' + escape(item.other_user_id || '') + '"' +
                 ' data-is-group="' + (item.is_group ? '1' : '0') + '"' +
+                ' data-closed="' + (isRoom ? '1' : '0') + '"' +
+                ' data-broadcast="' + (isBroadcast ? '1' : '0') + '"' +
                 ' data-moderation="' + moderation + '"' +
                 ' data-favorite="' + (item.favorite ? '1' : '0') + '"' +
                 ' data-pinned="' + (item.pinned ? '1' : '0') + '"' +
@@ -1516,7 +2553,7 @@
             }
 
             var groups = (items || []).filter(function (item) {
-                return item.is_group;
+                return item.is_group && !item.is_closed;
             });
 
             if (!groups.length) {
@@ -1526,6 +2563,46 @@
             }
 
             $list.html(groups.map(conversationItemHtml).join(''));
+        }
+
+        function renderRooms(items) {
+            var $list = $('#chat-rooms');
+
+            if (!$list.length) {
+                return;
+            }
+
+            var rooms = (items || []).filter(function (item) {
+                return item.is_group && item.is_closed;
+            });
+
+            if (!rooms.length) {
+                $list.html('<p class="chat-hint">Aún no perteneces a ninguna sala.</p>');
+
+                return;
+            }
+
+            $list.html(rooms.map(conversationItemHtml).join(''));
+        }
+
+        function renderBroadcasts(items) {
+            var $list = $('#chat-broadcasts');
+
+            if (!$list.length) {
+                return;
+            }
+
+            var broadcasts = (items || []).filter(function (item) {
+                return item.is_broadcast;
+            });
+
+            if (!broadcasts.length) {
+                $list.html('<p class="chat-hint">Aún no tienes difusiones.</p>');
+
+                return;
+            }
+
+            $list.html(broadcasts.map(conversationItemHtml).join(''));
         }
 
         function renderArchived(items) {            var $list = $('#chat-archived');
@@ -1711,7 +2788,9 @@
         }
 
         function renderGroupUsers(users) {
-            var list = users || [];
+            var list = (users || []).filter(function (user) {
+                return !user.blocked && !user.blocked_by;
+            });
             var signature = JSON.stringify(list.map(function (user) { return [user.id, user.name]; }));
 
             if (signature === groupUsersSignature) {
@@ -1734,6 +2813,8 @@
 
                     renderConversations(response.conversations);
                     renderGroups(response.conversations);
+                    renderRooms(response.conversations);
+                    renderBroadcasts(response.broadcasts || []);
                     renderArchived(response.archived);
                     renderArchivedCount((response.archived || []).length);
                     renderReports(response.reports);
@@ -1745,6 +2826,7 @@
 
                     if (response.users) {
                         renderGroupUsers(response.users);
+                        renderRoomUsers(response.users);
                     }
 
                     if (response.unread > lastUnread && lastUnread > 0) {
@@ -1766,8 +2848,16 @@
             // Al volver de un chat de caso, la pestaña Reportes queda visible.
             var backToReports = currentIsReport;
 
+            resetChatSearch();
+            exitSelectionMode();
             currentId = null;
             currentModeration = false;
+            conversationBlocked = false;
+            conversationBlockLabel = '';
+            profileStandalone = false;
+            profileOrigin = 'conversation';
+            currentMemberProfile = null;
+            blockedPromptConversationId = null;
             closeChatProfile();
             clearReply();
             applyConversation(null);
@@ -1805,6 +2895,11 @@
         function hideUserMenu() {
             $('#chat-user-menu').prop('hidden', true).css({ top: '', left: '' });
             activeUser = null;
+        }
+
+        function hideMoreMenu() {
+            $('#chat-more-menu').prop('hidden', true);
+            $('#chat-more').attr('aria-expanded', 'false');
         }
 
         /**
@@ -1876,6 +2971,8 @@
                 blocked: $item.data('blocked') === 1,
                 userId: parseInt($item.data('user-id'), 10) || null,
                 isGroup: $item.data('is-group') === 1,
+                isClosed: $item.data('closed') === 1,
+                isBroadcast: $item.data('broadcast') === 1,
                 isOwner: $item.data('owner') === 1,
                 favorite: $item.data('favorite') === 1,
                 pinned: $item.data('pinned') === 1,
@@ -1895,6 +2992,7 @@
 
             $menu.find('[data-list-action="mute"]').prop('hidden', !mine || activeConversation.muted);
             $menu.find('[data-list-action="unmute"]').prop('hidden', !mine || !activeConversation.muted);
+            $menu.find('[data-list-action="profile"]').prop('hidden', isModeration);
 
             var canBlock = !activeConversation.isGroup && activeConversation.userId !== null;
 
@@ -1915,12 +3013,16 @@
             $menu.find('[data-list-action="vaciar"]').prop('hidden', !mine);
             $menu.find('[data-list-action="clear"]').prop('hidden', !mine);
 
-            $menu.find('[data-list-action="leave"]').prop('hidden', !activeConversation.isGroup);
-            $menu.find('[data-list-action="report"]').prop('hidden', isModeration);
-            $menu.find('[data-list-action="delete"]').prop('hidden', !isModeration);
-            $menu.find('[data-list-action="invite"]').prop('hidden', !canManage);
-            $menu.find('[data-list-action="members"]').prop('hidden', !canManage);
-            $menu.find('[data-list-action="banned"]').prop('hidden', !canManage);
+            $menu.find('[data-list-action="leave"]')
+                .prop('hidden', !activeConversation.isGroup)
+                .text(activeConversation.isClosed ? 'Salir de la sala' : 'Salir del grupo');
+            $menu.find('[data-list-action="report"]').prop('hidden', isModeration || activeConversation.isBroadcast);
+            $menu.find('[data-list-action="delete"]')
+                .prop('hidden', !isModeration && !(activeConversation.isBroadcast && activeConversation.isOwner))
+                .text(activeConversation.isBroadcast ? 'Eliminar difusión' : 'Eliminar para todos');
+            $menu.find('[data-list-action="invite"]').prop('hidden', !canManage || activeConversation.isClosed);
+            $menu.find('[data-list-action="members"]').prop('hidden', !canManage || activeConversation.isBroadcast);
+            $menu.find('[data-list-action="banned"]').prop('hidden', !canManage || activeConversation.isClosed);
 
             $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
             placeMenu($menu, event);
@@ -1931,6 +3033,7 @@
             event.stopPropagation();
 
             hideListMenu();
+            hideMoreMenu();
 
             activeMessage = $message;
 
@@ -1963,17 +3066,17 @@
                     .prop('hidden', true);
             }
 
-            // Fijar/desfijar el mensaje: solo para participantes, nunca moderando.
-            var pinned = lastData && lastData.conversation ? lastData.conversation.pinned_message : null;
-            var pinnedId = pinned ? parseInt(pinned.id, 10) : null;
+            // Fijar/desfijar: cada mensaje conserva su propio estado.
+            var isPinned = $message.attr('data-pinned') === '1';
             var messageId = parseInt($message.data('message-id'), 10) || null;
             var canPin = !currentModeration
+                && !readOnly
                 && !pendingId
                 && messageId !== null
                 && !deleted;
 
-            $menu.find('[data-action="pin"]').prop('hidden', !canPin || messageId === pinnedId);
-            $menu.find('[data-action="unpin"]').prop('hidden', !canPin || messageId !== pinnedId);
+            $menu.find('[data-action="pin"]').prop('hidden', !canPin || isPinned);
+            $menu.find('[data-action="unpin"]').prop('hidden', !canPin || !isPinned);
 
             $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
             placeMenu($menu, event);
@@ -1999,6 +3102,32 @@
 
             if (top < margin) {
                 top = Math.min(rect.bottom + 6, window.innerHeight - height - margin);
+            }
+
+            $menu.css({
+                left: left + 'px',
+                top: Math.max(margin, top) + 'px'
+            });
+        }
+
+        /**
+         * Menú desplegable del botón ⋮: alineado a su borde derecho y debajo.
+         */
+        function positionDropdownMenu($menu, anchor) {
+            if (!anchor) {
+                return;
+            }
+
+            var element = anchor.jquery ? anchor[0] : anchor;
+            var rect = element.getBoundingClientRect();
+            var width = $menu.outerWidth();
+            var height = $menu.outerHeight();
+            var margin = 8;
+            var left = Math.max(margin, Math.min(rect.right - width, window.innerWidth - width - margin));
+            var top = rect.bottom + 6;
+
+            if (top + height + margin > window.innerHeight) {
+                top = Math.max(margin, rect.top - height - 6);
             }
 
             $menu.css({
@@ -2054,12 +3183,22 @@
                     startMessagePolling();
                 }
             } else {
+                if (searchOpen) {
+                    closeChatSearch();
+                }
+
+                exitSelectionMode();
                 stopChatPolling();
                 closeChatProfile();
             }
         });
 
         $('#chat-close').on('click', function () {
+            if (searchOpen) {
+                closeChatSearch();
+            }
+
+            exitSelectionMode();
             $('#chat-panel').prop('hidden', true);
             $('#chat-toggle').attr('aria-expanded', 'false');
             stopChatPolling();
@@ -2088,6 +3227,10 @@
             var $panel = $('#chat-panel');
             var target = event.target;
 
+            if (!$(target).closest('#chat-more, #chat-more-menu').length) {
+                hideMoreMenu();
+            }
+
             if ($panel.prop('hidden')) {
                 return;
             }
@@ -2104,6 +3247,11 @@
                 return;
             }
 
+            if (searchOpen) {
+                closeChatSearch();
+            }
+
+            exitSelectionMode();
             $panel.prop('hidden', true);
             $('#chat-toggle').attr('aria-expanded', 'false');
             stopChatPolling();
@@ -2114,7 +3262,7 @@
 
             selectTab(tab);
 
-            if (tab === 'users' || tab === 'groups' || tab === 'reports') {
+            if (tab === 'users' || tab === 'groups' || tab === 'rooms' || tab === 'broadcasts' || tab === 'reports') {
                 refresh();
             }
 
@@ -2173,12 +3321,14 @@
         });
 
         $widget.on('click', '.chat-user-open', function () {
-            post(abrirUrl, { user_id: $(this).data('id') })
+            var userId = $(this).data('id');
+
+            post(chatBase + '/usuarios/' + userId + '/conversacion', {})
                 .done(function (response) {
-                    openConversation(response.conversation.id, response.conversation.title, 'Conversación directa');
+                    openProfileFromList(response.conversation_id);
                 })
                 .fail(function (xhr) {
-                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo abrir el chat.');
+                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo abrir el perfil.');
                 });
         });
 
@@ -2219,14 +3369,22 @@
         $('#chat-pin-menu').on('click', '[data-pin-action="unpin"]', function () {
             $('#chat-pin-menu').prop('hidden', true);
 
-            if (!currentId || currentModeration) {
+            if (!currentId || currentModeration || isReadOnlyChat()) {
                 return;
             }
 
+            var pinnedId = lastData && lastData.conversation && lastData.conversation.pinned_message
+                ? parseInt(lastData.conversation.pinned_message.id, 10)
+                : null;
+
             remove(chatBase + '/' + currentId + '/mensaje-fijado', {})
-                .done(function () {
+                .done(function (response) {
                     if (lastData && lastData.conversation) {
-                        lastData.conversation.pinned_message = null;
+                        lastData.conversation.pinned_message = response.pinned_message || null;
+                    }
+
+                    if (pinnedId) {
+                        refreshMessages([pinnedId]);
                     }
 
                     renderPinned();
@@ -2261,6 +3419,43 @@
             hideListMenu();
 
             if (!target || !target.id) {
+                return;
+            }
+
+            if (action === 'profile') {
+                openProfileFromList(target.id);
+                return;
+            }
+
+            if (action === 'chat' || action === 'favorite') {
+                post(chatBase + '/usuarios/' + target.id + '/conversacion', {})
+                    .done(function (response) {
+                        var conversationId = response.conversation_id;
+
+                        refresh().done(function () {
+                            selectTab('conversations');
+
+                            var $row = $('#chat-conversations [data-id="' + conversationId + '"]');
+
+                            if ($row.length) {
+                                $row.trigger('click');
+                            }
+
+                            if (action === 'profile') {
+                                window.setTimeout(function () {
+                                    $('#chat-profile-open').trigger('click');
+                                }, 900);
+                            }
+
+                            if (action === 'favorite') {
+                                post(chatBase + '/' + conversationId + '/favorito', {}).done(refresh);
+                            }
+                        });
+                    })
+                    .fail(function (xhr) {
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo abrir la conversación.');
+                    });
+
                 return;
             }
 
@@ -2411,7 +3606,11 @@
             }
 
             if (action === 'delete') {
-                AppDialog.confirm('¿Eliminar esta conversación para todos? No se puede deshacer.', function () {
+                AppDialog.confirm(
+                    target.isBroadcast
+                        ? '¿Eliminar esta difusión? No se puede deshacer.'
+                        : '¿Eliminar esta conversación para todos? No se puede deshacer.',
+                    function () {
                     remove(chatBase + '/' + target.id, {})
                         .done(function () {
                             if (currentId === target.id) {
@@ -2446,8 +3645,18 @@
                 return;
             }
 
+            if (action === 'member-back') {
+                showProfileSection('main');
+                return;
+            }
+
             if (action === 'members') {
-                manageMembers(target.id);
+                if (target.isClosed) {
+                    manageRoomMembers(target.id);
+                } else {
+                    manageMembers(target.id);
+                }
+
                 return;
             }
 
@@ -2508,6 +3717,50 @@
                 return;
             }
 
+            if (action === 'profile') {
+                post(chatBase + '/usuarios/' + target.id + '/conversacion', {})
+                    .done(function (response) {
+                        openProfileFromList(response.conversation_id);
+                    })
+                    .fail(function (xhr) {
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo abrir el perfil.');
+                    });
+
+                return;
+            }
+
+            if (action === 'chat' || action === 'favorite') {
+                post(chatBase + '/usuarios/' + target.id + '/conversacion', {})
+                    .done(function (response) {
+                        var conversationId = response.conversation_id;
+
+                        refresh().done(function () {
+                            selectTab('conversations');
+
+                            var $row = $('#chat-conversations [data-id="' + conversationId + '"]');
+
+                            if ($row.length) {
+                                $row.trigger('click');
+                            }
+
+                            if (action === 'profile') {
+                                window.setTimeout(function () {
+                                    $('#chat-profile-open').trigger('click');
+                                }, 900);
+                            }
+
+                            if (action === 'favorite') {
+                                post(chatBase + '/' + conversationId + '/favorito', {}).done(refresh);
+                            }
+                        });
+                    })
+                    .fail(function (xhr) {
+                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo abrir la conversación.');
+                    });
+
+                return;
+            }
+
             if (action === 'mute' || action === 'unmute') {
                 post(chatBase + '/usuarios/' + target.id + '/silenciar', {})
                     .done(function () {
@@ -2522,12 +3775,12 @@
 
             if (action === 'block') {
                 AppDialog.confirm(
-                    '¿Bloquear a «' + escape(target.name) + '»? Mientras esté bloqueado no podrás abrir el chat.',
+                    '¿Bloquear a «' + escape(target.name) + '»? Podrás abrir el chat, pero no enviar mensajes.',
                     function () {
                         post(chatBase + '/usuarios/' + target.id + '/bloquear', {})
                             .done(function () {
                                 if (currentId) {
-                                    loadMessages();
+                                    reloadConversationMessages();
                                 }
 
                                 refresh();
@@ -2544,6 +3797,10 @@
             if (action === 'unblock') {
                 remove(chatBase + '/usuarios/' + target.id + '/bloquear', {})
                     .done(function () {
+                        if (currentId) {
+                            reloadConversationMessages();
+                        }
+
                         refresh();
                     })
                     .fail(function (xhr) {
@@ -2599,9 +3856,12 @@
                     return;
                 }
 
+                var previousPinId = lastData && lastData.conversation && lastData.conversation.pinned_message
+                    ? parseInt(lastData.conversation.pinned_message.id, 10)
+                    : null;
                 var pinRequest = action === 'pin'
                     ? post(chatBase + '/' + currentId + '/fijar-mensaje/' + id, {})
-                    : remove(chatBase + '/' + currentId + '/mensaje-fijado', {});
+                    : remove(chatBase + '/' + currentId + '/mensaje-fijado/' + id, {});
 
                 pinRequest
                     .done(function (response) {
@@ -2609,6 +3869,13 @@
                             lastData.conversation.pinned_message = response.pinned_message || null;
                         }
 
+                        var refreshIds = [id];
+
+                        if (action === 'pin' && previousPinId && previousPinId !== id) {
+                            refreshIds.push(previousPinId);
+                        }
+
+                        refreshMessages(refreshIds);
                         renderPinned();
                     })
                     .fail(function (xhr) {
@@ -2640,6 +3907,12 @@
                 AppDialog.confirm('¿Desea eliminar el mensaje?', function () {
                     post(chatBase + '/mensajes/' + id + '/eliminar', {})
                         .done(function () {
+                            if (lastData && lastData.conversation && lastData.conversation.pinned_message
+                                && parseInt(lastData.conversation.pinned_message.id, 10) === id) {
+                                lastData.conversation.pinned_message = null;
+                                renderPinned();
+                            }
+
                             refreshMessages([id]);
                             refresh();
                         })
@@ -2934,6 +4207,193 @@
             }
 
             copyLightboxText(groupInviteUrl, 'Enlace de invitación copiado.');
+        });
+
+        /* ------------------------------------------------------------------
+           Salas cerradas: grupos con usuarios elegidos y sin invitación
+           ------------------------------------------------------------------ */
+
+        var roomModalElement = document.getElementById('modal-chat-room');
+        var roomModal = roomModalElement && window.bootstrap && window.bootstrap.Modal
+            ? window.bootstrap.Modal.getOrCreateInstance(roomModalElement)
+            : null;
+
+        function renderRoomUsers(users) {
+            var list = (users || []).filter(function (user) {
+                return !user.blocked && !user.blocked_by;
+            });
+
+            $('#chat-room-users').html(list.map(function (user) {
+                return '<label class="chat-group__user">' +
+                    '<input type="checkbox" class="form-check-input chat-room-user" value="' + user.id + '"> ' +
+                    escape(user.name) + '</label>';
+            }).join(''));
+        }
+
+        function resetRoomModal() {
+            $('#chat-room-error').text('');
+            $('#chat-room-create').prop('disabled', false);
+            renderRoomUsers(lastUsers);
+        }
+
+        $('#chat-room-open').on('click', function () {
+            resetRoomModal();
+
+            refresh().done(function (response) {
+                if (response && response.users) {
+                    renderRoomUsers(response.users);
+                }
+            });
+
+            if (roomModal) {
+                roomModal.show();
+            }
+        });
+
+        $('#chat-room-create').on('click', function () {
+            var ids = $('.chat-room-user:checked').map(function () {
+                return parseInt(this.value, 10);
+            }).get();
+
+            if (ids.length < 2) {
+                $('#chat-room-error').text('Elige al menos dos personas: contigo serán tres.');
+                return;
+            }
+
+            var $button = $(this).prop('disabled', true);
+            $('#chat-room-error').text('');
+
+            post(chatBase + '/sala', { user_ids: ids })
+                .done(function (response) {
+                    if (roomModal) {
+                        roomModal.hide();
+                    }
+
+                    refresh();
+                    selectTab('rooms');
+                    AppDialog.alert((response && response.message) || 'Sala creada.');
+                })
+                .fail(function (xhr) {
+                    $('#chat-room-error').text((xhr.responseJSON || {}).message || 'No se pudo crear la sala.');
+                })
+                .always(function () {
+                    $button.prop('disabled', false);
+                });
+        });
+
+        /* ------------------------------------------------------------------
+           Difusión: sala con destinatarios que reciben copia en su chat
+           ------------------------------------------------------------------ */
+
+        var broadcastModalElement = document.getElementById('modal-chat-broadcast');
+        var broadcastModal = broadcastModalElement && window.bootstrap && window.bootstrap.Modal
+            ? window.bootstrap.Modal.getOrCreateInstance(broadcastModalElement)
+            : null;
+
+        function renderBroadcastUsers(term) {
+            var query = String(term || '').toLowerCase().trim();
+            var users = (lastUsers || []).filter(function (user) {
+                if (user.blocked || user.blocked_by) {
+                    return false;
+                }
+
+                return !query || String(user.name || '').toLowerCase().indexOf(query) !== -1;
+            });
+
+            if (!users.length) {
+                $('#chat-broadcast-list').html('<p class="chat-hint">No hay personas disponibles.</p>');
+                updateBroadcastButton();
+                return;
+            }
+
+            $('#chat-broadcast-list').html(users.map(function (user) {
+                return '<label class="chat-broadcast__user">' +
+                    '<input type="checkbox" class="form-check-input chat-broadcast-user" value="' + user.id + '"> ' +
+                    '<span>' + escape(user.name) + '</span>' +
+                    '</label>';
+            }).join(''));
+
+            updateBroadcastButton();
+        }
+
+        function broadcastSelection() {
+            return $('.chat-broadcast-user:checked').map(function () {
+                return parseInt(this.value, 10);
+            }).get();
+        }
+
+        function updateBroadcastButton() {
+            var count = broadcastSelection().length;
+
+            $('#chat-broadcast-send')
+                .prop('disabled', count === 0)
+                .text(count > 0 ? 'Crear difusión (' + count + ')' : 'Crear difusión');
+        }
+
+        function openBroadcastCreation() {
+            $('#chat-broadcast-search').val('');
+            $('#chat-broadcast-error').text('');
+            $('#chat-broadcast-list').html('<p class="chat-hint">Cargando personas...</p>');
+            updateBroadcastButton();
+
+            if (broadcastModal) {
+                broadcastModal.show();
+            }
+
+            refresh().done(function (response) {
+                if (response && response.users) {
+                    renderBroadcastUsers('');
+                }
+            });
+        }
+
+        $('#chat-broadcast-open, #chat-broadcast-new').on('click', openBroadcastCreation);
+
+        $('#chat-broadcast-search').on('input', function () {
+            renderBroadcastUsers($(this).val());
+        });
+
+        $('#chat-broadcast-list').on('change', '.chat-broadcast-user', updateBroadcastButton);
+
+        $('#chat-broadcast-send').on('click', function () {
+            var ids = broadcastSelection();
+
+            if (!ids.length) {
+                $('#chat-broadcast-error').text('Elige al menos una persona.');
+                return;
+            }
+
+            var $button = $(this).prop('disabled', true);
+            $('#chat-broadcast-error').text('');
+
+            post(chatBase + '/broadcast', { user_ids: ids })
+                .done(function (response) {
+                    if (broadcastModal) {
+                        broadcastModal.hide();
+                    }
+
+                    var conversation = (response && response.conversation) || {};
+
+                    refresh();
+                    selectTab('broadcasts');
+
+                    if (conversation.id) {
+                        openConversation(
+                            conversation.id,
+                            conversation.title || 'Difusión',
+                            conversation.subtitle || ''
+                        );
+                    }
+                })
+                .fail(function (xhr) {
+                    $('#chat-broadcast-error').text(
+                        (xhr.responseJSON || {}).message || 'No se pudo crear la difusión.'
+                    );
+                })
+                .always(function () {
+                    $button.prop('disabled', false);
+                    updateBroadcastButton();
+                });
         });
 
         /* ------------------------------------------------------------------
@@ -3314,17 +4774,33 @@
                 .text(count > 1 ? 'Reenviar a ' + count : 'Reenviar');
         }
 
-        function openForwardModal($message) {
-            var id = parseInt($message.data('message-id'), 10);
+        function openForwardModal($messages) {
+            var nodes = $messages && $messages.jquery
+                ? $messages.toArray()
+                : ($messages && $messages.nodeType ? [$messages] : []);
+            var items = [];
 
-            if (!id) {
+            nodes.forEach(function (node) {
+                var $node = $(node);
+                var id = parseInt($node.data('message-id'), 10);
+
+                if (id) {
+                    items.push({ id: id, text: messageSummary($node) });
+                }
+            });
+
+            if (!items.length) {
                 return;
             }
 
-            forwardSource = { id: id, text: messageSummary($message) };
+            forwardSource = { items: items };
             forwardDestinations = null;
 
-            $('#chat-forward-preview').text(forwardSource.text);
+            $('#chat-forward-preview').text(
+                items.length === 1
+                    ? items[0].text
+                    : items.length + ' mensajes: ' + items[0].text
+            );
             $('#chat-forward-search').val('');
             $('#chat-forward-error').text('');
             $('#chat-forward-list').html('<p class="chat-hint">Cargando destinatarios...</p>');
@@ -3364,7 +4840,7 @@
         $('#chat-forward-list').on('change', '.chat-forward-target', updateForwardCount);
 
         $('#chat-forward-send').on('click', function () {
-            if (!forwardSource) {
+            if (!forwardSource || !forwardSource.items || !forwardSource.items.length) {
                 return;
             }
 
@@ -3376,33 +4852,60 @@
             }
 
             var $send = $(this).prop('disabled', true);
+            var items = forwardSource.items.slice();
+            var destinations = selection;
+            var index = 0;
+            var sent = 0;
+            var failed = 0;
+            var lastError = '';
+
             $('#chat-forward-error').text('');
 
-            post(chatBase + '/mensajes/' + forwardSource.id + '/reenviar', {
-                conversation_ids: selection.conversationIds,
-                user_ids: selection.userIds
-            }).done(function (response) {
-                if (forwardModal) {
-                    forwardModal.hide();
+            function sendNext() {
+                if (index >= items.length) {
+                    if (forwardModal) {
+                        forwardModal.hide();
+                    }
+
+                    if (currentId && destinations.conversationIds.indexOf(parseInt(currentId, 10)) !== -1) {
+                        loadMessages();
+                    }
+
+                    refresh();
+                    exitSelectionMode();
+
+                    if (sent > 0) {
+                        AppDialog.alert(
+                            items.length === 1
+                                ? (sent > 1 ? 'Mensaje reenviado a ' + sent + ' destinos.' : 'Mensaje reenviado.')
+                                : 'Se reenviaron ' + items.length + ' mensajes a ' + sent + ' destinos.' +
+                                    (failed > 0 ? ' ' + failed + ' no se pudieron reenviar.' : '')
+                        );
+                    } else {
+                        $('#chat-forward-error').text(lastError || 'No se pudo reenviar el mensaje.');
+                        $send.prop('disabled', false);
+                        updateForwardCount();
+                    }
+
+                    return;
                 }
 
-                var count = parseInt(response && response.count, 10) || 1;
+                var item = items[index++];
 
-                // Si el chat abierto está entre los destinos, se pinta lo nuevo.
-                if (currentId && selection.conversationIds.indexOf(parseInt(currentId, 10)) !== -1) {
-                    loadMessages();
-                }
+                post(chatBase + '/mensajes/' + item.id + '/reenviar', {
+                    conversation_ids: destinations.conversationIds,
+                    user_ids: destinations.userIds
+                }).done(function (response) {
+                    sent += parseInt(response && response.count, 10) || 1;
+                    sendNext();
+                }).fail(function (xhr) {
+                    failed += 1;
+                    lastError = (xhr.responseJSON || {}).message || 'No se pudo reenviar el mensaje.';
+                    sendNext();
+                });
+            }
 
-                refresh();
-                AppDialog.alert(count > 1 ? 'Mensaje reenviado a ' + count + ' destinos.' : 'Mensaje reenviado.');
-            }).fail(function (xhr) {
-                $('#chat-forward-error').text(
-                    (xhr.responseJSON || {}).message || 'No se pudo reenviar el mensaje.'
-                );
-            }).always(function () {
-                $send.prop('disabled', false);
-                updateForwardCount();
-            });
+            sendNext();
         });
 
         /* ------------------------------------------------------------------
@@ -3517,12 +5020,14 @@
             }
 
             var conversationId = currentId;
+            var moderation = currentModeration;
 
             pending.status = 'sending';
             paintPending();
 
             var data = new FormData();
             data.append('_token', token);
+            data.append('moderation', moderation ? 1 : 0);
 
             if (pending.body) {
                 data.append('body', pending.body);
@@ -3604,6 +5109,7 @@
                 // La respuesta viaja con la burbuja: si falla, «Volver a enviar»
                 // mantiene la cita.
                 reply: replyTarget,
+                moderation: currentModeration,
                 status: 'sending'
             };
 
@@ -4621,6 +6127,14 @@
             $('#chat-form').prop('hidden', false);
             $('#chat-mic').removeClass('is-recording');
             $('#chat-recorder-time').text('0:00');
+            var dot = document.getElementById('chat-recorder-dot');
+
+            if (dot) {
+                dot.style.setProperty('--recorder-level', '0');
+                dot.style.setProperty('--recorder-scale', '1');
+                dot.style.setProperty('--recorder-glow', '3px');
+            }
+
             recordSeconds = 0;
         }
 
@@ -4640,6 +6154,7 @@
             var data = new Uint8Array(analyser.frequencyBinCount);
             var canvas = $('#chat-recorder-wave')[0];
             var context = canvas.getContext('2d');
+            var dot = document.getElementById('chat-recorder-dot');
 
             function frame() {
                 if ($('#chat-recorder').prop('hidden')) {
@@ -4647,6 +6162,21 @@
                 }
 
                 analyser.getByteFrequencyData(data);
+
+                var energy = 0;
+
+                for (var index = 0; index < data.length; index++) {
+                    energy += data[index] * data[index];
+                }
+
+                var level = Math.min(1, Math.sqrt(energy / data.length) / 255 * 2.4);
+
+                if (dot) {
+                    dot.style.setProperty('--recorder-level', level.toFixed(3));
+                    dot.style.setProperty('--recorder-scale', (1 + level * 1.35).toFixed(3));
+                    dot.style.setProperty('--recorder-glow', (3 + level * 11).toFixed(1) + 'px');
+                }
+
                 context.clearRect(0, 0, canvas.width, canvas.height);
                 context.fillStyle = '#2F6F62';
 
@@ -4718,6 +6248,13 @@
                 $('#chat-mic').addClass('is-recording');
                 recordSeconds = 0;
                 $('#chat-recorder-time').text('0:00');
+                var dot = document.getElementById('chat-recorder-dot');
+
+                if (dot) {
+                    dot.style.setProperty('--recorder-level', '0');
+                    dot.style.setProperty('--recorder-scale', '1');
+                    dot.style.setProperty('--recorder-glow', '3px');
+                }
 
                 recordTimer = window.setInterval(function () {
                     recordSeconds += 1;
@@ -4767,6 +6304,13 @@
         var profileData = null;
         var profileMedia = [];
         var profileView = 'main';
+        var pendingMemberName = null;
+        var profileOrigin = 'conversation';
+        var profileConversationId = null;
+        var profileStandalone = false;
+        var currentMemberProfile = null;
+        var profileMainPrimaryHtml = '';
+        var blockedPromptConversationId = null;
 
         $('#chat-input').on('input', function () {
             var value = $(this).text();
@@ -5062,7 +6606,7 @@
                 badge = '<span class="chat-profile__member-badge chat-profile__member-badge--danger">' + escape(member.status) + '</span>';
             }
 
-            return '<div class="chat-profile__member" data-search="'
+            return '<div class="chat-profile__member" data-member-id="' + Number(member.id) + '" data-search="'
                 + escape((String(member.name || '') + ' ' + String(member.username || '')).toLowerCase()) + '">'
                 + '<span class="chat-profile__member-avatar">' + escape(profileInitials(member.name)) + '</span>'
                 + '<div class="chat-profile__member-main">'
@@ -5190,22 +6734,72 @@
                 + '</button>';
         }
 
+        function profileAvatarHtml(data, name) {
+            var people = null;
+
+            if (data.is_broadcast) {
+                people = (data.recipients || []).map(function (item) { return item.name; });
+            } else if (data.is_group && data.is_closed) {
+                people = (data.members || []).map(function (item) { return item.name; });
+            }
+
+            if (!people || people.length < 2) {
+                return '<span class="chat-profile__avatar">' + escape(profileInitials(name)) + '</span>';
+            }
+
+            var visible = people.slice(0, 3);
+            var extra = people.length - visible.length;
+            var html = '<span class="chat-profile__avatar-stack">';
+
+            visible.forEach(function (person) {
+                html += '<span class="chat-profile__avatar chat-profile__avatar--mini">' +
+                    escape(profileInitials(person)) + '</span>';
+            });
+
+            if (extra > 0) {
+                html += '<span class="chat-profile__avatar chat-profile__avatar--mini chat-profile__avatar--more">+' + extra + '</span>';
+            }
+
+            return html + '</span>';
+        }
+        function profilePrimaryButton(action, icon, label) {
+            return '<div class="chat-profile__primary">'
+                + '<button type="button" class="btn btn-primary w-100" data-profile-action="' + action + '">'
+                + '<i class="fa-solid ' + icon + '" aria-hidden="true"></i> '
+                + escape(label) + '</button>'
+                + '</div>';
+        }
+
         function renderChatProfile(data) {
-            var name = data.other && data.other.name ? data.other.name : (data.name || data.title || 'Conversación');
+            var name = data.other && data.other.name ? data.other.name : (data.title || data.name || 'Conversación');
             var html = '';
 
             if (data.is_secret && data.secret_role === 'receiver') {
                 name = 'Amigo secreto';
             }
 
-            $('#chat-profile-title').text(data.is_group ? (data.name || 'Grupo') : name);
-            $('#chat-profile-eyebrow').text(data.is_group ? 'Grupo' : (data.is_moderating ? 'Moderación' : 'Perfil'));
+            if (data.is_broadcast) {
+                name = 'Difusión';
+            }
+
+            $('#chat-profile-title').text(data.is_broadcast
+                ? (data.title || 'Difusión')
+                : (data.is_closed
+                    ? (data.title || data.name || 'Sala')
+                    : (data.is_group ? (data.title || data.name || 'Grupo') : name)));
+            $('#chat-profile-eyebrow').text(data.is_broadcast
+                ? 'Difusión'
+                : (data.is_closed
+                    ? 'Sala'
+                    : (data.is_group ? 'Grupo' : (data.is_moderating ? 'Moderación' : 'Perfil'))));
 
             html += '<div class="chat-profile__identity">'
-                + '<span class="chat-profile__avatar">' + escape(profileInitials(name)) + '</span>'
+                + profileAvatarHtml(data, name)
                 + '<p class="chat-profile__name">' + escape(name) + '</p>';
 
-            if (data.is_group) {
+            if (data.is_broadcast) {
+                html += '<p class="chat-profile__username">' + Number(data.recipients_count || 0) + ' destinatarios</p>';
+            } else if (data.is_group) {
                 html += '<p class="chat-profile__username">' + Number(data.members_count || 0) + ' miembros</p>';
             } else if (data.is_secret && data.secret_role === 'receiver') {
                 html += '<p class="chat-profile__username">Identidad protegida hasta el final del evento</p>';
@@ -5234,7 +6828,7 @@
                     + (visible.length ? visible.map(profileMemberRow).join('') : '<p class="chat-profile__empty">Sin miembros.</p>')
                     + '</div></div>';
 
-                if (data.can_manage) {
+                if (data.can_manage && !data.is_closed) {
                     html += '<div class="chat-profile__card">'
                         + '<div class="chat-profile__section-head">'
                         + '<span class="chat-profile__section-title">Auditoría del grupo</span>'
@@ -5242,6 +6836,30 @@
                         + 'Ver auditoría <i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>'
                         + '</div></div>';
                 }
+            }
+
+            if (data.is_broadcast) {
+                var recipients = data.recipients || [];
+
+                html += '<div class="chat-profile__card">'
+                    + '<div class="chat-profile__section-head">'
+                    + '<span class="chat-profile__section-title">Destinatarios (' + Number(data.recipients_count || 0) + ')</span>'
+                    + '</div>'
+                    + '<div class="chat-profile__member-summary">'
+                    + (recipients.length
+                        ? recipients.map(function (recipient) {
+                            var meta = recipient.username ? '@' + escape(recipient.username) : '';
+                            meta += (meta ? ' · ' : '') + (recipient.online ? 'En línea' : 'Desconectado');
+
+                            return '<div class="chat-profile__member">'
+                                + '<span class="chat-profile__member-avatar">' + escape(profileInitials(recipient.name)) + '</span>'
+                                + '<div class="chat-profile__member-main">'
+                                + '<span class="chat-profile__member-name">' + escape(recipient.name) + '</span>'
+                                + '<span class="chat-profile__member-meta">' + meta + '</span>'
+                                + '</div></div>';
+                        }).join('')
+                        : '<p class="chat-profile__empty">Sin destinatarios.</p>')
+                    + '</div></div>';
             }
 
             html += '<div class="chat-profile__card">'
@@ -5255,12 +6873,57 @@
                 + '<p class="chat-profile__media-empty">Cargando contenido...</p>'
                 + '</div></div>';
 
+            if (!data.is_group && !data.is_broadcast && !data.is_secret && !data.is_moderating && !data.is_moderating) {
+                var groups = data.common_groups || [];
+                var groupsTitle = groups.length === 1 ? '1 grupo en común' : groups.length + ' grupos en común';
+
+                if (!groups.length) {
+                    groupsTitle = 'No hay grupos en común';
+                }
+
+                html += '<div class="chat-profile__card chat-profile__card--groups">'
+                    + '<div class="chat-profile__section-head">'
+                    + '<span class="chat-profile__section-title">Grupos en común</span>'
+                    + '<span class="chat-profile__count">' + escape(groupsTitle) + '</span>'
+                    + '</div>'
+                    + (data.blocked || data.blocked_by
+                        ? ''
+                        : '<div class="chat-profile__common-actions">'
+                            + '<button type="button" class="chat-profile__common-action" data-profile-action="group">'
+                            + '<i class="fa-solid fa-user-group" aria-hidden="true"></i> Crear grupo con ' + escape(name)
+                            + '</button>'
+                            + '<button type="button" class="chat-profile__common-action" data-profile-action="add-groups">'
+                            + '<i class="fa-solid fa-user-plus" aria-hidden="true"></i> Añadir a ' + escape(name) + ' a grupos'
+                            + '</button>'
+                            + '</div>');
+
+                if (groups.length) {
+                    html += '<div class="chat-profile__common-list">' + groups.map(function (group) {
+                        return '<button type="button" class="chat-profile__common-group" data-profile-group="' + Number(group.id) + '">'
+                            + '<span class="chat-profile__common-name">' + escape(group.name || 'Grupo') + '</span>'
+                            + '<span class="chat-profile__common-members">' + escape((group.members || []).join(', ')) + '</span>'
+                            + '</button>';
+                    }).join('') + '</div>';
+                } else {
+                    html += '<p class="chat-profile__empty">No hay grupos en común</p>';
+                }
+
+                html += '</div>';
+            }
+
             var options = [];
 
             if (data.is_participant) {
                 options.push(profileOption('favorite', 'fa-star', data.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'));
-                options.push(profileOption('vaciar', 'fa-broom', data.is_group ? 'Vaciar sala' : 'Vaciar chat'));
+                options.push(profileOption(
+                    'vaciar',
+                    'fa-broom',
+                    data.is_broadcast
+                        ? 'Vaciar difusión'
+                        : (data.is_group ? 'Vaciar sala' : 'Vaciar chat')
+                ));
             }
+
 
             if (data.can_block && data.other) {
                 options.push(profileOption(
@@ -5271,18 +6934,31 @@
             }
 
             if (data.can_leave) {
-                options.push(profileOption('leave', 'fa-right-from-bracket', 'Salir del grupo'));
+                options.push(profileOption(
+                    'leave',
+                    'fa-right-from-bracket',
+                    data.is_closed ? 'Salir de la sala' : 'Salir del grupo'
+                ));
             }
 
             if (data.can_delete) {
-                options.push(profileOption('delete', 'fa-trash', 'Eliminar grupo', 'danger'));
+                options.push(profileOption(
+                    'delete',
+                    'fa-trash',
+                    data.is_broadcast
+                        ? 'Eliminar difusión'
+                        : (data.is_closed ? 'Eliminar sala' : 'Eliminar grupo'),
+                    'danger'
+                ));
             }
 
             if (data.can_report && (!data.is_secret || data.secret_role === 'giver' || data.is_group)) {
                 options.push(profileOption(
                     data.is_group ? 'report-group' : 'report-user',
                     'fa-flag',
-                    data.is_group ? 'Reportar grupo' : 'Reportar ' + (data.other ? data.other.name : 'usuario')
+                    data.is_group
+                        ? (data.is_closed ? 'Reportar sala' : 'Reportar grupo')
+                        : 'Reportar ' + (data.other ? data.other.name : 'usuario')
                 ));
             }
 
@@ -5290,10 +6966,57 @@
                 html += '<div class="chat-profile__options">' + options.join('') + '</div>';
             }
 
+            var primaryHtml = '';
+
+            if (!data.is_secret || data.secret_role === 'giver') {
+                if (profileOrigin === 'conversation') {
+                    primaryHtml = profilePrimaryButton('search', 'fa-magnifying-glass', 'Buscar');
+                } else if (data.is_group || data.is_broadcast) {
+                    primaryHtml = profilePrimaryButton('open-conversation', 'fa-comments', 'Conversación');
+                } else {
+                    primaryHtml = profilePrimaryButton('open-message', 'fa-comment', 'Mensaje');
+                }
+            }
+
             $('#chat-profile-main').html(html).prop('hidden', false);
+            profileMainPrimaryHtml = primaryHtml;
+            $('#chat-profile-footer').html(primaryHtml).prop('hidden', primaryHtml === '');
             $('#chat-profile-loading').prop('hidden', true);
             showProfileSection('main');
             renderProfileMedia();
+        }
+
+        function openMemberCard(memberId) {
+            if (!profileData || !profileData.members) {
+                return;
+            }
+
+            var member = profileData.members.filter(function (item) {
+                return String(item.id) === String(memberId);
+            })[0];
+
+            if (!member) {
+                return;
+            }
+
+            $('#chat-member-avatar').text(profileInitials(member.name));
+            $('#chat-member-name').text(member.name || '');
+            $('#chat-member-username').text(member.username ? '@' + member.username : '');
+            $('#chat-member-status').text([
+                member.is_owner ? 'Dueño del grupo' : '',
+                member.status || '',
+                member.online ? 'En línea' : ''
+            ].filter(Boolean).join(' · '));
+
+            currentMemberProfile = member;
+            var currentUserId = parseInt($widget.attr('data-user-id'), 10);
+            var primaryHtml = String(member.id) === String(currentUserId)
+                ? ''
+                : profilePrimaryButton('member-message', 'fa-comment', 'Mensaje');
+
+            $('#chat-profile-footer').html(primaryHtml).prop('hidden', primaryHtml === '');
+
+            showProfileSection('member');
         }
 
         function showProfileSection(name) {
@@ -5301,41 +7024,97 @@
             $('#chat-profile [data-profile-section]').prop('hidden', true);
             $('#chat-profile [data-profile-section="' + name + '"]').prop('hidden', false);
             $('#chat-gallery-panel').prop('hidden', name !== 'gallery');
-            $('#chat-profile-back').attr('aria-label', name === 'main' ? 'Volver a la conversación' : 'Volver al perfil');
+
+            if (name === 'main') {
+                $('#chat-profile-footer')
+                    .html(profileMainPrimaryHtml)
+                    .prop('hidden', profileMainPrimaryHtml === '');
+            }
+
+            $('#chat-profile-footer').prop(
+                'hidden',
+                (name !== 'main' && name !== 'member') || $('#chat-profile-footer').children().length === 0
+            );
+            $('#chat-profile-back').attr(
+                'aria-label',
+                name === 'main'
+                    ? (profileStandalone ? 'Volver a la lista' : 'Volver a la conversación')
+                    : 'Volver al perfil'
+            );
             $('#chat-profile-body').scrollTop(0);
         }
 
-        function openChatProfile() {
-            if (!currentId) {
+        function openChatProfile(conversationId, origin) {
+            var standalone = origin === 'list';
+            var id = standalone ? conversationId : (conversationId || currentId);
+
+            if (!id) {
                 return;
             }
 
-            var conversationId = currentId;
+            if (searchOpen) {
+                closeChatSearch();
+            }
+
+            exitSelectionMode();
+
+            if (standalone) {
+                closeChatProfile();
+                currentModeration = false;
+                stopChatPolling();
+            }
+
+            profileOrigin = standalone ? 'list' : 'conversation';
+            profileStandalone = standalone;
+            profileConversationId = id;
+            currentId = id;
+
+            if (standalone) {
+                $('#chat-panel > .chat-tabs').hide();
+                $('#chat-body').hide();
+                $('#chat-conversation').prop('hidden', false).removeClass('is-gallery');
+                $('#chat-messages').empty();
+            }
 
             profileData = null;
+            currentMemberProfile = null;
+            profileMainPrimaryHtml = '';
             profileMedia = [];
             profileView = 'main';
 
             $('#chat-profile').prop('hidden', false);
             $('#chat-profile-loading').prop('hidden', false).text('Cargando perfil...');
+            $('#chat-profile-footer').prop('hidden', true).empty();
             $('#chat-profile-main').empty().prop('hidden', true);
             $('#chat-profile [data-profile-section]').prop('hidden', true);
             $('#chat-profile [data-profile-section="main"]').prop('hidden', false);
             $('#chat-profile-title').text('Perfil');
             $('#chat-profile-eyebrow').text(currentModeration ? 'Moderación' : 'Perfil');
 
-            $.getJSON(chatBase + '/' + conversationId + '/perfil')
+            $.getJSON(chatBase + '/' + id + '/perfil')
                 .done(function (response) {
-                    if (currentId !== conversationId) {
+                    if (currentId !== id) {
                         return;
                     }
 
                     profileData = response;
                     renderChatProfile(response);
 
-                    $.getJSON(chatBase + '/' + conversationId + '/media')
+                    if (pendingMemberName) {
+                        var wanted = pendingMemberName;
+                        pendingMemberName = null;
+                        var found = (response.members || []).filter(function (member) {
+                            return String(member.name || '').toLowerCase() === String(wanted).toLowerCase();
+                        })[0];
+
+                        if (found) {
+                            openMemberCard(found.id);
+                        }
+                    }
+
+                    $.getJSON(chatBase + '/' + id + '/media')
                         .done(function (mediaResponse) {
-                            if (currentId !== conversationId || !profileData) {
+                            if (currentId !== id || !profileData) {
                                 return;
                             }
 
@@ -5343,14 +7122,14 @@
                             renderProfileMedia();
                         })
                         .fail(function () {
-                            if (currentId === conversationId && profileData) {
+                            if (currentId === id && profileData) {
                                 profileMedia = [];
                                 renderProfileMedia();
                             }
                         });
                 })
                 .fail(function (xhr) {
-                    if (currentId !== conversationId) {
+                    if (currentId !== id) {
                         return;
                     }
 
@@ -5360,13 +7139,51 @@
                 });
         }
 
+        function openProfileFromList(conversationId) {
+            if (!conversationId) {
+                return;
+            }
+
+            openChatProfile(conversationId, 'list');
+        }
+
         function closeChatProfile() {
+            var standalone = profileStandalone;
+
+            profileStandalone = false;
+            profileOrigin = 'conversation';
+            currentMemberProfile = null;
             $('#chat-profile').prop('hidden', true);
             $('#chat-gallery-panel').prop('hidden', true);
+            $('#chat-profile-footer').prop('hidden', true).empty();
             profileData = null;
             profileMedia = [];
             profileView = 'main';
             $('#chat-profile-member-search').val('');
+
+            if (standalone) {
+                showList();
+            }
+        }
+
+        function openMessageWithUser(userId, name) {
+            if (!userId) {
+                return;
+            }
+
+            post(chatBase + '/usuarios/' + userId + '/conversacion', {})
+                .done(function (response) {
+                    if (response.conversation_id) {
+                        openConversation(
+                            response.conversation_id,
+                            name || 'Conversación',
+                            'Conversación directa'
+                        );
+                    }
+                })
+                .fail(function (xhr) {
+                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo abrir el chat.');
+                });
         }
 
         function openProfileGallery(tab) {
@@ -5428,8 +7245,91 @@
 
             var other = profileData.other;
 
+            if (action === 'search') {
+                closeChatProfile();
+                openChatSearch();
+                return;
+            }
+
+            if (action === 'open-message') {
+                if (profileConversationId) {
+                    openConversation(
+                        profileConversationId,
+                        profileData.title || (other ? other.name : ''),
+                        other && other.online ? 'En línea' : 'Conversación directa'
+                    );
+                } else {
+                    openMessageWithUser(other ? other.id : null, other ? other.name : '');
+                }
+
+                return;
+            }
+
+            if (action === 'member-message') {
+                openMessageWithUser(
+                    currentMemberProfile ? currentMemberProfile.id : null,
+                    currentMemberProfile ? currentMemberProfile.name : ''
+                );
+                return;
+            }
+
+            if (action === 'open-conversation') {
+                var targetId = profileConversationId || currentId;
+                var title = profileData.title || profileData.name || 'Conversación';
+                var subtitle = profileData.is_group
+                    ? Number(profileData.members_count || 0) + ' miembros'
+                    : (profileData.is_broadcast
+                        ? Number(profileData.recipients_count || 0) + ' destinatarios'
+                        : '');
+
+                openConversation(targetId, title, subtitle);
+                return;
+            }
+
             if (action === 'gallery') {
                 openProfileGallery($trigger.data('gallery-tab'));
+                return;
+            }
+
+            if (action === 'add-groups') {
+                var addable = ((profileData && profileData.my_groups) || []).filter(function (group) { return !group.has_other; });
+                var modalElement = document.getElementById('modal-chat-add-groups');
+
+                $('#chat-add-groups-error').text('');
+                $('#chat-add-groups-list').html(
+                    addable.length
+                        ? addable.map(function (group) {
+                            return '<label class="chat-add-groups__item">' +
+                                '<input type="checkbox" class="form-check-input chat-add-group" value="' + Number(group.id) + '"> ' +
+                                '<span>' + escape(group.name) + '</span></label>';
+                        }).join('')
+                        : '<p class="chat-profile__empty">No tienes grupos disponibles para agregar.</p>'
+                );
+
+                if (modalElement && window.bootstrap) {
+                    window.bootstrap.Modal.getOrCreateInstance(modalElement).show();
+                }
+
+                return;
+            }
+
+            if (action === 'group') {
+                var otherId = profileData && profileData.other ? profileData.other.id : null;
+
+                closeChatProfile();
+                $('#chat-group-open').trigger('click');
+
+                if (otherId) {
+                    window.setTimeout(function () {
+                        $('#chat-group-users .chat-group-user[value="' + otherId + '"]').prop('checked', true);
+                    }, 900);
+                }
+
+                return;
+            }
+
+            if (action === 'member-back') {
+                showProfileSection('main');
                 return;
             }
 
@@ -5461,7 +7361,9 @@
 
             if (action === 'vaciar') {
                 AppDialog.confirm(
-                    profileData.is_group ? '¿Vaciar esta sala de tu lado?' : '¿Vaciar este chat de tu lado?',
+                    profileData.is_broadcast
+                        ? '¿Vaciar esta difusión de tu lado?'
+                        : (profileData.is_group ? '¿Vaciar esta sala de tu lado?' : '¿Vaciar este chat de tu lado?'),
                     function () {
                         post(chatBase + '/' + currentId + '/vaciar', {})
                             .done(function () {
@@ -5494,6 +7396,10 @@
                                 if (profileData) {
                                     profileData.blocked = blocking;
                                     renderChatProfile(profileData);
+                                }
+
+                                if (currentId) {
+                                    reloadConversationMessages();
                                 }
 
                                 refresh();
@@ -5536,7 +7442,11 @@
             }
 
             if (action === 'delete') {
-                AppDialog.confirm('¿Eliminar este grupo para todos? No se puede deshacer.', function () {
+                AppDialog.confirm(
+                    profileData && profileData.is_broadcast
+                        ? '¿Eliminar esta difusión? No se puede deshacer.'
+                        : '¿Eliminar este grupo para todos? No se puede deshacer.',
+                    function () {
                     remove(chatBase + '/' + currentId, {})
                         .done(function () {
                             closeChatProfile();
@@ -5548,7 +7458,134 @@
             }
         }
 
-        $('#chat-profile-open').on('click', openChatProfile);
+        $('#chat-add-groups-save').on('click', function () {
+            var ids = $('.chat-add-group:checked').map(function () { return Number(this.value); }).get();
+
+            if (!ids.length) {
+                $('#chat-add-groups-error').text('Selecciona al menos un grupo.');
+                return;
+            }
+
+            post(chatBase + '/' + currentId + '/grupos/agregar', { groups: ids })
+                .done(function (response) {
+                    var element = document.getElementById('modal-chat-add-groups');
+
+                    if (element && window.bootstrap) {
+                        window.bootstrap.Modal.getOrCreateInstance(element).hide();
+                    }
+
+                    AppDialog.alert((response && response.message) || 'Listo.');
+                    refresh();
+                })
+                .fail(function (xhr) {
+                    $('#chat-add-groups-error').text((xhr.responseJSON || {}).message || 'No se pudo agregar.');
+                });
+        });
+
+        $(document).on('click', '[data-chat-open-profile]', function (event) {
+            event.stopPropagation();
+
+            if (currentModeration) {
+                return;
+            }
+
+            var isGroup = $(this).attr('data-group') === '1';
+            var senderName = $(this).attr('data-sender-name') || '';
+
+            $('#chat-profile-open').trigger('click');
+
+            if (isGroup && senderName) {
+                pendingMemberName = senderName;
+            }
+        });
+
+        $('#chat-more').on('click', function (event) {
+            event.stopPropagation();
+
+            var $menu = $('#chat-more-menu');
+
+            if (!$menu.prop('hidden')) {
+                hideMoreMenu();
+                return;
+            }
+
+            hideContextMenu();
+            hideListMenu();
+            hideUserMenu();
+            hideContentMenu();
+
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+            positionDropdownMenu($menu, $(this));
+            $(this).attr('aria-expanded', 'true');
+        });
+
+        $('#chat-more-menu').on('click', '[data-more-action]', function (event) {
+            event.stopPropagation();
+
+            var action = $(this).data('more-action');
+
+            hideMoreMenu();
+
+            if (action === 'search') {
+                openChatSearch();
+            } else if (action === 'select') {
+                enterSelectionMode();
+            } else if (action === 'profile') {
+                openChatProfile();
+            }
+        });
+
+        $('#chat-search-input').on('input', scheduleChatSearch);
+
+        $('#chat-search-input').on('keydown', function (event) {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeChatSearch();
+                return;
+            }
+
+            if (event.key === 'Enter') {
+                event.preventDefault();
+
+                var $first = $('#chat-search-results .chat-search__result').first();
+
+                if ($first.length) {
+                    jumpToSearchResult($first.data('id'));
+                }
+            }
+        });
+
+        $('#chat-search-close').on('click', function () {
+            closeChatSearch();
+        });
+
+        $('#chat-search-results').on('click', '.chat-search__result', function () {
+            jumpToSearchResult($(this).data('id'));
+        });
+
+        $(document).on('keydown', function (event) {
+            if (event.key !== 'Escape') {
+                return;
+            }
+
+            if (!$('#chat-more-menu').prop('hidden')) {
+                hideMoreMenu();
+                return;
+            }
+
+            if (selectionMode && !$('.modal.show').length) {
+                exitSelectionMode();
+                return;
+            }
+
+            if (searchOpen) {
+                closeChatSearch();
+            }
+        });
+
+        $('#chat-profile-open').on('click', function () {
+            openChatProfile();
+        });
 
         $('#chat-profile-back').on('click', function () {
             if (profileView !== 'main') {
@@ -5557,6 +7594,27 @@
             }
 
             closeChatProfile();
+        });
+
+        $(document).on('click', '[data-profile-group]', function () {
+            if (currentModeration) {
+                return;
+            }
+
+            var groupId = String($(this).attr('data-profile-group'));
+
+            closeChatProfile();
+            selectTab('groups');
+
+            var $row = $('#chat-groups [data-id="' + groupId + '"]');
+
+            if ($row.length) {
+                $row.trigger('click');
+            }
+        });
+
+        $('#chat-profile').on('click', '[data-member-id]', function () {
+            openMemberCard($(this).attr('data-member-id'));
         });
 
         $('#chat-profile').on('click', '[data-profile-action]', function () {
@@ -6136,6 +8194,93 @@
             $('#chat-panel').prop('hidden', false);
             $('#chat-toggle').attr('aria-expanded', 'true');
             startSummaryPolling();
+        }
+
+        function manageRoomMembers(conversationId) {
+            $.getJSON(chatBase + '/grupo/' + conversationId + '/miembros').done(function (response) {
+                var items = (response && response.items) || [];
+                var removable = items.filter(function (item) { return !item.is_owner; });
+                var available = (lastUsers || []).filter(function (user) {
+                    return !user.blocked
+                        && !user.blocked_by
+                        && !items.some(function (item) { return String(item.id) === String(user.id); });
+                });
+
+                var html = '';
+
+                if (removable.length) {
+                    html += '<div class="mb-2"><label class="form-label" for="chat-room-member-remove">Quitar de la sala</label>' +
+                        '<select class="form-select" id="chat-room-member-remove">' +
+                        removable.map(function (item) {
+                            return '<option value="' + item.id + '">' + escape(item.name) + '</option>';
+                        }).join('') +
+                        '</select></div>';
+                }
+
+                if (available.length) {
+                    html += '<div class="mb-2"><label class="form-label" for="chat-room-member-add">Agregar a la sala</label>' +
+                        '<select class="form-select" id="chat-room-member-add">' +
+                        available.map(function (user) {
+                            return '<option value="' + user.id + '">' + escape(user.name) + '</option>';
+                        }).join('') +
+                        '</select></div>';
+                }
+
+                if (!html) {
+                    html = '<p class="chat-hint">No hay otros usuarios disponibles.</p>';
+                }
+
+                AppDialog.custom({
+                    title: 'Miembros de la sala',
+                    centerVertical: true,
+                    message: html,
+                    buttons: {
+                        cancel: { label: 'Cerrar', className: 'btn-outline-secondary' },
+                        remove: {
+                            label: 'Quitar',
+                            className: 'btn-outline-danger',
+                            callback: function () {
+                                var memberId = $('#chat-room-member-remove').val();
+
+                                if (!memberId) {
+                                    return;
+                                }
+
+                                post(chatBase + '/' + conversationId + '/expulsar/' + memberId, {})
+                                    .done(function (dialogResponse) {
+                                        AppDialog.alert(dialogResponse.message || 'Miembro quitado de la sala.');
+                                        refresh();
+                                    })
+                                    .fail(function (xhr) {
+                                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo quitar al miembro.');
+                                    });
+                            }
+                        },
+                        add: {
+                            label: 'Agregar',
+                            className: 'btn-primary',
+                            callback: function () {
+                                var userId = $('#chat-room-member-add').val();
+
+                                if (!userId) {
+                                    return;
+                                }
+
+                                post(chatBase + '/sala/' + conversationId + '/miembros', { user_id: userId })
+                                    .done(function (dialogResponse) {
+                                        AppDialog.alert(dialogResponse.message || 'Miembro agregado a la sala.');
+                                        refresh();
+                                    })
+                                    .fail(function (xhr) {
+                                        AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo agregar al miembro.');
+                                    });
+                            }
+                        }
+                    }
+                });
+            }).fail(function (xhr) {
+                AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudieron cargar los miembros.');
+            });
         }
 
         function manageMembers(conversationId) {

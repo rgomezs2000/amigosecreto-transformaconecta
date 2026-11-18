@@ -30,6 +30,12 @@ class SorteoCiegoController extends Controller
         return view('sorteo.index', [
             'event' => $event,
             'estado' => $this->sorteo->estado($event, $user),
+            'participacion' => $event !== null
+                ? \App\Models\EventParticipant::query()
+                    ->where('event_id', $event->id)
+                    ->where('user_id', $user->id)
+                    ->first()
+                : null,
         ]);
     }
 

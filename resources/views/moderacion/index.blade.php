@@ -81,10 +81,9 @@
                         <label for="moderacion-filter-case-type" class="form-label">Tipo de caso</label>
                         <select class="form-select" id="moderacion-filter-case-type">
                             <option value="">Todos los tipos</option>
-                            <option value="moderacion">Moderación y contenido</option>
-                            <option value="sugerencia">Sugerencia</option>
-                            <option value="ayuda">Ayuda</option>
-                            <option value="soporte">Soporte</option>
+                            @foreach (\App\Models\ChatReport::TYPES as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
                         </select>
                     </div>
 
@@ -635,6 +634,7 @@
                     \App\Models\ChatReport::TYPE_SUGGESTION => 'Sugerencia',
                     \App\Models\ChatReport::TYPE_HELP => 'Ayuda',
                     \App\Models\ChatReport::TYPE_SUPPORT => 'Soporte',
+                    \App\Models\ChatReport::TYPE_USER_REGISTRATION => 'Usuarios',
                 ],
                 'endpoint' => route('moderacion.crear'),
                 'mode' => 'admin',

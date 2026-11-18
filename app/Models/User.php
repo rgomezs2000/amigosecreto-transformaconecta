@@ -478,6 +478,12 @@ class User extends Authenticatable
         return $this->hasMany(EventParticipant::class);
     }
 
+    /** Deseos escritos por el usuario para un evento. */
+    public function wishItems(): HasMany
+    {
+        return $this->hasMany(WishItem::class);
+    }
+
     public function givenAssignments(): HasMany
     {
         return $this->hasMany(Assignment::class, 'giver_id');

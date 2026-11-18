@@ -7,7 +7,8 @@
             </h2>
             <p class="sorteo-card__text">
                 Agrega los detalles que se consumen (chocolates, café, dulces…). Cada uno con su
-                valor en US$ y su equivalente en Bs. a la tasa oficial del BCV.
+                valor en US$ y su equivalente en Bs. a la tasa oficial del BCV. El total no puede
+                superar el presupuesto del evento.
             </p>
         </div>
 
@@ -26,6 +27,18 @@
     @endunless
 
     <p class="amigo-form-status" id="amigo-consumibles-status" role="status" aria-live="polite"></p>
+
+    <div class="amigo-tabla-toolbar">
+        <label for="amigo-consumibles-search" class="form-label">Buscar consumible</label>
+        <div class="amigo-tabla-toolbar__row">
+            <input type="search" class="form-control" id="amigo-consumibles-search"
+                   placeholder="Escribe la primera letra…" autocomplete="off">
+            <button type="button" class="btn btn-outline-secondary" id="amigo-consumibles-search-clear">
+                <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                <span>Limpiar</span>
+            </button>
+        </div>
+    </div>
 
     <div class="table-responsive">
         <table id="amigo-consumibles-table"

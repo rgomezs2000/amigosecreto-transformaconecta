@@ -220,6 +220,7 @@ class SorteoService
             $assignment->forceFill(['drawn_at' => now()])->save();
 
             $this->enviarAliento($event, $user);
+            $this->avisarAsignacion($event, $assignment->fresh(['receiver']));
             $this->cerrarSiCompleto($event);
         }
 
@@ -257,11 +258,12 @@ class SorteoService
             $event->update([
                 'status' => EventStatus::Drawn,
                 'draw_closed_at' => now(),
+                'dynamic_starts_at' => now(),
             ]);
 
             $this->chat->anunciar(
                 $event,
-                'El sorteo ciego ha concluido: todos los participantes ya eligieron a su amigo secreto. Comienza la etapa de la lista de deseos.'
+                'El sorteo ciego ha concluido: todos los participantes ya eligieron a su amigo secreto. Comienza el intercambio de pistas.'
             );
 
             foreach ($participantes as $participante) {
@@ -269,9 +271,9 @@ class SorteoService
                     $participante,
                     'sorteo.concluido',
                     'El sorteo ha concluido',
-                    'Todos eligieron a su amigo secreto. Ya puedes preparar tu lista de deseos.',
+                    'Todos eligieron a su amigo secreto. Ya puedes escribir tus pistas en «Intercambio de pistas».',
                     ['event_id' => $event->id],
-                    module_url('ver-tu-amigo'),
+                    module_url('intercambio-de-pista'),
                     'evento'
                 );
             }
@@ -301,6 +303,7 @@ class SorteoService
             $event->update([
                 'status' => EventStatus::DrawEnabled,
                 'draw_closed_at' => null,
+                'dynamic_starts_at' => null,
             ]);
 
             AuditLog::create([
@@ -327,23 +330,18 @@ class SorteoService
     }
 
     /**
-     * Tarjeta con lo único que el usuario puede ver de su amigo secreto.
+     * Tarjeta con lo único que el usuario puede ver de su amigo secreto: el
+     * nombre. No se revela el usuario ni datos de contacto.
      *
-     * @return array{id:int,name:string,username:string,notas:?string}
+     * @return array{id:int,name:string}
      */
     public function tarjetaAmigo(Event $event, Assignment $assignment): array
     {
         $receiver = $assignment->receiver;
 
-        $notas = $event->participants()
-            ->where('users.id', $receiver?->id)
-            ->first()?->pivot?->notes;
-
         return [
             'id' => (int) $receiver?->id,
             'name' => (string) ($receiver?->name ?? ''),
-            'username' => (string) ($receiver?->username ?? ''),
-            'notas' => $notas !== null && trim((string) $notas) !== '' ? (string) $notas : null,
         ];
     }
 
@@ -361,7 +359,6 @@ class SorteoService
                 $query->where('event_id', $event->id)->where('receiver_id', $user->id);
             })
             ->orderByDesc('sent_at')
-            ->limit(20)
             ->get();
     }
 
@@ -406,6 +403,47 @@ class SorteoService
                 'preheader' => 'Un mensaje anónimo para ti.',
             ]
         );
+    }
+
+    /**
+     * Avisa a las dos partes que el reparto ya las tocó: al que regala se le
+     * revela el nombre de su asignado; al que recibe se le avisa del chat sin
+     * revelar quién es.
+     */
+    private function avisarAsignacion(Event $event, Assignment $assignment): void
+    {
+        $giver = $assignment->giver;
+        $receiver = $assignment->receiver;
+
+        if ($giver !== null) {
+            $this->push->send(
+                $giver,
+                'sorteo.asignado',
+                'Tu amigo secreto',
+                'Te tocó regalarle a '.($receiver?->name ?? 'tu amigo secreto').'. Ya puedes escribir tus pistas y registrar tu obsequio.',
+                ['event_id' => $event->id, 'assignment_id' => $assignment->id],
+                module_url('ver-tu-amigo'),
+                'evento'
+            );
+        }
+
+        if ($receiver !== null) {
+            $conversation = Conversation::query()
+                ->where('assignment_id', $assignment->id)
+                ->first();
+
+            $this->push->send(
+                $receiver,
+                'sorteo.chat',
+                'Tu amigo secreto abrió un chat contigo',
+                'Puedes conversar de forma anónima con tu amigo secreto desde el chat. No sabrás quién es hasta la gran revelación.',
+                ['event_id' => $event->id, 'assignment_id' => $assignment->id],
+                $conversation !== null
+                    ? module_url('chat').'?conversacion='.$conversation->id
+                    : module_url('ver-tu-amigo'),
+                'evento'
+            );
+        }
     }
 
     /**

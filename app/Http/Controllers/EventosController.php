@@ -7,11 +7,14 @@ use App\Enums\ParticipantStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\Event;
+use App\Models\EventParticipant;
 use App\Models\Module;
 use App\Models\User;
 use App\Services\EventoChat;
+use App\Services\InvitacionesEvento;
 use App\Services\PushNotifier;
 use App\Services\SorteoService;
+use App\Support\FaseEvento;
 use Carbon\Carbon;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
@@ -27,6 +30,7 @@ class EventosController extends Controller
         private readonly SorteoService $sorteo,
         private readonly EventoChat $chat,
         private readonly PushNotifier $push,
+        private readonly InvitacionesEvento $invitaciones,
     ) {}
 
     private function ensureAccess(): void
@@ -48,15 +52,17 @@ class EventosController extends Controller
 
         $events = Event::query()->orderByDesc('year')->get();
 
-        $participants = User::query()
-            ->where('role', UserRole::Participant->value)
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->get();
+        // Si se crearon usuarios después del evento, al abrir la página ya
+        // aparecen sus invitaciones pendientes.
+        $events->each(function (Event $event) {
+            if ($event->status->allowsInvitations()) {
+                $this->invitaciones->generar($event);
+            }
+        });
 
         return view('eventos.index', [
             'events' => $events,
-            'participantUsers' => $participants,
+            'tasa' => dollar_rate(),
         ]);
     }
 
@@ -72,16 +78,7 @@ class EventosController extends Controller
             ->orderByDesc('year')
             ->get();
 
-        $data = $events->map(fn (Event $event) => [
-            'id' => $event->id,
-            'year' => $event->year,
-            'name' => $event->name,
-            'status' => $event->statusLabel(),
-            'badge' => $event->isSuspended() ? 'blocked' : ($event->status->isFinished() ? 'inactive' : 'active'),
-            'exchange' => $event->exchange_at?->format('d/m/Y') ?? 'Sin fecha',
-            'participants' => $event->participants_count,
-            'created' => $event->created_at?->format('d/m/Y') ?? '—',
-        ])->values();
+        $data = $events->map(fn (Event $event) => $this->tarjetaData($event))->values();
 
         return api_success('Estado de eventos.', [
             'version' => md5($data->toJson()),
@@ -91,20 +88,51 @@ class EventosController extends Controller
         ]);
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    private function tarjetaData(Event $event): array
+    {
+        $participaciones = $event->participations()->get()->groupBy(fn (EventParticipant $item) => $item->status->value);
+
+        return [
+            'id' => $event->id,
+            'year' => $event->year,
+            'name' => $event->name,
+            'status' => $event->statusLabel(),
+            'badge' => $event->isSuspended() ? 'blocked' : ($event->status->isFinished() ? 'inactive' : 'active'),
+            'phase' => FaseEvento::paso($event),
+            'phase_label' => FaseEvento::etiquetaDe($event),
+            'exchange' => $event->exchange_at?->format('d/m/Y') ?? 'Sin fecha',
+            'participants' => $event->participants_count,
+            'active' => (int) ($participaciones->get(ParticipantStatus::Active->value)?->count() ?? 0),
+            'pending' => (int) ($participaciones->get(ParticipantStatus::Pending->value)?->count() ?? 0),
+            'budget' => $event->budget() !== null ? 'US$ '.format_rate($event->budget()) : 'Sin presupuesto',
+            'created' => $event->created_at?->format('d/m/Y') ?? '—',
+        ];
+    }
+
     public function crear(Request $request): JsonResponse
     {
         $this->ensureAccess();
 
+        if ($request->filled('max_value') && ! $request->filled('presupuesto')) {
+            $request->merge(['presupuesto' => $request->input('max_value')]);
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:120'],
-            'exchange_at' => ['required', 'date'],
+            'exchange_at' => ['required', 'date', 'after_or_equal:today'],
+            'presupuesto' => ['required', 'numeric', 'min:0.01', 'max:99999999.99'],
             'status_reason' => ['nullable', 'string', 'max:1000'],
-            'participants' => ['nullable', 'array'],
-            'participants.*.notes' => ['nullable', 'string', 'max:500'],
         ], [
             'name.required' => 'El nombre del evento es obligatorio.',
             'exchange_at.required' => 'La fecha del intercambio es obligatoria.',
             'exchange_at.date' => 'Escribe una fecha válida.',
+            'exchange_at.after_or_equal' => 'La fecha del intercambio no puede ser anterior a hoy.',
+            'presupuesto.required' => 'El presupuesto es obligatorio.',
+            'presupuesto.numeric' => 'Escribe un presupuesto válido en US$.',
+            'presupuesto.min' => 'El presupuesto debe ser mayor que cero.',
             'status_reason.max' => 'Las observaciones son demasiado largas.',
         ]);
 
@@ -131,29 +159,27 @@ class EventosController extends Controller
                 'status' => EventStatus::Registration,
                 'status_reason' => $data['status_reason'] ?? null,
                 'exchange_at' => $date,
+                'max_value' => (float) $data['presupuesto'],
+                'currency' => 'USD',
             ]);
 
-            $notes = $request->input('participants', []);
+            // Se genera una invitación personal por cada usuario participante.
+            // Nadie queda inscrito hasta que acepte.
+            $this->invitaciones->generar($event);
+            $this->invitaciones->anunciarCreacion($event);
 
-            $participants = User::query()
-                ->where('role', UserRole::Participant->value)
-                ->where('is_active', true)
-                ->orderBy('name')
-                ->get();
+            AuditLog::create([
+                'event_id' => $event->id,
+                'user_id' => $request->user()?->id,
+                'action' => 'event.created',
+                'payload' => [
+                    'name' => $event->name,
+                    'year' => $event->year,
+                    'budget_usd' => (float) $data['presupuesto'],
+                ],
+            ]);
 
-            foreach ($participants as $participant) {
-                $participantNotes = is_array($notes[$participant->id] ?? null)
-                    ? ($notes[$participant->id]['notes'] ?? null)
-                    : null;
-
-                $event->participants()->attach($participant->id, [
-                    'status' => ParticipantStatus::Active->value,
-                    'confirmed_at' => now(),
-                    'notes' => $participantNotes,
-                ]);
-            }
-
-            $request->session()->flash('eventos_status', 'Evento creado correctamente.');
+            $request->session()->flash('eventos_status', 'Evento creado. Las invitaciones están listas para enviarse.');
 
             return api_success('Evento creado correctamente.', [
                 'event_id' => $event->id,
@@ -178,10 +204,19 @@ class EventosController extends Controller
             return api_error('Ya existe un evento en curso para el año '.$event->year.'.', 409);
         }
 
+        $pending = $event->pendingParticipationsCount();
+
+        if ($pending > 0) {
+            return api_error(
+                'Todavía hay '.$pending.' invitación(es) en espera. La organización debe descartarlas o esperar la respuesta antes de iniciar.',
+                422
+            );
+        }
+
         $participants = $this->activeParticipants($event);
 
-        if ($participants->isEmpty()) {
-            return api_error('El evento no tiene participantes activos.', 422);
+        if ($participants->count() < 2) {
+            return api_error('El evento necesita al menos 2 participantes activos para sortear.', 422);
         }
 
         try {
@@ -191,15 +226,16 @@ class EventosController extends Controller
                 'started_at' => now(),
                 'suspended_at' => null,
                 'draw_closed_at' => null,
+                'dynamic_starts_at' => null,
             ]);
 
             // Chat fijo del evento: solo lectura, con el aviso de apertura.
             $this->chat->anunciar(
                 $event,
-                'El evento «'.$event->name.'» ha comenzado. El sorteo está abierto: entra a «Sorteo ciego» y descubre a tu amigo secreto.'
+                'La Unión terminó y el sorteo está abierto. Entra a «Sorteo ciego» y descubre a tu amigo secreto.'
             );
 
-            // Aviso en pantalla (push) para cada participante.
+            // Aviso en pantalla (push) para cada participante activo.
             foreach ($participants as $participant) {
                 $this->push->send(
                     $participant,
@@ -238,12 +274,140 @@ class EventosController extends Controller
         }
     }
 
+    /**
+     * Envía (o reenvía) las invitaciones pendientes por correo, chat y push.
+     */
+    public function invitar(Request $request, Event $event): JsonResponse
+    {
+        $this->ensureAccess();
+
+        if (! $event->status->allowsInvitations()) {
+            return api_error('Las invitaciones ya no se pueden enviar en esta fase.', 409);
+        }
+
+        try {
+            $resultado = $this->invitaciones->enviar($event);
+
+            if ($resultado['enviadas'] === 0) {
+                return api_error('No hay invitaciones pendientes por enviar.', 409);
+            }
+
+            $request->session()->flash(
+                'eventos_status',
+                'Invitaciones enviadas: '.$resultado['enviadas'].'. Quedan '.$resultado['pendientes'].' por responder.'
+            );
+
+            return api_success('Invitaciones enviadas correctamente.', [
+                'enviadas' => $resultado['enviadas'],
+                'pendientes' => $resultado['pendientes'],
+                'redirect' => module_url('eventos'),
+            ]);
+        } catch (Throwable $exception) {
+            Log::error('Error al enviar invitaciones', ['event_id' => $event->id, 'error' => $exception->getMessage()]);
+
+            return api_error('No se pudieron enviar las invitaciones. Intenta de nuevo.', 500);
+        }
+    }
+
+    /**
+     * Reenvía la invitación a una sola persona y devuelve su enlace personal.
+     */
+    public function invitarParticipante(Request $request, Event $event, User $user): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $participacion = $this->participacion($event, $user);
+
+        if ($participacion->status !== ParticipantStatus::Pending) {
+            return api_error('Solo se puede invitar a quien está pendiente.', 409);
+        }
+
+        try {
+            $this->invitaciones->enviar($event, $participacion);
+        } catch (Throwable $exception) {
+            Log::error('Error al enviar la invitación individual', [
+                'event_id' => $event->id,
+                'user_id' => $user->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return api_error('No se pudo enviar la invitación. Intenta de nuevo.', 500);
+        }
+
+        return api_success('Invitación enviada.', [
+            'invitation_url' => $participacion->fresh()?->invitationUrl(),
+        ]);
+    }
+
+    /**
+     * Expulsa a un participante activo, con el motivo obligatorio.
+     */
+    public function expulsar(Request $request, Event $event, User $user): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $validator = Validator::make($request->all(), [
+            'reason' => ['required', 'string', 'min:3', 'max:1000'],
+        ], [
+            'reason.required' => 'Escribe el motivo de la expulsión.',
+            'reason.min' => 'El motivo es demasiado corto.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), [
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $participacion = $this->participacion($event, $user);
+
+        try {
+            $this->invitaciones->expulsar($participacion, $request->user(), $validator->validated()['reason']);
+        } catch (Throwable $exception) {
+            return api_error($exception->getMessage(), 409);
+        }
+
+        return api_success('Participante expulsado del evento.');
+    }
+
+    /**
+     * Descarta a quien nunca respondió, para poder iniciar el evento.
+     */
+    public function descartar(Request $request, Event $event, User $user): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $validator = Validator::make($request->all(), [
+            'reason' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), [
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $participacion = $this->participacion($event, $user);
+
+        try {
+            $this->invitaciones->descartar(
+                $participacion,
+                $request->user(),
+                (string) ($validator->validated()['reason'] ?? '')
+            );
+        } catch (Throwable $exception) {
+            return api_error($exception->getMessage(), 409);
+        }
+
+        return api_success('Invitación descartada.');
+    }
+
     public function suspender(Request $request, Event $event): JsonResponse
     {
         $this->ensureAccess();
 
         if ($event->status->isFinished()) {
-            return api_error('El evento ya finalizó y no se puede suspender.', 409);
+            return api_error('El evento ya se celebró y no se puede suspender.', 409);
         }
 
         if ($event->isSuspended()) {
@@ -302,7 +466,7 @@ class EventosController extends Controller
         $this->ensureAccess();
 
         if ($event->status->isFinished()) {
-            return api_error('El evento ya finalizó y no se puede posponer.', 409);
+            return api_error('El evento ya se celebró y no se puede posponer.', 409);
         }
 
         $validator = Validator::make($request->all(), [
@@ -372,6 +536,10 @@ class EventosController extends Controller
     {
         $this->ensureAccess();
 
+        if ($event->status->isFinished()) {
+            return api_error('El evento ya se celebró y no se puede cancelar.', 409);
+        }
+
         $validator = Validator::make($request->all(), [
             'reason' => ['required', 'string', 'max:1000'],
         ], [
@@ -428,21 +596,37 @@ class EventosController extends Controller
     {
         $this->ensureAccess();
 
-        $participants = $event->participants()
-            ->orderBy('name')
+        // Asegura que también aparezcan los usuarios participantes creados
+        // después del evento (con su invitación pendiente).
+        if ($event->status->allowsInvitations()) {
+            $this->invitaciones->generar($event);
+        }
+
+        $participations = $event->participations()
+            ->with('user')
             ->get()
-            ->map(fn (User $user) => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'username' => $user->username,
-                'status' => $user->is_active ? 'Activo' : 'Inactivo',
-                'notes' => $user->pivot?->notes ?? '',
-            ]);
+            ->filter(fn (EventParticipant $item) => $item->user !== null)
+            ->sortBy(fn (EventParticipant $item) => mb_strtolower($item->user->name))
+            ->values();
+
+        $participants = $participations->map(fn (EventParticipant $participacion) => [
+            'id' => $participacion->user->id,
+            'name' => $participacion->user->name,
+            'email' => $participacion->user->email,
+            'username' => $participacion->user->username,
+            'status' => $participacion->status->label(),
+            'status_key' => $participacion->status->value,
+            'reason' => $participacion->status_reason,
+            'notes' => $participacion->notes ?? '',
+            'invited_at' => format_date($participacion->invited_at, 'd/m/Y H:i', ''),
+            'invitation_url' => $participacion->invitationUrl(),
+        ]);
 
         return api_success('Participantes encontrados.', [
             'participants' => $participants,
-            'count' => $participants->count(),
+            'count' => $participations->where('status', ParticipantStatus::Active)->count(),
+            'total' => $participations->count(),
+            'pending' => $participations->where('status', ParticipantStatus::Pending)->count(),
             'sorteo' => [
                 'pares' => $event->assignments()->count(),
                 'elegidos' => $event->assignments()->whereNotNull('drawn_at')->count(),
@@ -487,6 +671,18 @@ class EventosController extends Controller
 
             return api_error('No se pudo reiniciar el sorteo. Intenta de nuevo.', 500);
         }
+    }
+
+    private function participacion(Event $event, User $user): EventParticipant
+    {
+        $participacion = EventParticipant::query()
+            ->where('event_id', $event->id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        abort_if($participacion === null, 404, 'El usuario no tiene invitación en este evento.');
+
+        return $participacion;
     }
 
     /**

@@ -24,7 +24,9 @@
         <p class="participantes-estado__text">{{ $estado['mensaje'] }}</p>
 
         <p class="participantes-estado__meta">
-            Participantes: <strong>{{ $estado['participantes'] }}</strong>
+            Invitados: <strong>{{ $estado['participantes'] }}</strong>
+            · Activos: <strong>{{ $estado['activos'] }}</strong>
+            · Pendientes: <strong>{{ $estado['pendientes'] }}</strong>
             · Asignados: <strong>{{ $estado['asignados'] }}</strong>
             · Sin asignar: <strong>{{ $estado['sin_asignar'] }}</strong>
         </p>

@@ -62,6 +62,131 @@ class UsuariosController extends Controller
         ]);
     }
 
+    /**
+     * Busca una solicitud de registro abierta por correo o usuario.
+     *
+     * Si el caso no está tomado, lo toma el administrador que lo busca. Si ya
+     * lo tomó otro administrador, no se permite formalizarlo desde aquí.
+     */
+    public function solicitud(Request $request): JsonResponse
+    {
+        $this->ensureAccess();
+
+        $email = mb_strtolower(trim((string) $request->query('email', '')));
+        $username = mb_strtolower(trim((string) $request->query('username', '')));
+
+        $report = $this->buscarSolicitudRegistro($email, $username);
+
+        if ($report === null) {
+            return api_success('No hay una solicitud abierta.', ['found' => false]);
+        }
+
+        $current = $request->user();
+        $takenBy = $report->assigned_to ?: $report->taken_by;
+
+        if ($takenBy !== null && (int) $takenBy !== (int) $current->id) {
+            $admin = User::query()->find($takenBy);
+
+            return api_success('La solicitud ya está tomada por otro administrador.', [
+                'found' => true,
+                'blocked' => true,
+                'taken_by' => $admin?->name ?? 'otro administrador',
+                'solicitud' => $this->solicitudData($report),
+            ]);
+        }
+
+        $message = 'Solicitud encontrada y tomada por ti. Revisa los datos y guarda.';
+
+        if ($takenBy === null) {
+            $affected = ChatReport::query()
+                ->whereKey($report->id)
+                ->where('status', '!=', ChatReport::STATUS_CLOSED)
+                ->whereNull('assigned_to')
+                ->update([
+                    'status' => ChatReport::STATUS_ATTENDING,
+                    'assigned_to' => $current->id,
+                    'taken_by' => $current->id,
+                    'taken_at' => now(),
+                ]);
+
+            if ($affected === 0) {
+                $report->refresh();
+                $takenBy = $report->assigned_to ?: $report->taken_by;
+
+                if ($takenBy !== null && (int) $takenBy !== (int) $current->id) {
+                    $admin = User::query()->find($takenBy);
+
+                    return api_success('La solicitud ya está tomada por otro administrador.', [
+                        'found' => true,
+                        'blocked' => true,
+                        'taken_by' => $admin?->name ?? 'otro administrador',
+                        'solicitud' => $this->solicitudData($report),
+                    ]);
+                }
+            } else {
+                $report->refresh();
+            }
+        } else {
+            $message = 'Solicitud encontrada y ya tomada por ti. Revisa los datos y guarda.';
+        }
+
+        return api_success($message, [
+            'found' => true,
+            'blocked' => false,
+            'solicitud' => $this->solicitudData($report),
+            'message' => $message,
+        ]);
+    }
+
+    /**
+     * @return array{id:int,name:string,email:string,username:string}
+     */
+    private function solicitudData(ChatReport $report): array
+    {
+        $payload = $report->payload ?: [];
+
+        return [
+            'id' => (int) $report->id,
+            'name' => (string) ($payload['name'] ?? ''),
+            'email' => (string) ($payload['email'] ?? ''),
+            'username' => (string) ($payload['username'] ?? ''),
+        ];
+    }
+
+    private function buscarSolicitudRegistro(string $email, string $username): ?ChatReport
+    {
+        if ($email === '' && $username === '') {
+            return null;
+        }
+
+        return ChatReport::query()
+            ->where('type', ChatReport::TYPE_USER_REGISTRATION)
+            ->where('status', '!=', ChatReport::STATUS_CLOSED)
+            ->get()
+            ->first(function (ChatReport $report) use ($email, $username) {
+                $payload = $report->payload ?: [];
+                $reportEmail = mb_strtolower(trim((string) ($payload['email'] ?? '')));
+                $reportUsername = mb_strtolower(trim((string) ($payload['username'] ?? '')));
+
+                return ($email !== '' && $reportEmail === $email)
+                    || ($username !== '' && $reportUsername === $username);
+            });
+    }
+
+    private function buscarSolicitudReset(User $user): ?ChatReport
+    {
+        return ChatReport::query()
+            ->where('type', ChatReport::TYPE_ACCOUNT)
+            ->where('status', '!=', ChatReport::STATUS_CLOSED)
+            ->get()
+            ->first(function (ChatReport $report) use ($user) {
+                $payload = $report->payload ?: [];
+
+                return ($payload['action'] ?? null) === 'reset'
+                    && (int) ($payload['user_id'] ?? 0) === (int) $user->id;
+            });
+    }
+
     public function datos(Request $request): JsonResponse
     {
         $this->ensureAccess();
@@ -165,6 +290,53 @@ class UsuariosController extends Controller
             return api_response(false, 'Usuario no disponible.', [
                 'errors' => ['username' => ['Usuario no disponible.']],
             ], 422);
+        }
+
+        // Si el correo o el usuario pertenecen a un prerregistro abierto, no
+        // se crea por fuera del caso: debe formalizarse desde esa solicitud.
+        $solicitudAbierta = $this->buscarSolicitudRegistro(
+            mb_strtolower(trim((string) $data['email'])),
+            mb_strtolower(trim((string) $data['username']))
+        );
+
+        if ($solicitudAbierta !== null) {
+            $takenBy = $solicitudAbierta->assigned_to ?: $solicitudAbierta->taken_by;
+
+            if ($takenBy !== null && (int) $takenBy !== (int) $request->user()->id) {
+                $admin = User::query()->find($takenBy);
+
+                return api_response(false, 'Ese correo o usuario tiene una solicitud de registro tomada por '.($admin?->name ?? 'otro administrador').'.', [
+                    'errors' => [
+                        'email' => ['La solicitud de registro está siendo gestionada por otro administrador.'],
+                    ],
+                ], 422);
+            }
+
+            if ($takenBy === null) {
+                $affected = ChatReport::query()
+                    ->whereKey($solicitudAbierta->id)
+                    ->where('status', '!=', ChatReport::STATUS_CLOSED)
+                    ->whereNull('assigned_to')
+                    ->update([
+                        'status' => ChatReport::STATUS_ATTENDING,
+                        'assigned_to' => $request->user()->id,
+                        'taken_by' => $request->user()->id,
+                        'taken_at' => now(),
+                    ]);
+
+                if ($affected === 0) {
+                    $solicitudAbierta->refresh();
+                    $takenBy = $solicitudAbierta->assigned_to ?: $solicitudAbierta->taken_by;
+
+                    if ($takenBy !== null && (int) $takenBy !== (int) $request->user()->id) {
+                        return api_response(false, 'Ese correo o usuario tiene una solicitud de registro tomada por otro administrador.', [
+                            'errors' => [
+                                'email' => ['La solicitud de registro está siendo gestionada por otro administrador.'],
+                            ],
+                        ], 422);
+                    }
+                }
+            }
         }
 
         try {
@@ -320,6 +492,47 @@ class UsuariosController extends Controller
     public function restablecer(Request $request, User $user): JsonResponse
     {
         $this->ensureAccess();
+
+        $solicitudReset = $this->buscarSolicitudReset($user);
+
+        if ($solicitudReset !== null) {
+            $current = $request->user();
+            $takenBy = $solicitudReset->assigned_to ?: $solicitudReset->taken_by;
+
+            if ($takenBy !== null && (int) $takenBy !== (int) $current->id) {
+                $admin = User::query()->find($takenBy);
+
+                return api_error(
+                    'Este cambio de contraseña está atado a un caso tomado por '.($admin?->name ?? 'otro administrador').'.',
+                    422
+                );
+            }
+
+            if ($takenBy === null) {
+                $affected = ChatReport::query()
+                    ->whereKey($solicitudReset->id)
+                    ->where('status', '!=', ChatReport::STATUS_CLOSED)
+                    ->whereNull('assigned_to')
+                    ->update([
+                        'status' => ChatReport::STATUS_ATTENDING,
+                        'assigned_to' => $current->id,
+                        'taken_by' => $current->id,
+                        'taken_at' => now(),
+                    ]);
+
+                if ($affected === 0) {
+                    $solicitudReset->refresh();
+                    $takenBy = $solicitudReset->assigned_to ?: $solicitudReset->taken_by;
+
+                    if ($takenBy !== null && (int) $takenBy !== (int) $current->id) {
+                        return api_error(
+                            'Este cambio de contraseña está atado a un caso tomado por otro administrador.',
+                            422
+                        );
+                    }
+                }
+            }
+        }
 
         try {
             $plainPassword = Str::password(12);

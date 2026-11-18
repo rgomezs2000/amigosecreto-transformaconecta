@@ -129,8 +129,8 @@ class AmigoSecretoModulesTest extends TestCase
         $this->actingAs($this->participant())
             ->get('/amigo-secreto/ver-tu-amigo')
             ->assertOk()
-            ->assertSee('Tu amigo secreto')
-            ->assertSee('Ir al Sorteo ciego');
+            ->assertSee('Ver tu amigo')
+            ->assertSee('Todavía no hay un evento activo.');
     }
 
     public function test_el_sorteo_ciego_abre_su_pagina_para_el_participante(): void

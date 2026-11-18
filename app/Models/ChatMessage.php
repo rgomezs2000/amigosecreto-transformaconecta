@@ -32,6 +32,9 @@ class ChatMessage extends Model
         'attachment_mime',
         'attachment_size',
         'edited_at',
+        'pinned_at',
+        'pinned_by',
+        'is_broadcast',
         'deleted_at',
         'deleted_by',
         'deleted_by_admin',
@@ -41,7 +44,9 @@ class ChatMessage extends Model
     {
         return [
             'is_moderation' => 'boolean',
+            'is_broadcast' => 'boolean',
             'edited_at' => 'datetime',
+            'pinned_at' => 'datetime',
             'deleted_at' => 'datetime',
             'delivered_at' => 'datetime',
             'deleted_by_admin' => 'boolean',
@@ -85,6 +90,11 @@ class ChatMessage extends Model
         return $this->forwarded_from_id !== null;
     }
 
+    public function isPinned(): bool
+    {
+        return $this->pinned_at !== null;
+    }
+
     public function reactions(): HasMany
     {
         return $this->hasMany(ChatReaction::class, 'message_id');
@@ -98,6 +108,14 @@ class ChatMessage extends Model
     public function reports(): HasMany
     {
         return $this->hasMany(ChatReport::class, 'message_id');
+    }
+
+    /**
+     * Marca personal de favorito: cada usuario tiene la suya.
+     */
+    public function favorites(): HasMany
+    {
+        return $this->hasMany(ChatMessageFavorite::class, 'message_id');
     }
 
     /**

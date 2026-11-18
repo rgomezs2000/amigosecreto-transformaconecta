@@ -103,7 +103,9 @@ class LoginController extends Controller
             SessionSecurity::activate($user, $request);
 
             return api_success('Acceso correcto.', [
-                'redirect' => route('dashboard'),
+                // Respeta el enlace personal de invitación (o cualquier ruta
+                // protegida) que originó el acceso.
+                'redirect' => redirect()->intended(route('dashboard'))->getTargetUrl(),
             ]);
         } catch (Throwable $exception) {
             Log::error('Error al validar el acceso', [

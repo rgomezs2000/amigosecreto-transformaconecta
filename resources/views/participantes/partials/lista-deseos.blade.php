@@ -2,38 +2,39 @@
     <p class="participantes-modal__eyebrow">Participante</p>
     <h3 class="participantes-modal__name">{{ $participant->name }}</h3>
 
-    @if ($wishlist === null)
+    @if ($items->isEmpty())
         <p class="participantes-empty">
             <i class="fa-solid fa-list" aria-hidden="true"></i>
             <span>Sin lista de deseos registrada.</span>
         </p>
     @else
-        <dl class="perfil-data">
-            <div class="perfil-data__item perfil-data__item--wide">
-                <dt>Deseos</dt>
-                <dd class="participantes-text">{{ format_text($wishlist->likes, 'Sin deseos registrados') }}</dd>
-            </div>
-
-            <div class="perfil-data__item perfil-data__item--wide">
-                <dt>Evitar / restricciones</dt>
-                <dd class="participantes-text">{{ format_text($wishlist->avoid, 'Sin restricciones registradas') }}</dd>
-            </div>
-
-            <div class="perfil-data__item perfil-data__item--wide">
-                <dt>Categorías</dt>
-                <dd>
-                    @forelse (($wishlist->categories ?? []) as $category)
-                        <span class="perfil-badge">{{ $category }}</span>
-                    @empty
-                        <span class="participantes-empty">Sin categorías seleccionadas.</span>
-                    @endforelse
-                </dd>
-            </div>
-
-            <div class="perfil-data__item">
-                <dt>Actualizada</dt>
-                <dd>{{ format_date($wishlist->updated_at) }}</dd>
-            </div>
-        </dl>
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col">Deseo</th>
+                        <th scope="col">Descripción</th>
+                        <th scope="col">Enlace</th>
+                        <th scope="col">Registrado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($items as $item)
+                        <tr>
+                            <td>{{ $item->title }}</td>
+                            <td>{{ format_text($item->description, '—') }}</td>
+                            <td>
+                                @if ($item->url)
+                                    <a href="{{ $item->url }}" target="_blank" rel="noopener noreferrer">Abrir</a>
+                                @else
+                                    —
+                                @endif
+                            </td>
+                            <td>{{ format_date($item->created_at, 'd/m/Y H:i') }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
     @endif
 </div>

@@ -47,6 +47,50 @@ class SolicitudAdminController extends Controller
     }
 
     /**
+     * El caso solo lo puede resolver quien lo tomó. Si sigue sin gestor, se
+     * toma automáticamente por el administrador que ejecuta la acción.
+     */
+    private function ensureManager(ChatReport $report, User $admin): ?JsonResponse
+    {
+        $takenBy = $report->assigned_to ?: $report->taken_by;
+
+        if ($takenBy !== null && (int) $takenBy !== (int) $admin->id) {
+            $manager = User::query()->find($takenBy);
+
+            return api_error(
+                'Este caso está siendo gestionado por '.($manager?->name ?? 'otro administrador').'.',
+                422
+            );
+        }
+
+        if ($takenBy === null) {
+            $affected = ChatReport::query()
+                ->whereKey($report->id)
+                ->where('status', '!=', ChatReport::STATUS_CLOSED)
+                ->whereNull('assigned_to')
+                ->update([
+                    'status' => ChatReport::STATUS_ATTENDING,
+                    'assigned_to' => $admin->id,
+                    'taken_by' => $admin->id,
+                    'taken_at' => now(),
+                ]);
+
+            if ($affected === 0) {
+                $report->refresh();
+                $takenBy = $report->assigned_to ?: $report->taken_by;
+
+                if ($takenBy !== null && (int) $takenBy !== (int) $admin->id) {
+                    return api_error('Otro administrador tomó este caso.', 422);
+                }
+            }
+
+            $report->refresh();
+        }
+
+        return null;
+    }
+
+    /**
      * Restablece la contraseña y envía las nuevas credenciales al usuario.
      */
     public function restablecer(Request $request, ChatReport $report): JsonResponse
@@ -60,6 +104,10 @@ class SolicitudAdminController extends Controller
 
         if ($report->status === ChatReport::STATUS_CLOSED) {
             return api_error('El caso ya está cerrado.', 409);
+        }
+
+        if ($managerError = $this->ensureManager($report, $request->user())) {
+            return $managerError;
         }
 
         try {
@@ -106,6 +154,10 @@ class SolicitudAdminController extends Controller
             return api_error('El caso ya está cerrado.', 409);
         }
 
+        if ($managerError = $this->ensureManager($report, $request->user())) {
+            return $managerError;
+        }
+
         $user->forceFill([
             'is_active' => true,
             'locked_until' => null,
@@ -131,6 +183,10 @@ class SolicitudAdminController extends Controller
 
         if ($report->status === ChatReport::STATUS_CLOSED) {
             return api_error('El caso ya está cerrado.', 409);
+        }
+
+        if ($managerError = $this->ensureManager($report, $request->user())) {
+            return $managerError;
         }
 
         $validator = validator($request->all(), [

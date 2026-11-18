@@ -9,6 +9,7 @@ class ConsumableGift extends Model
 {
     protected $fillable = [
         'assignment_id',
+        'name',
         'description',
         'quantity',
         'value',

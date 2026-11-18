@@ -60,6 +60,7 @@ class ContactoSoporteController extends Controller
             ChatReport::TYPE_SUGGESTION => 'Sugerencia',
             ChatReport::TYPE_HELP => 'Ayuda',
             ChatReport::TYPE_SUPPORT => 'Soporte',
+            ChatReport::TYPE_USER_REGISTRATION => 'Usuarios',
         ];
     }
 
