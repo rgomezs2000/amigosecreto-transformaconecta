@@ -19,8 +19,8 @@
         return;
     }
 
-    var INTERVAL = 30000;
-    var IDLE = 8000;
+    var INTERVAL = 15000;
+    var IDLE = 5000;
     var paused = false;
     var running = false;
     var lastInteraction = Date.now();

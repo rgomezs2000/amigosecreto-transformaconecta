@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ParticipantStatus;
 use App\Enums\UserRole;
 use App\Models\Assignment;
+use App\Models\AuditLog;
 use App\Models\ChatMessage;
 use App\Models\Conversation;
 use App\Models\Event;
@@ -107,7 +108,12 @@ class InvitacionesEvento
         $enviadas = 0;
 
         foreach ($pendientes as $participacion) {
-            $this->enviarUna($event, $participacion);
+            $token = $this->rotarToken($participacion);
+            $url = route('invitacion.abrir', ['token' => $token]);
+
+            $this->notificar($event, $participacion, $url);
+            $this->enviarCorreo($event, $participacion, $url);
+            $this->enviarChat($event, $participacion, $token);
             $enviadas++;
         }
 
@@ -121,7 +127,63 @@ class InvitacionesEvento
         ];
     }
 
-    private function enviarUna(Event $event, EventParticipant $participacion): void
+    /**
+     * Envía la invitación por un solo canal. Cada envío rota el token para
+     * invalidar los enlaces y las fichas de chat anteriores.
+     *
+     * @return array{channel:string,invitation_url:string}
+     */
+    public function enviarCanal(Event $event, EventParticipant $participacion, string $channel): array
+    {
+        if ($participacion->status !== ParticipantStatus::Pending) {
+            throw new RuntimeException('La invitación ya fue respondida; no se pueden crear nuevas invitaciones.');
+        }
+
+        if (! $event->status->allowsInvitations()) {
+            throw new RuntimeException('La etapa de Unión ya cerró; no se pueden enviar invitaciones.');
+        }
+
+        if ($participacion->user === null) {
+            throw new RuntimeException('La persona de esta invitación ya no está disponible.');
+        }
+
+        $token = $this->rotarToken($participacion);
+        $url = route('invitacion.abrir', ['token' => $token]);
+
+        match ($channel) {
+            'notify' => $this->notificar($event, $participacion, $url),
+            'email' => $this->enviarCorreo($event, $participacion, $url),
+            'chat' => $this->enviarChat($event, $participacion, $token),
+            'link' => null,
+            default => throw new RuntimeException('Canal de invitación no válido.'),
+        };
+
+        $event->forceFill(['invitations_sent_at' => now()])->save();
+
+        return [
+            'channel' => $channel,
+            'invitation_url' => $url,
+        ];
+    }
+
+    /**
+     * Rota el token personal. Los enlaces y las fichas de chat anteriores
+     * quedan vencidos aunque la invitación no se haya respondido.
+     */
+    private function rotarToken(EventParticipant $participacion): string
+    {
+        $token = Str::random(64);
+
+        $participacion->forceFill([
+            'invitation_token' => $token,
+            'invited_at' => now(),
+            'status_changed_at' => now(),
+        ])->save();
+
+        return $token;
+    }
+
+    private function notificar(Event $event, EventParticipant $participacion, string $url): void
     {
         $user = $participacion->user;
 
@@ -129,35 +191,27 @@ class InvitacionesEvento
             return;
         }
 
-        if (blank($participacion->invitation_token)) {
-            $participacion->forceFill([
-                'invitation_token' => Str::random(64),
-                'status_changed_at' => now(),
-            ])->save();
-        }
-
-        $url = $participacion->invitationUrl();
-        $participacion->forceFill([
-            'invited_at' => now(),
-            'status_changed_at' => now(),
-        ])->save();
-
         $this->push->send(
             $user,
             'evento.invitacion',
             'Invitación al Amigo Secreto «'.$event->name.'»',
             'Tu invitación está lista. Ábrela para aceptarla o rechazarla; solo al aceptar entrarás al sorteo.',
-            ['event_id' => $event->id, 'invitation_token' => $participacion->invitation_token],
+            [
+                'event_id' => $event->id,
+                'invitation_token' => $participacion->invitation_token,
+            ],
             $url,
             'evento'
         );
+    }
 
-        $this->mensajeSistema(
-            $event,
-            $user,
-            'Tienes una invitación al Amigo Secreto «'.$event->name.'». '
-            .'Abre este enlace para aceptarla o rechazarla: '.$url
-        );
+    private function enviarCorreo(Event $event, EventParticipant $participacion, string $url): void
+    {
+        $user = $participacion->user;
+
+        if ($user === null) {
+            return;
+        }
 
         send_mail(
             $user->email,
@@ -177,6 +231,43 @@ class InvitacionesEvento
                 'preheader' => 'Tu invitación al Amigo Secreto está lista.',
             ]
         );
+    }
+
+    private function enviarChat(Event $event, EventParticipant $participacion, string $token): void
+    {
+        $user = $participacion->user;
+
+        if ($user === null) {
+            return;
+        }
+
+        $conversation = Conversation::query()->firstOrCreate(
+            [
+                'event_id' => $event->id,
+                'type' => 'system',
+                'name' => 'Sistema · '.$event->name,
+            ],
+            [
+                'created_by' => null,
+                'is_moderated' => false,
+                'is_read_only' => true,
+            ]
+        );
+
+        $conversation->users()->syncWithoutDetaching([$user->id]);
+
+        ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => null,
+            'body' => 'Tienes una invitación al evento «'.$event->name.'».',
+            'type' => 'event',
+            'event_id' => $event->id,
+            'event_invitation_token' => $token,
+            'is_moderation' => false,
+            'delivered_at' => now(),
+        ]);
+
+        $conversation->touch();
     }
 
     /**
@@ -477,7 +568,7 @@ class InvitacionesEvento
         EventParticipant $participacion,
         string $reason
     ): void {
-        \App\Models\AuditLog::create([
+        AuditLog::create([
             'event_id' => $event->id,
             'user_id' => $admin?->id,
             'action' => $action,

@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\ResuelveEstadoEvento;
 use App\Http\Controllers\Concerns\ResuelveEventoConsulta;
 use App\Models\Assignment;
 use App\Models\Event;
+use App\Models\EventParticipant;
 use App\Models\Module;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,6 +23,7 @@ use Illuminate\Http\Request;
  */
 class UsuariosAsociadosController extends Controller
 {
+    use ResuelveEstadoEvento;
     use ResuelveEventoConsulta;
 
     /**
@@ -51,10 +54,12 @@ class UsuariosAsociadosController extends Controller
         $this->ensureAccess();
 
         $events = Event::query()->orderByDesc('year')->get();
+        $event = $this->eventoActual($events);
 
         return view('usuarios-asociados.index', [
             'events' => $events,
-            'event' => $this->eventoActual($events),
+            'event' => $event,
+            'estado' => $this->estadoEvento($event),
         ]);
     }
 
@@ -69,12 +74,15 @@ class UsuariosAsociadosController extends Controller
         $event = $this->eventoSeleccionado($request);
 
         if ($event === null) {
+            $estado = $this->estadoEvento(null);
+
             return response()->json([
                 'draw' => $draw,
                 'recordsTotal' => 0,
                 'recordsFiltered' => 0,
                 'data' => [],
-                'aviso_html' => '',
+                'estado' => $estado,
+                'estado_html' => view('participantes.partials.estado', ['estado' => $estado])->render(),
             ]);
         }
 
@@ -123,19 +131,39 @@ class UsuariosAsociadosController extends Controller
             $query->skip($start)->take($length);
         }
 
-        $data = $query->get()->map(fn (Assignment $assignment) => [
-            'id' => (int) $assignment->giver_id,
-            'nombre' => e($assignment->giver?->name ?? '—'),
-            'usuario' => e($assignment->giver?->username ?? '—'),
-            'amigo' => e($assignment->receiver?->name ?? '—'),
-        ]);
+        $participations = EventParticipant::query()
+            ->where('event_id', $event->id)
+            ->with('user')
+            ->get()
+            ->keyBy('user_id');
+
+        $data = $query->get()->map(function (Assignment $assignment) use ($participations) {
+            $participation = $participations->get($assignment->giver_id);
+
+            $estatus = $participation !== null
+                ? view('participantes.partials.estado-participacion', [
+                    'participation' => $participation,
+                    'user' => $assignment->giver,
+                ])->render()
+                : '<span class="status-badge status-badge--blocked">Sin participación</span>';
+
+            return [
+                'id' => (int) $assignment->giver_id,
+                'nombre' => e($assignment->giver?->name ?? '—'),
+                'estatus' => $estatus,
+                'amigo' => e($assignment->receiver?->name ?? '—'),
+            ];
+        });
+
+        $estado = $this->estadoEvento($event);
 
         return response()->json([
             'draw' => $draw,
             'recordsTotal' => $recordsTotal,
             'recordsFiltered' => $recordsFiltered,
             'data' => $data,
-            'aviso_html' => view('usuarios-asociados.partials.aviso', ['event' => $event])->render(),
+            'estado' => $estado,
+            'estado_html' => view('participantes.partials.estado', ['estado' => $estado])->render(),
         ]);
     }
 }

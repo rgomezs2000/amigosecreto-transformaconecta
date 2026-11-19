@@ -125,7 +125,7 @@ class UsuariosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/usuarios/datos?' . $baseQuery)
+            ->getJson('/usuarios/datos?'.$baseQuery)
             ->assertOk();
 
         $filteredQuery = http_build_query([
@@ -137,7 +137,7 @@ class UsuariosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/usuarios/datos?' . $filteredQuery)
+            ->getJson('/usuarios/datos?'.$filteredQuery)
             ->assertOk()
             ->assertJsonPath('data.0.name', 'Ana Pérez');
     }
@@ -177,7 +177,7 @@ class UsuariosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/usuarios/datos?' . $roleQuery)
+            ->getJson('/usuarios/datos?'.$roleQuery)
             ->assertOk()
             ->assertJsonPath('recordsFiltered', 2);
 
@@ -192,7 +192,7 @@ class UsuariosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/usuarios/datos?' . $activeQuery)
+            ->getJson('/usuarios/datos?'.$activeQuery)
             ->assertOk()
             ->assertJsonPath('recordsFiltered', 2);
 
@@ -207,7 +207,7 @@ class UsuariosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/usuarios/datos?' . $blockedQuery)
+            ->getJson('/usuarios/datos?'.$blockedQuery)
             ->assertOk()
             ->assertJsonPath('recordsFiltered', 1);
     }
@@ -306,12 +306,12 @@ class UsuariosTest extends TestCase
             ->assertJsonPath('available', true);
 
         $this->actingAs($admin)
-            ->getJson('/perfil/consultar-login?login=' . $admin->username . '&admin=1')
+            ->getJson('/perfil/consultar-login?login='.$admin->username.'&admin=1')
             ->assertOk()
             ->assertJsonPath('available', false);
 
         $this->actingAs($admin)
-            ->getJson('/perfil/consultar-login?login=' . $admin->username . '&ignore=' . $admin->id . '&admin=1')
+            ->getJson('/perfil/consultar-login?login='.$admin->username.'&ignore='.$admin->id.'&admin=1')
             ->assertOk()
             ->assertJsonPath('available', true);
     }
@@ -328,13 +328,13 @@ class UsuariosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->getJson('/usuarios/' . $user->id)
+            ->getJson('/usuarios/'.$user->id)
             ->assertOk()
             ->assertJsonPath('user.name', 'Ana Pérez')
             ->assertJsonPath('user.username', 'ana');
 
         $this->actingAs($admin)
-            ->getJson('/usuarios/' . $user->id . '/ver')
+            ->getJson('/usuarios/'.$user->id.'/ver')
             ->assertOk()
             ->assertJsonPath('user.email', 'ana@example.com')
             ->assertJsonMissingPath('user.password');
@@ -362,7 +362,7 @@ class UsuariosTest extends TestCase
         $originalPassword = $user->password;
 
         $this->actingAs($admin)
-            ->putJson('/usuarios/' . $user->id, [
+            ->putJson('/usuarios/'.$user->id, [
                 'name' => 'Ana María',
                 'email' => 'ana.maria@example.com',
                 'username' => 'anamaria',
@@ -393,9 +393,13 @@ class UsuariosTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->postJson('/usuarios/' . $user->id . '/restablecer')
+            ->postJson('/usuarios/'.$user->id.'/restablecer')
             ->assertOk()
-            ->assertJson(['success' => true, 'mail_sent' => true]);
+            ->assertJson([
+                'success' => true,
+                'mail_sent' => true,
+                'message' => 'La contraseña de «'.$user->name.'» fue restablecida. Se ha enviado un correo con sus nuevas credenciales al usuario.',
+            ]);
 
         Mail::assertSent(NotificationMail::class, function (NotificationMail $mail) use ($user) {
             return $mail->hasTo($user->email);
@@ -409,7 +413,7 @@ class UsuariosTest extends TestCase
         $user = User::factory()->create(['is_active' => true, 'locked_until' => null]);
 
         $this->actingAs($admin)
-            ->postJson('/usuarios/' . $user->id . '/bloquear')
+            ->postJson('/usuarios/'.$user->id.'/bloquear')
             ->assertOk();
 
         $user->refresh();
@@ -418,7 +422,7 @@ class UsuariosTest extends TestCase
         $this->assertNotNull($user->locked_until);
 
         $this->actingAs($admin)
-            ->postJson('/usuarios/' . $user->id . '/desbloquear')
+            ->postJson('/usuarios/'.$user->id.'/desbloquear')
             ->assertOk();
 
         $user->refresh();
@@ -432,11 +436,11 @@ class UsuariosTest extends TestCase
         $admin = $this->adminWithUsuariosModule();
 
         $this->actingAs($admin)
-            ->deleteJson('/usuarios/' . $admin->id)
+            ->deleteJson('/usuarios/'.$admin->id)
             ->assertStatus(409);
 
         $this->actingAs($admin)
-            ->postJson('/usuarios/' . $admin->id . '/bloquear')
+            ->postJson('/usuarios/'.$admin->id.'/bloquear')
             ->assertStatus(409);
 
         $this->assertDatabaseHas('users', ['id' => $admin->id]);
@@ -450,15 +454,15 @@ class UsuariosTest extends TestCase
         $other = User::factory()->create();
 
         $this->actingAs($admin)
-            ->deleteJson('/usuarios/' . $user->id)
+            ->deleteJson('/usuarios/'.$user->id)
             ->assertOk();
 
-        $this->assertDatabaseMissing('users', ['id' => $user->id]);
+        $this->assertSoftDeleted('users', ['id' => $user->id]);
 
         $this->actingAs($admin)
             ->postJson('/usuarios/eliminar-varios', ['ids' => [$other->id]])
             ->assertOk();
 
-        $this->assertDatabaseMissing('users', ['id' => $other->id]);
+        $this->assertSoftDeleted('users', ['id' => $other->id]);
     }
 }

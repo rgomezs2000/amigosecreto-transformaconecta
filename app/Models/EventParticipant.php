@@ -2,15 +2,19 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use App\Enums\ParticipantStatus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class EventParticipant extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $fillable = [
         'event_id',
         'user_id',
@@ -77,3 +81,6 @@ class EventParticipant extends Model
         return route('invitacion.abrir', ['token' => $this->invitation_token]);
     }
 }
+
+
+

@@ -46,6 +46,18 @@ class MailNotifier
         }
 
         $mailOptions = $options;
+        $recipientName = trim((string) ($mailOptions['recipient_name'] ?? ''));
+
+        // La plantilla ya muestra «Hola, Nombre:». Si el contenido también
+        // empieza con ese saludo, se evita duplicarlo en HTML y texto plano.
+        if ($recipientName !== '' && $mailLines !== []) {
+            $firstLine = trim((string) $mailLines[0]);
+
+            if (preg_match('/^Hola,\s*'.preg_quote($recipientName, '/').'\s*[.:]?$/iu', $firstLine)) {
+                array_shift($mailLines);
+            }
+        }
+
         $source = (string) ($mailOptions['source'] ?? 'sistema');
         unset($mailOptions['source']);
 

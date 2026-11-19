@@ -445,7 +445,7 @@
             if (!document.hidden) {
                 poll();
             }
-        }, 10000);
+        }, 7000);
 
         document.addEventListener('visibilitychange', function () {
             if (!document.hidden) {

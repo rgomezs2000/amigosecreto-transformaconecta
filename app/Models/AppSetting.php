@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -12,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 class AppSetting extends Model
 {
+    use HasAuditFields;
     protected $fillable = [
         'key',
         'value',
@@ -38,3 +41,4 @@ class AppSetting extends Model
         );
     }
 }
+

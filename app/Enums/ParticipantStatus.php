@@ -14,9 +14,9 @@ enum ParticipantStatus: string
     public function label(): string
     {
         return match ($this) {
-            self::Pending => 'Pendiente',
+            self::Pending => 'En espera',
             self::Active => 'Activo',
-            self::Declined => 'Declinado',
+            self::Declined => 'Rechazado',
             self::Withdrawn => 'Retirado',
             self::Expelled => 'Expulsado',
             self::Dismissed => 'Descartado',

@@ -5,12 +5,16 @@ namespace App\Console\Commands;
 use App\Models\Assignment;
 use App\Models\AuditLog;
 use App\Models\ChatMessage;
+use App\Models\ChatMessageAttachment;
 use App\Models\Clue;
 use App\Models\ConsumableGift;
 use App\Models\Conversation;
 use App\Models\Event;
 use App\Models\EventParticipant;
 use App\Models\ExchangeGift;
+use App\Models\GroupBan;
+use App\Models\GroupInvitation;
+use App\Models\GroupSuspension;
 use App\Models\WishItem;
 use App\Models\Wishlist;
 use Illuminate\Console\Command;
@@ -113,7 +117,9 @@ class ReiniciarEvento extends Command
                             ->whereIn('message_id', $messageIds)
                             ->update(['message_id' => null]);
 
-                        DB::table('chat_message_attachments')->whereIn('message_id', $messageIds)->delete();
+                        ChatMessageAttachment::query()
+                            ->whereIn('message_id', $messageIds)
+                            ->delete();
                         DB::table('chat_message_favorites')->whereIn('message_id', $messageIds)->delete();
                         DB::table('chat_message_reactions')->whereIn('message_id', $messageIds)->delete();
 
@@ -133,16 +139,24 @@ class ReiniciarEvento extends Command
                             DB::table('chat_polls')->whereIn('id', $pollIds)->delete();
                         }
 
-                        ChatMessage::query()->whereIn('id', $messageIds)->delete();
+                        ChatMessage::query()
+                            ->whereIn('id', $messageIds)
+                            ->update([
+                                'deleted_at' => now(),
+                                'deleted_by' => null,
+                                'deleted_by_admin' => true,
+                                'pinned_at' => null,
+                                'pinned_by' => null,
+                            ]);
                     }
 
                     if ($conversationIds->isNotEmpty()) {
                         DB::table('chat_broadcast_recipients')->whereIn('conversation_id', $conversationIds)->delete();
                         DB::table('chat_moderation_reads')->whereIn('conversation_id', $conversationIds)->delete();
                         DB::table('chat_group_audits')->whereIn('conversation_id', $conversationIds)->delete();
-                        DB::table('chat_group_bans')->whereIn('conversation_id', $conversationIds)->delete();
-                        DB::table('chat_group_suspensions')->whereIn('conversation_id', $conversationIds)->delete();
-                        DB::table('chat_group_invitations')->whereIn('conversation_id', $conversationIds)->delete();
+                        GroupBan::query()->whereIn('conversation_id', $conversationIds)->delete();
+                        GroupSuspension::query()->whereIn('conversation_id', $conversationIds)->delete();
+                        GroupInvitation::query()->whereIn('conversation_id', $conversationIds)->delete();
                         DB::table('chat_conversation_user')->whereIn('conversation_id', $conversationIds)->delete();
 
                         Conversation::query()->whereIn('id', $conversationIds)->delete();

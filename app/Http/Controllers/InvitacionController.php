@@ -44,8 +44,12 @@ class InvitacionController extends Controller
         }
 
         if ((int) $participacion->user_id !== (int) $request->user()->id) {
-            return redirect()->route('dashboard')
-                ->with('invitacion_aviso', 'Esta invitación es personal y no corresponde a tu cuenta.');
+            return redirect()
+                ->route('dashboard', ['invitacion' => 'usuario-invalido'])
+                ->with(
+                    'invitacion_usuario_invalido',
+                    'Usuario inválido para esta invitación. Favor intentarlo con el usuario correcto.'
+                );
         }
 
         FaseEvento::sincronizar($participacion->event);
@@ -77,6 +81,10 @@ class InvitacionController extends Controller
 
     public function aceptar(Request $request, string $token): JsonResponse
     {
+        if ($request->user()?->isAdmin()) {
+            return api_error('La administración no acepta ni rechaza invitaciones.', 403);
+        }
+
         $participacion = $this->buscar($token);
 
         if ($participacion === null) {
@@ -97,6 +105,10 @@ class InvitacionController extends Controller
 
     public function rechazar(Request $request, string $token): JsonResponse
     {
+        if ($request->user()?->isAdmin()) {
+            return api_error('La administración no acepta ni rechaza invitaciones.', 403);
+        }
+
         $participacion = $this->buscar($token);
 
         if ($participacion === null) {
@@ -126,7 +138,7 @@ class InvitacionController extends Controller
             return api_error($exception->getMessage(), 409);
         }
 
-        return api_success('Rechazaste la invitación. Quedas como declinado en el evento.', [
+        return api_success('Rechazaste la invitación. Quedas como rechazado en el evento.', [
             'invitacion' => $this->datosDe($participacion->fresh()),
         ]);
     }

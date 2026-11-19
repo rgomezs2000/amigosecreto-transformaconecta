@@ -87,16 +87,6 @@
         </div>
     </dl>
 
-    @if ($status === \App\Enums\ParticipantStatus::Active)
-        <div class="sorteo-actions">
-            <button type="button" class="btn btn-outline-danger btn-ficha-expel"
-                    data-id="{{ $participant->id }}">
-                <i class="fa-solid fa-user-slash" aria-hidden="true"></i>
-                <span>Expulsar del evento</span>
-            </button>
-        </div>
-    @endif
-
     <p class="participantes-modal__phase">
         <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>
         <span>

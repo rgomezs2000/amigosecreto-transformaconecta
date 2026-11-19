@@ -264,7 +264,7 @@ class RolesTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('profiles', ['id' => $role->id]);
+        $this->assertSoftDeleted('profiles', ['id' => $role->id]);
     }
 
     public function test_elimina_varios_y_reporta_los_bloqueados(): void
@@ -290,7 +290,8 @@ class RolesTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('profiles', ['id' => $libre->id]);
+        $this->assertSoftDeleted('profiles', ['id' => $libre->id]);
         $this->assertDatabaseHas('profiles', ['id' => $usado->id]);
     }
 }
+

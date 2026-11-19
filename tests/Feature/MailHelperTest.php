@@ -47,8 +47,27 @@ class MailHelperTest extends TestCase
         $this->assertStringContainsString('Tu cuenta está lista', $html);
         $this->assertStringContainsString('Entrar al sistema', $html);
         $this->assertStringContainsString('#2F6F62', $html);
-        $this->assertStringContainsString('max-width: 620px', $html);
+        $this->assertStringContainsString('max-width: 640px', $html);
+        $this->assertStringContainsString('Montserrat', $html);
         $this->assertStringContainsString('role="presentation"', $html);
+    }
+
+    public function test_no_duplica_el_saludo_en_el_contenido(): void
+    {
+        Mail::fake();
+
+        send_mail(
+            'ana@example.com',
+            'Tu cuenta está lista',
+            'Tu cuenta está lista',
+            ['Hola, Ana.', 'Tu cuenta fue creada correctamente.'],
+            null,
+            ['recipient_name' => 'Ana', 'eyebrow' => 'Cuenta creada']
+        );
+
+        Mail::assertSent(NotificationMail::class, function (NotificationMail $mail) {
+            return $mail->mailLines === ['Tu cuenta fue creada correctamente.'];
+        });
     }
 
     public function test_envia_bienvenida_al_crear_usuario(): void

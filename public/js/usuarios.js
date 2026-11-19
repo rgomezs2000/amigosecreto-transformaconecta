@@ -132,6 +132,38 @@
             table.search(initialSearch).draw();
         }
 
+        // Desde el detalle de un caso de contraseña se llega con
+        // ?restablecer=ID. Se busca la fila y se dispara la misma confirmación
+        // que usa el botón de restablecer.
+        var autoResetUserId = new URLSearchParams(window.location.search).get('restablecer');
+        var autoResetPending = Boolean(autoResetUserId);
+
+        function tryAutoReset() {
+            if (!autoResetPending) {
+                return;
+            }
+
+            var $button = $('#usuarios-table .btn-user-reset[data-id="' + autoResetUserId + '"]');
+
+            if (!$button.length) {
+                return;
+            }
+
+            autoResetPending = false;
+
+            var url = new URL(window.location.href);
+            url.searchParams.delete('restablecer');
+            window.history.replaceState({}, '', url.toString());
+
+            $button.trigger('click');
+        }
+
+        table.on('draw', tryAutoReset);
+
+        if (autoResetPending) {
+            window.setTimeout(tryAutoReset, 400);
+        }
+
         function toggleFilters() {
             var type = $('#usuarios-filter-type').val();
 
@@ -490,22 +522,35 @@
         $('#usuarios-table').on('click', '.btn-user-reset', function () {
             var id = $(this).data('id');
             var name = $(this).data('name');
-            var $button = $(this);
 
             AppDialog.confirm('¿Restablecer la contraseña de «' + name + '»? Se enviará una nueva clave por correo.', function () {
-                window.App.processing($button, true, 'Procesando...');
-
                 $.ajax({
                     url: usuarioBase + '/' + encodeURIComponent(id) + '/restablecer',
                     method: 'POST',
                     dataType: 'json',
                     data: { _token: token }
                 }).done(function (response) {
-                    window.location.assign(response.redirect || indexUrl);
-                }).fail(function (xhr) {
-                    window.App.processing($button, false);
-                    showError(xhr);
-                });
+                    var redirect = response.redirect || indexUrl;
+                    var message = response.message || 'La contraseña fue restablecida.';
+
+                    if (response.mail_sent === false) {
+                        AppDialog.warning(message, {
+                            title: 'Contraseña restablecida con aviso',
+                            callback: function () {
+                                window.location.assign(redirect);
+                            }
+                        });
+
+                        return;
+                    }
+
+                    AppDialog.success(message, {
+                        title: 'Contraseña restablecida',
+                        callback: function () {
+                            window.location.assign(redirect);
+                        }
+                    });
+                }).fail(showError);
             });
         });
 

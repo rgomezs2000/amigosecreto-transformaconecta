@@ -111,7 +111,7 @@ class SolicitudController extends Controller
 
     /**
      * Solicitud pública de restablecimiento de contraseña: crea un caso de
-     * tipo «Cuenta». La respuesta es siempre la misma para no revelar si la
+     * tipo «Usuarios». La respuesta es siempre la misma para no revelar si la
      * cuenta existe.
      */
     public function recuperacion(Request $request): JsonResponse
@@ -131,7 +131,7 @@ class SolicitudController extends Controller
 
         if ($user !== null) {
             $pending = ChatReport::query()
-                ->where('type', ChatReport::TYPE_ACCOUNT)
+                ->where('type', ChatReport::TYPE_USER_REGISTRATION)
                 ->where('status', '!=', ChatReport::STATUS_CLOSED)
                 ->where('payload->action', 'reset')
                 ->where('payload->user_id', $user->id)
@@ -139,7 +139,7 @@ class SolicitudController extends Controller
 
             if (! $pending) {
                 ChatReport::create([
-                    'type' => ChatReport::TYPE_ACCOUNT,
+                    'type' => ChatReport::TYPE_USER_REGISTRATION,
                     'status' => ChatReport::STATUS_PENDING,
                     'reporter_id' => $user->id,
                     'reason' => 'Solicitud de restablecimiento de contraseña',

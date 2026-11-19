@@ -167,10 +167,13 @@ class ModeracionBloqueosController extends Controller
             $toRemove = array_values(array_intersect($available, $current));
 
             foreach ($toCreate as $blockedId) {
-                ChatBlock::query()->firstOrCreate([
+                ChatBlock::withTrashed()->firstOrNew([
                     'blocker_id' => $user->id,
                     'blocked_id' => $blockedId,
-                ]);
+                ])->forceFill([
+                    'deleted_at' => null,
+                    'deleted_by' => null,
+                ])->save();
 
                 $created++;
             }

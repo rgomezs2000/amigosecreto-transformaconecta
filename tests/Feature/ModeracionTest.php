@@ -333,7 +333,7 @@ class ModeracionTest extends TestCase
             ->assertJsonPath('message', 'Bloqueos actualizados.');
 
         $this->assertDatabaseHas('chat_blocks', ['blocker_id' => $ana->id, 'blocked_id' => $pedro->id]);
-        $this->assertDatabaseMissing('chat_blocks', ['blocker_id' => $ana->id, 'blocked_id' => $luis->id]);
+        $this->assertSoftDeleted('chat_blocks', ['blocker_id' => $ana->id, 'blocked_id' => $luis->id]);
         $this->assertSame(1, ChatBlock::query()->where('blocker_id', $ana->id)->count());
 
         $this->actingAs($admin)
@@ -691,6 +691,51 @@ class ModeracionTest extends TestCase
             ->assertJsonPath('closed', 0);
     }
 
+    public function test_un_caso_por_atender_se_puede_cerrar_directamente(): void
+    {
+        $this->conversationWithReport();
+
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'chat']);
+        $report = ChatReport::query()->firstOrFail();
+
+        $actions = $this->actingAs($admin)
+            ->getJson('/moderacion/datos?draw=1&start=0&length=10')
+            ->assertOk()
+            ->json('data.0.actions');
+
+        $this->assertStringContainsString('moderacion-close', $actions);
+        $this->assertTrue(strpos($actions, 'moderacion-close') > strpos($actions, 'moderacion-detail'));
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/reportes/'.$report->id.'/detalle')
+            ->assertOk()
+            ->assertJsonPath('report.can_close', true);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/cerrar', [
+                'close_observation' => 'Solicitud errónea, se descarta.',
+                'confirmed' => 1,
+            ])
+            ->assertOk()
+            ->assertJsonPath('report.status_label', 'Cerrado');
+
+        $report->refresh();
+
+        $this->assertSame(ChatReport::STATUS_CLOSED, $report->status);
+        $this->assertSame($admin->id, $report->assigned_to);
+        $this->assertSame($admin->id, $report->taken_by);
+        $this->assertSame($admin->id, $report->closed_by);
+        $this->assertSame('Solicitud errónea, se descarta.', $report->close_observation);
+        $this->assertNotNull($report->taken_at);
+        $this->assertNotNull($report->closed_at);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/datos?draw=1&start=0&length=10')
+            ->assertOk()
+            ->assertJsonPath('data.0.status_label', 'Cerrado')
+            ->assertJsonPath('data.0.can_close', false);
+    }
+
     public function test_el_reporte_pasa_por_atender_atendiendo_y_cerrado(): void
     {
         [$conversation, $message, $ana] = $this->conversationWithReport();
@@ -704,7 +749,7 @@ class ModeracionTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.status_label', 'Por atender')
             ->assertJsonPath('data.0.can_take', true)
-            ->assertJsonPath('data.0.can_close', false);
+            ->assertJsonPath('data.0.can_close', true);
 
         $this->actingAs($admin)
             ->postJson('/moderacion/reportes/'.$report->id.'/tomar', [
@@ -815,5 +860,81 @@ class ModeracionTest extends TestCase
         }
 
         $this->post('/administracion/moderacion')->assertStatus(405);
+    }
+
+    public function test_el_caso_de_contrasena_oculta_la_accion_al_restablecer(): void
+    {
+        Mail::fake();
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion', 'usuarios']);
+        $target = $this->makeUser('Participante', UserRole::Participant);
+
+        $case = ChatReport::openAccountRequest($target, 'reset', 'Olvidé mi contraseña');
+
+        $case->update([
+            'status' => ChatReport::STATUS_ATTENDING,
+            'assigned_to' => $admin->id,
+            'taken_by' => $admin->id,
+            'taken_at' => now(),
+        ]);
+
+        $detail = $this->actingAs($admin)
+            ->getJson('/moderacion/reportes/'.$case->id.'/detalle')
+            ->assertOk()
+            ->assertJsonPath('report.is_managed', false)
+            ->assertJsonPath('report.can_refer', true);
+
+        $this->assertStringContainsString(
+            'restablecer='.$target->id,
+            (string) $detail->json('report.password_change_url')
+        );
+
+        $this->actingAs($admin)
+            ->postJson('/usuarios/'.$target->id.'/restablecer')
+            ->assertOk();
+
+        $this->assertNotNull($case->fresh()->managed_at);
+
+        $this->actingAs($admin)
+            ->postJson('/usuarios/'.$target->id.'/restablecer')
+            ->assertStatus(409);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/reportes/'.$case->id.'/detalle')
+            ->assertOk()
+            ->assertJsonPath('report.is_managed', true)
+            ->assertJsonPath('report.can_refer', false)
+            ->assertJsonPath('report.password_change_url', null);
+    }
+
+    public function test_una_solicitud_de_registro_con_usuario_creado_ya_no_se_remite(): void
+    {
+        $admin = $this->makeUser('Admin', UserRole::Admin, ['moderacion']);
+
+        $user = User::factory()->create([
+            'name' => 'Registro Creado',
+            'email' => 'registro.creado@example.com',
+            'username' => 'registro-creado',
+        ]);
+
+        $case = ChatReport::create([
+            'type' => ChatReport::TYPE_USER_REGISTRATION,
+            'status' => ChatReport::STATUS_ATTENDING,
+            'reporter_id' => $admin->id,
+            'assigned_to' => $admin->id,
+            'taken_by' => $admin->id,
+            'taken_at' => now(),
+            'reason' => 'Solicitud de registro',
+            'payload' => [
+                'name' => $user->name,
+                'email' => $user->email,
+                'username' => $user->username,
+            ],
+        ]);
+
+        $this->actingAs($admin)
+            ->getJson('/moderacion/reportes/'.$case->id.'/detalle')
+            ->assertOk()
+            ->assertJsonPath('report.is_managed', true)
+            ->assertJsonPath('report.can_refer', false);
     }
 }

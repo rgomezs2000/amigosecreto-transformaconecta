@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ExchangeGift extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $fillable = [
         'assignment_id',
         'product',
@@ -28,3 +32,6 @@ class ExchangeGift extends Model
         return $this->belongsTo(Assignment::class);
     }
 }
+
+
+

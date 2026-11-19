@@ -328,7 +328,7 @@ class EventosTest extends TestCase
             ])
             ->assertOk();
 
-        $this->assertDatabaseMissing('events', ['id' => $event->id]);
+        $this->assertSoftDeleted('events', ['id' => $event->id]);
         $this->assertDatabaseHas('audit_logs', ['action' => 'event.cancelled']);
 
         Mail::assertSent(NotificationMail::class, function (NotificationMail $mail) use ($participant) {
@@ -395,3 +395,4 @@ class EventosTest extends TestCase
             ->assertDontSee('Ver tu amigo');
     }
 }
+

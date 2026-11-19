@@ -527,10 +527,6 @@
                 <i class="fa-solid fa-hand" aria-hidden="true"></i>
                 <span>Tomar caso</span>
             </button>
-            <button type="button" class="btn btn-success" id="moderacion-detail-close" hidden>
-                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
-                <span>Cerrar caso</span>
-            </button>
             {{-- Remitir el caso a otro administrador (solo el gestor actual). --}}
             <button type="button" class="btn btn-outline-primary" id="moderacion-detail-refer" hidden>
                 <i class="fa-solid fa-share" aria-hidden="true"></i>
@@ -550,6 +546,11 @@
                 <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
                 <span>Ir al módulo</span>
             </a>
+            {{-- Cerrar caso: siempre penúltimo, después de Remitir y antes de Cerrar. --}}
+            <button type="button" class="btn btn-success" id="moderacion-detail-close" hidden>
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                <span>Cerrar caso</span>
+            </button>
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
         </x-slot:footer>
     </x-app-modal>

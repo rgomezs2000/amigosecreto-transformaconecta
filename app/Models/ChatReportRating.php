@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ChatReportRating extends Model
 {
+    use HasAuditFields, SoftDeletes;
     public const ASPECTS = [
         'general' => 'General',
         'funcionalidad' => 'Funcionalidad',
@@ -49,3 +53,6 @@ class ChatReportRating extends Model
         return self::LABELS[$this->score] ?? 'Sin valorar';
     }
 }
+
+
+

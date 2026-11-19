@@ -367,22 +367,22 @@ class ReiniciarEventoTest extends TestCase
             ->assertSuccessful();
 
         // Fuera el flujo principal.
-        $this->assertDatabaseMissing('events', ['id' => $event->id]);
-        $this->assertDatabaseMissing('event_participants', ['event_id' => $event->id]);
-        $this->assertDatabaseMissing('assignments', ['event_id' => $event->id]);
-        $this->assertDatabaseMissing('clues', ['assignment_id' => $assignmentId]);
-        $this->assertDatabaseMissing('exchange_gifts', ['assignment_id' => $assignmentId]);
-        $this->assertDatabaseMissing('consumable_gifts', ['assignment_id' => $assignmentId]);
-        $this->assertDatabaseMissing('wishlists', ['event_participant_id' => $participacionAna]);
-        $this->assertDatabaseMissing('wish_items', ['event_id' => $event->id]);
-        $this->assertDatabaseMissing('chat_conversations', ['event_id' => $event->id]);
-        $this->assertDatabaseMissing('chat_messages', ['id' => $eventMessage]);
-        $this->assertDatabaseMissing('chat_messages', ['id' => $systemMessage]);
+        $this->assertSoftDeleted('events', ['id' => $event->id]);
+        $this->assertSoftDeleted('event_participants', ['event_id' => $event->id]);
+        $this->assertSoftDeleted('assignments', ['event_id' => $event->id]);
+        $this->assertSoftDeleted('clues', ['assignment_id' => $assignmentId]);
+        $this->assertSoftDeleted('exchange_gifts', ['assignment_id' => $assignmentId]);
+        $this->assertSoftDeleted('consumable_gifts', ['assignment_id' => $assignmentId]);
+        $this->assertSoftDeleted('wishlists', ['event_participant_id' => $participacionAna]);
+        $this->assertSoftDeleted('wish_items', ['event_id' => $event->id]);
+        $this->assertSoftDeleted('chat_conversations', ['event_id' => $event->id]);
+        $this->assertSoftDeleted('chat_messages', ['id' => $eventMessage]);
+        $this->assertSoftDeleted('chat_messages', ['id' => $systemMessage]);
         $this->assertDatabaseMissing('chat_polls', ['id' => $pollId]);
         $this->assertDatabaseCount('chat_poll_options', 0);
         $this->assertDatabaseCount('chat_poll_votes', 0);
         $this->assertDatabaseMissing('chat_message_favorites', ['message_id' => $eventMessage]);
-        $this->assertDatabaseMissing('chat_message_attachments', ['message_id' => $eventMessage]);
+        $this->assertSoftDeleted('chat_message_attachments', ['message_id' => $eventMessage]);
         $this->assertDatabaseMissing('chat_broadcast_recipients', ['conversation_id' => $eventConversation]);
         $this->assertDatabaseMissing('notifications', ['type' => 'evento.invitacion']);
         $this->assertDatabaseMissing('notifications', ['type' => 'chat.mensaje']);
@@ -407,6 +407,16 @@ class ReiniciarEventoTest extends TestCase
         $this->assertDatabaseHas('chat_report_attachments', ['report_id' => $eventReport]);
         $this->assertDatabaseHas('notifications', ['type' => 'general']);
         $this->assertDatabaseHas('session_kicks', ['session_id' => 'sesion-general']);
+
+        // El evento anterior queda con borrado lógico y se puede crear otro
+        // para el mismo año.
+        $nuevo = Event::create([
+            'name' => 'Evento nuevo',
+            'year' => (int) $event->year,
+            'status' => EventStatus::Draft,
+        ]);
+
+        $this->assertNotSame($event->id, $nuevo->id);
     }
 
     public function test_no_reinicia_un_evento_ya_finalizado(): void
@@ -428,3 +438,5 @@ class ReiniciarEventoTest extends TestCase
         $this->assertDatabaseHas('events', ['id' => $event->id]);
     }
 }
+
+

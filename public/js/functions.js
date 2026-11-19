@@ -129,6 +129,26 @@
                 return false;
             }
 
+            // Cerrar o cancelar un modal nunca es una operación que deba
+            // quedar bloqueada con «Procesando…».
+            if (element.matches('.btn-close, [data-bs-dismiss]')) {
+                return false;
+            }
+
+            // Las listas de selección dentro del cuerpo de un modal (eventos
+            // para adjuntar, destinatarios, etc.) no son botones de guardado:
+            // no deben transformarse en «Procesando…». Los botones de guardar
+            // viven en el pie del modal.
+            if (element.closest('.modal-body')) {
+                return false;
+            }
+
+            // Las acciones dentro de las tablas no muestran «Procesando...»:
+            // abren fichas o modales y el estado de carga estorba en la fila.
+            if (element.closest('.roles-actions, .moderacion-actions, td.actions')) {
+                return false;
+            }
+
             return element.tagName === 'BUTTON';
         }
 
@@ -180,6 +200,20 @@
 
         $(document).ajaxSend(function (event, xhr, settings) {
             if (settings.global === false || !eligible(active)) {
+                return;
+            }
+
+            // Solo las operaciones que cambian datos bloquean el botón. Abrir
+            // un modal o consultar una ficha (GET) no debe mostrar
+            // «Procesando…»: el bloqueo es para guardar, modificar o eliminar.
+            var method = String(settings.type || 'GET').toUpperCase();
+
+            if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+                // La consulta no bloquea nada y, además, invalida el botón
+                // recordado para que una operación posterior no lo marque.
+                active = null;
+                window.clearTimeout(clearTimer);
+
                 return;
             }
 

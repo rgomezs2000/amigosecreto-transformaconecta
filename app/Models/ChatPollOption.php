@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ChatPollOption extends Model
 {
+    use HasAuditFields;
     protected $table = 'chat_poll_options';
 
     protected $fillable = [
@@ -33,3 +36,4 @@ class ChatPollOption extends Model
         return $this->hasMany(ChatPollVote::class, 'option_id');
     }
 }
+

@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class GroupBan extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $table = 'chat_group_bans';
 
     protected $fillable = [
@@ -37,3 +41,6 @@ class GroupBan extends Model
         return $this->revoked_at === null;
     }
 }
+
+
+

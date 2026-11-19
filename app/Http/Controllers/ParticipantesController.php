@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ParticipantStatus;
+use App\Http\Controllers\Concerns\ResuelveEstadoEvento;
 use App\Http\Controllers\Concerns\ResuelveEventoConsulta;
 use App\Models\Assignment;
 use App\Models\Clue;
@@ -11,6 +13,7 @@ use App\Models\EventParticipant;
 use App\Models\Module;
 use App\Models\User;
 use App\Models\WishItem;
+use App\Services\InvitacionesEvento;
 use App\Support\FaseEvento;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -28,6 +31,7 @@ use Illuminate\Http\Request;
  */
 class ParticipantesController extends Controller
 {
+    use ResuelveEstadoEvento;
     use ResuelveEventoConsulta;
 
     /**
@@ -39,15 +43,29 @@ class ParticipantesController extends Controller
      */
     private function ensureAccess(): void
     {
-        $module = Module::activeByCode('participantes');
-
-        if ($module === null) {
-            abort(404);
-        }
-
         $user = auth()->user();
 
-        if (! $user?->hasModuleAccess($module)) {
+        if ($user === null) {
+            abort(403);
+        }
+
+        // Los datos de las fichas los comparten los módulos de monitoreo:
+        // Participantes, Lista de deseos, Usuarios obsequiados y Pistas. El
+        // acceso a cada página lo valida su propio controlador; aquí basta con
+        // que la cuenta sea de administración y tenga alguno de esos módulos.
+        $codes = ['participantes', 'lista-de-deseos', 'usuarios-obsequiados', 'pistas'];
+        $allowed = false;
+
+        foreach ($codes as $code) {
+            $module = Module::activeByCode($code);
+
+            if ($module !== null && $user->hasModuleAccess($module)) {
+                $allowed = true;
+                break;
+            }
+        }
+
+        if (! $allowed) {
             abort(403);
         }
 
@@ -100,12 +118,13 @@ class ParticipantesController extends Controller
         // En la Unión, los usuarios participantes creados después del evento
         // también deben aparecer con su invitación pendiente.
         if ($event->status->allowsInvitations()) {
-            app(\App\Services\InvitacionesEvento::class)->generar($event);
+            app(InvitacionesEvento::class)->generar($event);
         }
 
         $query = EventParticipant::query()
             ->where('event_participants.event_id', $event->id)
             ->join('users', 'users.id', '=', 'event_participants.user_id')
+            ->whereNull('users.deleted_at')
             ->select('event_participants.*')
             ->with('user');
 
@@ -212,6 +231,11 @@ class ParticipantesController extends Controller
                 'participation' => $participation,
                 'assignment' => $assignment,
                 'estado' => $estado,
+            ])->render(),
+            'actions_html' => view('participantes.partials.ficha-actions', [
+                'event' => $event,
+                'participant' => $participant,
+                'participation' => $participation,
             ])->render(),
         ]);
     }
@@ -361,14 +385,33 @@ class ParticipantesController extends Controller
 
         $this->participacion($event, $participant);
 
-        $assignment = $this->asignacionDe($event, $participant->id);
+        // «dado»: el obsequio que registra el participante para su amigo.
+        // «recibido»: el que le registra su amigo secreto (Usuarios obsequiados).
+        $recibido = $request->input('rol') === 'recibido';
+        $assignment = $recibido
+            ? $this->asignacionRecibida($event, $participant->id)
+            : $this->asignacionDe($event, $participant->id);
         $gift = $assignment?->exchangeGift;
-        $estado = $this->estadoParticipante($event, $participant, $assignment);
+        $estado = $this->estadoParticipante($event, $participant, $recibido ? null : $assignment);
+
+        if ($recibido) {
+            $estado['asignado'] = $assignment !== null;
+            $estado['recibe'] = $assignment !== null;
+            $estado['consulta'] = $assignment !== null;
+        }
 
         return api_success('Obsequios del participante.', [
             'participant' => $this->participantData($participant),
             'estado' => $estado,
             'totales' => $this->totalesConsumibles($assignment, $event),
+            'gift' => $gift !== null ? [
+                'product' => $gift->product,
+                'description' => $gift->description,
+                'value' => $gift->value,
+                'value_label' => $this->money($gift->value, $event),
+                'value_bs' => $this->bsDe($gift->value),
+                'registered_at' => format_date($gift->registered_at, 'd/m/Y'),
+            ] : null,
             'aviso_html' => $estado['asignado']
                 ? ''
                 : view('participantes.partials.aviso-participante', [
@@ -378,6 +421,7 @@ class ParticipantesController extends Controller
             'html' => view('participantes.partials.obsequio', [
                 'gift' => $gift,
                 'valor' => $this->money($gift?->value, $event),
+                'valorBs' => $this->bsDe($gift?->value),
             ])->render(),
         ]);
     }
@@ -397,7 +441,10 @@ class ParticipantesController extends Controller
 
         $this->participacion($event, $participant);
 
-        $assignment = $this->asignacionDe($event, $participant->id);
+        $recibido = $request->input('rol') === 'recibido';
+        $assignment = $recibido
+            ? $this->asignacionRecibida($event, $participant->id)
+            : $this->asignacionDe($event, $participant->id);
         $draw = (int) $request->input('draw', 1);
 
         $query = ConsumableGift::query()
@@ -438,6 +485,7 @@ class ParticipantesController extends Controller
             'nombre' => e($gift->name ?: $gift->description),
             'cantidad' => (int) $gift->quantity,
             'valor' => $this->money($gift->value, $event),
+            'valor_bs' => $this->bsDe($gift->value),
         ]);
 
         return response()->json([
@@ -478,106 +526,17 @@ class ParticipantesController extends Controller
     }
 
     /**
-     * Estado del evento para la cabecera y los avisos de la página.
-     *
-     * @return array<string, mixed>
+     * Asignación en la que el participante es quien recibe el obsequio.
      */
-    private function estadoEvento(?Event $event): array
+    private function asignacionRecibida(Event $event, int $receiverId): ?Assignment
     {
-        if ($event === null) {
-            return [
-                'evento' => null,
-                'fase' => 1,
-                'fase_label' => FaseEvento::etiqueta(1),
-                'estado_label' => 'Sin evento',
-                'suspendido' => false,
-                'pospuesto' => false,
-                'participantes' => 0,
-                'activos' => 0,
-                'pendientes' => 0,
-                'asignados' => 0,
-                'sin_asignar' => 0,
-                'reparto' => false,
-                'mensaje' => 'Todavía no hay eventos registrados. Crea un evento para consultar a sus participantes.',
-            ];
-        }
-
-        $paso = FaseEvento::paso($event);
-        $participantes = EventParticipant::query()->where('event_id', $event->id)->count();
-        $activos = EventParticipant::query()
+        return Assignment::query()
             ->where('event_id', $event->id)
-            ->where('status', \App\Enums\ParticipantStatus::Active->value)
-            ->count();
-        $pendientes = EventParticipant::query()
-            ->where('event_id', $event->id)
-            ->where('status', \App\Enums\ParticipantStatus::Pending->value)
-            ->count();
-        $asignados = Assignment::query()->where('event_id', $event->id)->count();
-        $sinAsignar = max(0, $activos - $asignados);
-
-        return [
-            'evento' => [
-                'id' => $event->id,
-                'nombre' => $event->name,
-                'anio' => $event->year,
-                'estado' => $event->status->label(),
-                'estado_visible' => $event->statusLabel(),
-                'intercambio' => format_date($event->exchange_at, 'd/m/Y'),
-            ],
-            'fase' => $paso,
-            'fase_label' => FaseEvento::etiqueta($paso),
-            'estado_label' => $event->statusLabel(),
-            'suspendido' => $event->isSuspended(),
-            'pospuesto' => $event->isPostponed(),
-            'participantes' => $participantes,
-            'activos' => $activos,
-            'pendientes' => $pendientes,
-            'asignados' => $asignados,
-            'sin_asignar' => $sinAsignar,
-            'reparto' => $asignados > 0,
-            'mensaje' => $this->mensajeEvento($event, $participantes, $activos, $pendientes, $asignados, $sinAsignar),
-        ];
+            ->where('receiver_id', $receiverId)
+            ->with('exchangeGift')
+            ->first();
     }
 
-    private function mensajeEvento(
-        Event $event,
-        int $participantes,
-        int $activos,
-        int $pendientes,
-        int $asignados,
-        int $sinAsignar
-    ): string {
-        if ($participantes === 0) {
-            return 'Este evento todavía no tiene invitaciones generadas.';
-        }
-
-        if ($event->isSuspended()) {
-            return 'El evento está suspendido temporalmente. La información se muestra en solo lectura.';
-        }
-
-        if ($event->status->isFinished()) {
-            return 'El evento ya finalizó. La información queda disponible en solo lectura.';
-        }
-
-        if ($event->status->allowsInvitations() && $pendientes > 0) {
-            return 'La Unión sigue abierta: hay '.$pendientes.' invitación(es) en espera. '
-                .'El evento no puede iniciarse hasta que todos respondan o se descarten.';
-        }
-
-        if ($event->status->allowsInvitations()) {
-            return 'Todos respondieron la invitación. La organización ya puede iniciar el sorteo.';
-        }
-
-        if ($asignados === 0) {
-            return 'El evento está en la fase «'.FaseEvento::etiquetaDe($event).'» y todavía no se ha asignado el amigo secreto.';
-        }
-
-        if ($sinAsignar > 0) {
-            return 'El amigo secreto ya está asignado a '.$asignados.' de '.$activos.' participantes activos. Los que faltan aparecen como «Sin asignar».';
-        }
-
-        return 'El amigo secreto ya está asignado a todos los participantes activos.';
-    }
 
     /**
      * Estado del amigo secreto para un participante concreto.
@@ -671,6 +630,23 @@ class ParticipantesController extends Controller
         $symbol = $event->currency === 'USD' ? 'US$' : $event->currency;
 
         return $symbol.' '.format_rate($value);
+    }
+
+    /**
+     * Equivalente en bolívares a la tasa del día.
+     *
+     * La tasa es dinámica: se consulta y se muestra, nunca se guarda en la
+     * base de datos.
+     */
+    private function bsDe(mixed $value): ?string
+    {
+        $tasa = dollar_rate();
+
+        if ($value === null || $value === '' || $tasa === null) {
+            return null;
+        }
+
+        return 'Bs. '.format_rate((float) $value * $tasa);
     }
 
     private function leidaBadge(Clue $clue): string

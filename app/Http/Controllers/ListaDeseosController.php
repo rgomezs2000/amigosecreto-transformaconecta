@@ -25,8 +25,13 @@ class ListaDeseosController extends Controller
 {
     public function __construct() {}
 
-    public function index(): View
+    public function index(Request $request): View
     {
+        // La administración no llena listas: consulta las de los usuarios.
+        if ($request->user()?->isAdmin()) {
+            return app(MonitoreoAdminController::class)->listaDeseos($request);
+        }
+
         $this->ensureAccess();
 
         $event = $this->eventoActual();

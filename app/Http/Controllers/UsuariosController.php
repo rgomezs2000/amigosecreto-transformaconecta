@@ -3,8 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Enums\UserRole;
-use App\Models\Module;
 use App\Models\ChatReport;
+use App\Models\EventParticipant;
+use App\Models\Module;
 use App\Models\Profile;
 use App\Models\User;
 use Illuminate\Contracts\View\View;
@@ -200,7 +201,7 @@ class UsuariosController extends Controller
     private function buscarSolicitudReset(User $user): ?ChatReport
     {
         return ChatReport::query()
-            ->where('type', ChatReport::TYPE_ACCOUNT)
+            ->where('type', ChatReport::TYPE_USER_REGISTRATION)
             ->where('status', '!=', ChatReport::STATUS_CLOSED)
             ->get()
             ->first(function (ChatReport $report) use ($user) {
@@ -263,7 +264,7 @@ class UsuariosController extends Controller
         $users = $query->get();
 
         $data = $users->map(fn (User $user) => [
-            'check' => '<input type="checkbox" class="form-check-input user-checkbox" value="' . $user->id . '" aria-label="Seleccionar usuario ' . e($user->name) . '">',
+            'check' => '<input type="checkbox" class="form-check-input user-checkbox" value="'.$user->id.'" aria-label="Seleccionar usuario '.e($user->name).'">',
             'id' => $user->id,
             'name' => e($user->name),
             'email' => e($user->email),
@@ -396,6 +397,10 @@ class UsuariosController extends Controller
 
             $sent = $user->sendCredentialsEmail($plainPassword, $profile);
 
+            if ($solicitudAbierta !== null) {
+                $solicitudAbierta->markManaged();
+            }
+
             $message = $sent
                 ? 'Usuario creado y correo enviado correctamente.'
                 : 'Usuario creado, pero no se pudo enviar el correo. Restablece la contraseña.';
@@ -511,6 +516,7 @@ class UsuariosController extends Controller
         }
 
         try {
+            EventParticipant::query()->where('user_id', $user->id)->delete();
             $user->delete();
 
             $request->session()->flash('usuarios_status', 'Usuario eliminado correctamente.');
@@ -533,6 +539,10 @@ class UsuariosController extends Controller
         $this->ensureAccess();
 
         $solicitudReset = $this->buscarSolicitudReset($user);
+
+        if ($solicitudReset !== null && $solicitudReset->isManaged()) {
+            return api_error('Este caso ya fue gestionado; solo queda cerrarlo.', 409);
+        }
 
         if ($solicitudReset !== null) {
             $current = $request->user();
@@ -577,13 +587,15 @@ class UsuariosController extends Controller
             $plainPassword = Str::password(12);
             $user->updatePassword($plainPassword);
 
+            if ($solicitudReset !== null) {
+                $solicitudReset->markManaged();
+            }
+
             $sent = $user->sendPasswordResetEmail($plainPassword);
 
             $message = $sent
-                ? 'Contraseña restablecida y correo enviado.'
-                : 'Contraseña restablecida, pero no se pudo enviar el correo.';
-
-            $request->session()->flash('usuarios_status', $message);
+                ? 'La contraseña de «'.$user->name.'» fue restablecida. Se ha enviado un correo con sus nuevas credenciales al usuario.'
+                : 'La contraseña de «'.$user->name.'» fue restablecida, pero no se pudo enviar el correo con las nuevas credenciales. Revisa la configuración de correo.';
 
             return api_success($message, [
                 'redirect' => module_url('usuarios'),
@@ -696,9 +708,10 @@ class UsuariosController extends Controller
         }
 
         try {
+            EventParticipant::query()->whereIn('user_id', $ids)->delete();
             $deleted = User::query()->whereIn('id', $ids)->delete();
 
-            $message = $deleted . ' usuario(s) eliminado(s).';
+            $message = $deleted.' usuario(s) eliminado(s).';
 
             $request->session()->flash('usuarios_status', $message);
 

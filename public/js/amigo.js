@@ -211,7 +211,7 @@
             }
 
             window.AppDialog.confirm(
-                '¿Desea rechazar la invitación? Tu participación quedará como declinada.',
+                '¿Desea rechazar la invitación? Tu participación quedará como rechazada.',
                 function () {
                     enviarRespuesta(true, motivo, $button);
                 }

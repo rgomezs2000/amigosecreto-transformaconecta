@@ -2,7 +2,10 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -13,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class Wishlist extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $fillable = [
         'event_participant_id',
         'likes',
@@ -32,3 +36,6 @@ class Wishlist extends Model
         return $this->belongsTo(EventParticipant::class, 'event_participant_id');
     }
 }
+
+
+

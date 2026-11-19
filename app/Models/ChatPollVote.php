@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ChatPollVote extends Model
 {
+    use HasAuditFields;
     protected $table = 'chat_poll_votes';
 
     protected $fillable = [
@@ -30,3 +33,4 @@ class ChatPollVote extends Model
         return $this->belongsTo(User::class);
     }
 }
+

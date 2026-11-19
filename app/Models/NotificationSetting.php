@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 
 class NotificationSetting extends Model
 {
+    use HasAuditFields;
     protected $fillable = [
         'email_enabled',
         'push_enabled',
@@ -36,3 +39,4 @@ class NotificationSetting extends Model
         ]);
     }
 }
+

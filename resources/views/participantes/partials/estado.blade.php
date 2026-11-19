@@ -5,9 +5,10 @@
         <p class="participantes-estado__text">{{ $estado['mensaje'] }}</p>
     @else
         <div class="participantes-estado__row">
-            <span class="participantes-estado__pill">
-                Fase {{ $estado['fase'] }} · {{ $estado['fase_label'] }}
-            </span>
+            @include('partials.fase-badge', [
+                'fase' => $estado['fase'],
+                'texto' => 'Fase '.$estado['fase'].' · '.$estado['fase_label'],
+            ])
 
             <span class="status-badge {{ $estado['suspendido'] ? 'status-badge--blocked' : 'status-badge--active' }}">
                 {{ $estado['estado_label'] }}

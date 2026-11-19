@@ -506,7 +506,7 @@ class ModulosTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('modules', ['id' => $module->id]);
+        $this->assertSoftDeleted('modules', ['id' => $module->id]);
     }
 
     public function test_elimina_varios_y_reporta_los_bloqueados(): void
@@ -544,7 +544,7 @@ class ModulosTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('modules', ['id' => $libre->id]);
+        $this->assertSoftDeleted('modules', ['id' => $libre->id]);
         $this->assertDatabaseHas('modules', ['id' => $usado->id]);
     }
 
@@ -678,7 +678,7 @@ class ModulosTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('modules', ['id' => $libre->id]);
+        $this->assertSoftDeleted('modules', ['id' => $libre->id]);
         $this->assertDatabaseHas('modules', ['id' => $inicio->id]);
     }
 
@@ -742,3 +742,4 @@ class ModulosTest extends TestCase
         $this->assertSame(route('login'), $module->url());
     }
 }
+

@@ -139,6 +139,16 @@ class ChatProfileTest extends TestCase
         $this->actingAs($outsider)
             ->getJson('/chat/'.$group->id.'/perfil')
             ->assertForbidden();
+
+        // El menú del miembro distingue al dueño y a la administración.
+        $members = collect(
+            $this->actingAs($member)->getJson('/chat/'.$group->id.'/perfil')->json('members')
+        )->keyBy('name');
+
+        $this->assertTrue($members['Dueno']['is_owner']);
+        $this->assertFalse($members['Dueno']['is_admin']);
+        $this->assertFalse($members['Miembro']['is_owner']);
+        $this->assertFalse($members['Miembro']['is_admin']);
     }
 
     public function test_la_suspension_queda_en_la_auditoria_del_grupo(): void

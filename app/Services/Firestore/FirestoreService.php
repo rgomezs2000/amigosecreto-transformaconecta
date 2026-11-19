@@ -5,9 +5,11 @@ namespace App\Services\Firestore;
 use App\Models\ChatMessage;
 use App\Models\ChatReport;
 use App\Models\Conversation;
+use App\Models\FirestoreLog;
 use App\Models\Notification;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -118,12 +120,25 @@ class FirestoreService
         }
 
         if (! $this->gateway->enabled()) {
+            $this->logTransaction('updateMany', self::PUSH, null, $documents, 'disabled');
+
             return false;
         }
 
         try {
-            return $this->gateway->updateMany($documents);
+            $result = $this->gateway->updateMany($documents);
+            $this->logTransaction(
+                'updateMany',
+                self::PUSH,
+                null,
+                $documents,
+                $result ? 'ok' : 'failed'
+            );
+
+            return $result;
         } catch (Throwable $exception) {
+            $this->logTransaction('updateMany', self::PUSH, null, $documents, 'error', $exception->getMessage());
+
             Log::warning('Firestore: no se pudo marcar las notificaciones como leídas', [
                 'documents' => count($documents),
                 'error' => $exception->getMessage(),
@@ -427,14 +442,28 @@ class FirestoreService
     private function write(string $mode, string $collection, string $id, array $data): bool
     {
         if (! $this->gateway->enabled()) {
+            $this->logTransaction($mode, $collection, $id, $data, 'disabled');
+
             return false;
         }
 
         try {
-            return $mode === 'update'
+            $result = $mode === 'update'
                 ? $this->gateway->update($collection, $id, $data)
                 : $this->gateway->set($collection, $id, $data);
+
+            $this->logTransaction(
+                $mode,
+                $collection,
+                $id,
+                $data,
+                $result ? 'ok' : 'failed'
+            );
+
+            return $result;
         } catch (Throwable $exception) {
+            $this->logTransaction($mode, $collection, $id, $data, 'error', $exception->getMessage());
+
             Log::warning('Firestore: no se pudo sincronizar '.$collection.'/'.$id, [
                 'error' => $exception->getMessage(),
             ]);
@@ -453,12 +482,26 @@ class FirestoreService
         }
 
         if (! $this->gateway->enabled()) {
+            $this->logTransaction('setMany', 'multiple', null, $documents, 'disabled');
+
             return false;
         }
 
         try {
-            return $this->gateway->setMany($documents);
+            $result = $this->gateway->setMany($documents);
+
+            $this->logTransaction(
+                'setMany',
+                'multiple',
+                null,
+                $documents,
+                $result ? 'ok' : 'failed'
+            );
+
+            return $result;
         } catch (Throwable $exception) {
+            $this->logTransaction('setMany', 'multiple', null, $documents, 'error', $exception->getMessage());
+
             Log::warning('Firestore: no se pudo sincronizar el lote', [
                 'documents' => count($documents),
                 'error' => $exception->getMessage(),
@@ -466,5 +509,104 @@ class FirestoreService
 
             return false;
         }
+    }
+
+    /**
+     * Guarda en SQL el mismo JSON que se envía a Firestore, junto con el actor
+     * y los usuarios relacionados con la transacción.
+     *
+     * @param  array<string, mixed>|array<int, array<string, mixed>>  $payload
+     */
+    private function logTransaction(
+        string $action,
+        ?string $collection,
+        ?string $documentId,
+        array $payload,
+        string $status,
+        ?string $error = null
+    ): void {
+        try {
+            $actorId = Auth::id() !== null ? (int) Auth::id() : null;
+            $userIds = $this->associatedUserIds($payload);
+
+            if ($actorId !== null) {
+                array_unshift($userIds, $actorId);
+            }
+
+            $userIds = array_values(array_unique(array_filter(
+                array_map('intval', $userIds),
+                fn (int $id) => $id > 0
+            )));
+
+            FirestoreLog::create([
+                'user_id' => $actorId,
+                'user_ids' => $userIds,
+                'action' => $action,
+                'collection' => $collection,
+                'document_id' => $documentId,
+                'documents' => $this->countDocuments($payload, $action),
+                'payload' => $payload,
+                'status' => $status,
+                'error' => $error,
+            ]);
+        } catch (Throwable $exception) {
+            // El log nunca debe tumbar la transacción principal.
+            Log::warning('No se pudo guardar el log SQL de Firestore', [
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function countDocuments(array $payload, string $action): int
+    {
+        if (in_array($action, ['setMany', 'updateMany'], true)) {
+            return count($payload);
+        }
+
+        return 1;
+    }
+
+    /**
+     * Extrae los usuarios mencionados en el JSON del documento.
+     *
+     * @return array<int, int>
+     */
+    private function associatedUserIds(array $payload): array
+    {
+        $ids = [];
+
+        $walk = function (array $data) use (&$walk, &$ids): void {
+            foreach ($data as $key => $value) {
+                if (in_array($key, [
+                    'user_id',
+                    'reporter_id',
+                    'reported_user_id',
+                    'created_by',
+                    'sender_id',
+                    'recipient_id',
+                    'target_user_id',
+                ], true) && is_numeric($value)) {
+                    $ids[] = (int) $value;
+                }
+
+                if ($key === 'participants' && is_array($value)) {
+                    foreach ($value as $participant) {
+                        if (is_numeric($participant)) {
+                            $ids[] = (int) $participant;
+                        } elseif (is_array($participant) && isset($participant['id']) && is_numeric($participant['id'])) {
+                            $ids[] = (int) $participant['id'];
+                        }
+                    }
+                }
+
+                if (is_array($value)) {
+                    $walk($value);
+                }
+            }
+        };
+
+        $walk($payload);
+
+        return $ids;
     }
 }

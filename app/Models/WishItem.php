@@ -2,7 +2,10 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -13,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class WishItem extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $fillable = [
         'event_id',
         'user_id',
@@ -31,3 +35,6 @@ class WishItem extends Model
         return $this->belongsTo(User::class);
     }
 }
+
+
+

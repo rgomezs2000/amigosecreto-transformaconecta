@@ -170,6 +170,7 @@
 
             ficha.id = id;
             $('#participante-ficha-body').html(loading());
+            $('#participante-ficha-actions').empty();
 
             var instance = modalFor('modal-participante-ficha');
 
@@ -183,6 +184,7 @@
                 }
 
                 $('#participante-ficha-body').html(response.html || '');
+                $('#participante-ficha-actions').html(response.actions_html || '');
             });
         });
 
@@ -190,9 +192,7 @@
 
         var deseos = { id: null };
 
-        participantsTable.on('click', '.btn-participant-wishlist', function () {
-            var id = $(this).data('id');
-
+        function abrirDeseos(id) {
             deseos.id = id;
             $('#participante-deseos-body').html(loading());
 
@@ -209,7 +209,29 @@
 
                 $('#participante-deseos-body').html(response.html || '');
             });
+        }
+
+        participantsTable.on('click', '.btn-participant-wishlist', function () {
+            abrirDeseos($(this).data('id'));
         });
+
+        function abrirDeseoDesdeUrl() {
+            var params = new URLSearchParams(window.location.search);
+            var participantId = params.get('participante');
+            var eventId = params.get('evento');
+
+            if (!participantId || params.get('accion') !== 'deseos') {
+                return;
+            }
+
+            if (eventId && String($('#participantes-evento').val()) !== String(eventId)) {
+                $('#participantes-evento').val(eventId).trigger('change');
+            }
+
+            abrirDeseos(participantId);
+        }
+
+        window.setTimeout(abrirDeseoDesdeUrl, 700);
 
         /* ---------- Pistas: dos pestañas paginadas ---------- */
 
@@ -558,24 +580,81 @@
             window.AppDialog.success('Enlace personal copiado al portapapeles.');
         });
 
-        participantsTable.on('click', '.btn-participant-invite', function () {
-            var id = $(this).data('id');
+        $(document).on('click', '.btn-ficha-link', function () {
+            copyLink($(this).data('url'));
+            window.AppDialog.success('Enlace personal copiado al portapapeles.');
+        });
 
-            adminPost(adminUrl(urls.invitar, id), {})
+        $(document).on('click', '.btn-ficha-wishlist', function () {
+            abrirDeseos($(this).data('id'));
+        });
+
+        function recargarFicha(id) {
+            if (String(ficha.id) !== String(id)) {
+                return;
+            }
+
+            cargar(urls.ficha, id, {}, function (response) {
+                if (String(ficha.id) !== String(id)) {
+                    return;
+                }
+
+                $('#participante-ficha-body').html(response.html || '');
+                $('#participante-ficha-actions').html(response.actions_html || '');
+            });
+        }
+
+        function enviarCanalParticipante(id, channel, $button) {
+            var messages = {
+                email: 'Invitación enviada por correo.',
+                chat: 'Invitación enviada al chat del sistema.',
+                notify: 'Notificación enviada en el sistema.',
+                link: 'Enlace personal copiado al portapapeles.'
+            };
+
+            $button.prop('disabled', true);
+
+            adminPost(adminUrl(urls.invitar, id), { channel: channel })
                 .done(function (response) {
-                    if (response.invitation_url) {
+                    if (channel === 'link' && response.invitation_url) {
                         copyLink(response.invitation_url);
                     }
 
-                    window.AppDialog.success('Invitación enviada. El enlace personal se copió al portapapeles.');
                     reloadTable();
+                    recargarFicha(id);
+                    window.AppDialog.success(response.message || messages[channel] || 'Invitación enviada.');
                 })
-                .fail(showError);
+                .fail(function (xhr) {
+                    $button.prop('disabled', false);
+                    showError(xhr);
+                });
+        }
+
+        participantsTable.on('click', '.btn-participant-email', function () {
+            enviarCanalParticipante($(this).data('id'), 'email', $(this));
         });
 
-        participantsTable.on('click', '.btn-participant-discard', function () {
-            var id = $(this).data('id');
+        participantsTable.on('click', '.btn-participant-chat', function () {
+            enviarCanalParticipante($(this).data('id'), 'chat', $(this));
+        });
 
+        participantsTable.on('click', '.btn-participant-notify', function () {
+            enviarCanalParticipante($(this).data('id'), 'notify', $(this));
+        });
+
+        $(document).on('click', '.btn-ficha-email', function () {
+            enviarCanalParticipante($(this).data('id'), 'email', $(this));
+        });
+
+        $(document).on('click', '.btn-ficha-chat', function () {
+            enviarCanalParticipante($(this).data('id'), 'chat', $(this));
+        });
+
+        $(document).on('click', '.btn-ficha-notify', function () {
+            enviarCanalParticipante($(this).data('id'), 'notify', $(this));
+        });
+
+        function descartarParticipante(id) {
             window.AppDialog.prompt(
                 'Motivo por el que se descarta la invitación (opcional):',
                 function (reason) {
@@ -585,6 +664,7 @@
                             adminPost(adminUrl(urls.descartar, id), { reason: reason || '' })
                                 .done(function () {
                                     reloadTable();
+                                    recargarFicha(id);
                                 })
                                 .fail(showError);
                         }
@@ -592,12 +672,18 @@
                 },
                 { title: 'Descartar invitación', required: false, maxlength: 1000 }
             );
+        }
+
+        participantsTable.on('click', '.btn-participant-discard', function () {
+            descartarParticipante($(this).data('id'));
+        });
+
+        $(document).on('click', '.btn-ficha-discard', function () {
+            descartarParticipante($(this).data('id'));
         });
 
         participantsTable.on('click', '.btn-participant-expel', function () {
-            var id = $(this).data('id');
-
-            expulsarParticipante(id);
+            expulsarParticipante($(this).data('id'));
         });
 
         // La ficha también permite expulsar al participante activo.
@@ -619,13 +705,8 @@
                         function () {
                             adminPost(adminUrl(urls.expulsar, id), { reason: reason })
                                 .done(function () {
-                                    var fichaModal = modalFor('modal-participante-ficha');
-
-                                    if (fichaModal) {
-                                        fichaModal.hide();
-                                    }
-
                                     reloadTable();
+                                    recargarFicha(id);
                                 })
                                 .fail(showError);
                         },

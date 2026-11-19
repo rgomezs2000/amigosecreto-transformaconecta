@@ -46,7 +46,7 @@
             columns: [
                 { data: 'id', className: 'roles-id' },
                 { data: 'nombre', className: 'roles-name' },
-                { data: 'usuario', className: 'roles-name' },
+                { data: 'estatus', orderable: false, className: 'roles-name' },
                 { data: 'amigo', className: 'roles-name' }
             ],
             columnDefs: [
@@ -75,8 +75,8 @@
             drawCallback: function (settings) {
                 var json = (settings && settings.json) || {};
 
-                if (typeof json.aviso_html === 'string') {
-                    $('#usuarios-asociados-aviso').html(json.aviso_html);
+                if (typeof json.estado_html === 'string') {
+                    $('#usuarios-asociados-estado').html(json.estado_html);
                 }
             }
         });

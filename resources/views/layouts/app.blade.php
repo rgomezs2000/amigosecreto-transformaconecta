@@ -54,24 +54,59 @@
 
             <p class="dashboard-rate">
                 US$/Bs (BCV):
-                <strong>{{ format_rate($shell['dollarRate']) }}</strong>
+                <strong data-bcv-rate>{{ format_rate($shell['dollarRate']) }}</strong>
             </p>
         </div>
     </header>
 
     @yield('page')
 
+    @php($invitacionUsuarioInvalido = session('invitacion_usuario_invalido')
+        ?: (request()->query('invitacion') === 'usuario-invalido'
+            ? 'Usuario inválido para esta invitación. Favor intentarlo con el usuario correcto.'
+            : null))
+
+    @if ($invitacionUsuarioInvalido)
+        <x-app-modal id="modal-invitacion-usuario-invalido" title="Usuario inválido">
+            <x-slot:body>
+                <p class="mb-0">{{ $invitacionUsuarioInvalido }}</p>
+            </x-slot:body>
+
+            <x-slot:footer>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </x-slot:footer>
+        </x-app-modal>
+
+        @push('scripts')
+            <script>
+                document.addEventListener('DOMContentLoaded', function () {
+                    var element = document.getElementById('modal-invitacion-usuario-invalido');
+
+                    if (element && window.bootstrap) {
+                        window.bootstrap.Modal.getOrCreateInstance(element).show();
+                    }
+
+                    if (new URLSearchParams(window.location.search).get('invitacion') === 'usuario-invalido'
+                        && window.history && window.history.replaceState) {
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                    }
+                });
+            </script>
+        @endpush
+    @endif
+
     @include('partials.chat-widget')
 
     <div class="offcanvas offcanvas-start" tabindex="-1" id="main-menu"
          data-bs-backdrop="true" data-bs-scroll="false"
+         data-menu-signature="{{ hash('sha256', $liveMenuHtml = view('partials.menu', ['groups' => $shell['menuGroups']])->render()) }}"
          aria-labelledby="main-menu-label">
         <div class="offcanvas-header">
             <h2 class="offcanvas-title" id="main-menu-label">Menú</h2>
             <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
         </div>
         <div class="offcanvas-body">
-            @include('partials.menu', ['groups' => $shell['menuGroups']])
+            {!! $liveMenuHtml !!}
         </div>
     </div>
 

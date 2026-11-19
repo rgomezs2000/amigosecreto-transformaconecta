@@ -72,8 +72,15 @@ parámetro y validan que el usuario participe en ese evento.
 | GET | `/participantes/{participant}/ficha` | Ficha en HTML + estado del amigo secreto. |
 | GET | `/participantes/{participant}/lista-deseos` | Ficha de la lista de deseos. |
 | GET | `/participantes/{participant}/pistas` | DataTable de pistas (`tipo=recibidas|enviadas`). |
-| GET | `/participantes/{participant}/obsequios` | Obsequio único + totales. |
-| GET | `/participantes/{participant}/obsequios/consumibles` | DataTable de consumibles + totales. |
+| GET | `/participantes/{participant}/obsequios` | Obsequio único + totales. Con `rol=recibido`, el que le registra su amigo secreto. |
+| GET | `/participantes/{participant}/obsequios/consumibles` | DataTable de consumibles + totales (acepta `rol=recibido`). |
+
+Los montos en bolívares de los obsequios se calculan en la respuesta con la tasa
+del día (`dollar_rate()`); no se guardan en la base de datos.
+
+Los endpoints de fichas también los usan los módulos **Lista de deseos**,
+**Usuarios obsequiados** y **Pistas**; por eso el acceso exige rol de
+administración y cualquiera de esos cuatro módulos de monitoreo.
 
 ## Piezas
 

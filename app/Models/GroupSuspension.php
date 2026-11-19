@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class GroupSuspension extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $table = 'chat_group_suspensions';
 
     protected $fillable = [
@@ -37,3 +41,6 @@ class GroupSuspension extends Model
         return $this->until !== null && $this->until->isFuture();
     }
 }
+
+
+

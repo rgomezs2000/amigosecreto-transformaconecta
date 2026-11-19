@@ -24,6 +24,17 @@
         var tasa = parseFloat($config.attr('data-tasa')) || 0;
         var token = $('#eventos-csrf').val();
 
+        document.addEventListener('bcv:rate', function (event) {
+            var next = Number(event.detail && event.detail.rate);
+
+            if (!isFinite(next) || next <= 0) {
+                return;
+            }
+
+            tasa = next;
+            updateBudgetBs();
+        });
+
         function modal(id) {
             var element = document.getElementById(id);
 
@@ -212,12 +223,15 @@
 
                     if (participant.status_key === 'pending') {
                         actions = '<div class="table-actions">' +
-                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-invitar" data-user="' + participant.id + '" title="Enviar invitación"><i class="fa-solid fa-envelope"></i></button>' +
-                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-link" data-url="' + (participant.invitation_url || '') + '" title="Copiar enlace"><i class="fa-solid fa-link"></i></button>' +
-                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-descartar" data-user="' + participant.id + '" title="Descartar"><i class="fa-solid fa-ban"></i></button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-channel" data-processing-manual="true" data-user="' + participant.id + '" data-channel="notify" title="Notificar en el sistema"><i class="fa-solid fa-bell"></i></button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-channel" data-processing-manual="true" data-user="' + participant.id + '" data-channel="email" title="Enviar por correo"><i class="fa-solid fa-envelope"></i></button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-channel" data-processing-manual="true" data-user="' + participant.id + '" data-channel="chat" title="Enviar al chat del sistema"><i class="fa-solid fa-comments"></i></button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-channel" data-processing-manual="true" data-user="' + participant.id + '" data-channel="link" title="Copiar enlace"><i class="fa-solid fa-link"></i></button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-descartar" data-processing-manual="true" data-user="' + participant.id + '" title="Descartar"><i class="fa-solid fa-ban"></i></button>' +
                             '</div>';
                     } else if (participant.status_key === 'active') {
                         actions = '<div class="table-actions">' +
+                            '<a class="btn btn-sm btn-outline-secondary" href="' + $('<div>').text(participant.wishlist_url || '').html() + '" title="Lista de deseos"><i class="fa-solid fa-list"></i></a>' +
                             '<button type="button" class="btn btn-sm btn-outline-secondary btn-participante-expulsar" data-user="' + participant.id + '" title="Expulsar"><i class="fa-solid fa-user-slash"></i></button>' +
                             '</div>';
                     }
@@ -303,34 +317,39 @@
             );
         });
 
-        // Invitar / descartar / expulsar una persona ----------------------
-        $('#evento-participantes-list').on('click', '.btn-participante-invitar', function () {
-            var userId = $(this).data('user');
+        // Invitar por un canal concreto / descartar / expulsar -------------
+        $('#evento-participantes-list').on('click', '.btn-participante-channel', function () {
+            var $button = $(this);
+            var userId = $button.data('user');
+            var channel = String($button.data('channel') || '');
+            var labels = {
+                notify: 'Notificación enviada en el sistema.',
+                email: 'Invitación enviada por correo.',
+                chat: 'Invitación enviada al chat del sistema.',
+                link: 'Enlace personal copiado al portapapeles.'
+            };
 
-            post(urlFor(invitarUnoUrl, modalParticipantsEvent, userId), {})
+            $button.prop('disabled', true);
+
+            post(urlFor(invitarUnoUrl, modalParticipantsEvent, userId), { channel: channel })
                 .done(function (response) {
-                    if (response.invitation_url) {
+                    if (channel === 'link' && response && response.invitation_url) {
                         copyText(response.invitation_url);
+                        showLinkBubble(response.invitation_url);
+                        loadParticipants(modalParticipantsEvent, false);
+                        return;
                     }
 
-                    window.AppDialog.success('Invitación enviada. El enlace personal se copió al portapapeles.', {
+                    window.AppDialog.success((response && response.message) || labels[channel] || 'Invitación enviada.', {
                         callback: function () {
                             loadParticipants(modalParticipantsEvent, false);
                         }
                     });
                 })
-                .fail(showError);
-        });
-
-        $('#evento-participantes-list').on('click', '.btn-participante-link', function () {
-            var url = $(this).data('url');
-
-            if (!url) {
-                return;
-            }
-
-            copyText(url);
-            window.AppDialog.success('Enlace personal copiado al portapapeles.');
+                .fail(function (xhr) {
+                    $button.prop('disabled', false);
+                    showError(xhr);
+                });
         });
 
         $('#evento-participantes-list').on('click', '.btn-participante-descartar', function () {
@@ -380,6 +399,26 @@
                 { title: 'Expulsar participante', required: true, maxlength: 1000 }
             );
         });
+
+        function showLinkBubble(url) {
+            $('#evento-link-bubble').remove();
+
+            var $bubble = $('<div>', {
+                id: 'evento-link-bubble',
+                class: 'evento-link-bubble',
+                role: 'status',
+                'aria-live': 'polite'
+            })
+                .append($('<strong>').text('Enlace personal copiado'))
+                .append($('<span>').text(url))
+                .appendTo('body');
+
+            window.setTimeout(function () {
+                $bubble.fadeOut(180, function () {
+                    $(this).remove();
+                });
+            }, 4500);
+        }
 
         function copyText(text) {
             if (!text) {
@@ -644,7 +683,10 @@
                     $card.find('[data-evento-field="budget"]').text(event.budget);
                     $card.find('[data-evento-field="participants"]').text(event.active);
                     $card.find('[data-evento-field="pending"]').text(event.pending);
-                    $card.find('[data-evento-field="phase"]').text(event.phase_label);
+                    $card.find('[data-evento-field="phase"]')
+                        .removeClass('fase-badge--1 fase-badge--2 fase-badge--3 fase-badge--4 fase-badge--5')
+                        .addClass('fase-badge--' + event.phase)
+                        .text('Fase ' + event.phase + ' · ' + event.phase_label);
                     $card.find('[data-evento-field="created"]').text(event.created);
                     $card.find('[data-evento-field="name"]').text(event.name);
                     $card.attr('data-evento-name', event.name);

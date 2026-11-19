@@ -151,6 +151,27 @@ class DashboardTest extends TestCase
             ->assertSee('Error del servidor');
     }
 
+    public function test_la_pagina_de_error_500_no_duplica_el_contenido(): void
+    {
+        $html = view('errors.500')->render();
+
+        $this->assertSame(1, substr_count($html, 'error-page'));
+        $this->assertSame(1, substr_count($html, 'Error del servidor'));
+        $this->assertStringContainsString('error-standalone', $html);
+    }
+
+    public function test_las_paginas_de_error_con_sesion_no_duplican_el_contenido(): void
+    {
+        [$user] = $this->userWithModule();
+
+        $html = $this->actingAs($user)
+            ->get('/ruta-inexistente')
+            ->assertNotFound()
+            ->getContent();
+
+        $this->assertSame(1, substr_count($html, 'error-page'));
+    }
+
     public function test_la_pagina_de_error_419_se_puede_renderizar(): void
     {
         $this->view('errors.419')

@@ -1,80 +1,48 @@
-# Actualización en tiempo real no invasiva
+# Actualización en tiempo real
 
-Las tablas y contadores se refrescan solos, pero **nunca interrumpen** lo que la
-persona está haciendo. El mecanismo está pensado para que el sistema no se
-sienta “recargado” ni pierda trabajo en curso.
+El sistema se actualiza sin recargar la página. Cada componente conserva su
+estado (página, búsqueda, orden, selección y formularios) y los refrescos se
+pausan cuando hay interacción.
 
-## Regla de oro
+## Anticaché global
 
-Una actualización solo ocurre si:
+`public/js/live-refresh.js` añade un parámetro `_` con la marca de tiempo a
+todas las peticiones **GET del mismo origen**:
 
-- la pestaña está visible y hay conexión;
-- no hay un modal, un diálogo de Bootbox ni un panel lateral abierto;
-- no hay un campo de texto, selector o área editable enfocada;
-- la persona lleva al menos **8 segundos sin interactuar** (teclado, clic o
-  cambio en un campo);
-- la tabla está visible (no está en una pestaña oculta);
-- la tabla no tiene cambios pendientes marcados con `data-live-dirty="1"`.
+- jQuery/AJAX, incluidas las DataTables;
+- `fetch`, incluidas las consultas públicas de disponibilidad.
 
-Si alguna condición falla, se omite el ciclo. No se fuerza nada.
+No modifica POST, peticiones externas ni URLs que ya traen `_ts` o `_`.
 
-## Tablas
+## Qué se refresca
 
-`public/js/live-tables.js` se carga al final de todas las páginas y detecta las
-tablas DataTables con datos en servidor. Cada **30 segundos** intenta
-actualizarlas, una por una y con una pequeña separación entre tablas.
+- **Menú lateral:** consulta `/menu/estado` a los 12 segundos y luego cada 30
+  segundos. Solo reemplaza el HTML si la firma cambió, el menú está cerrado y
+  no hay modales ni offcanvas abiertos.
+- **Notificaciones:** contador cada 7 segundos; la lista se actualiza al abrir
+  el panel y cuando cambia.
+- **Chat:** mensajes cada 1,6–15 segundos según errores; resumen cada 4,5–30
+  segundos. Solo parchea diferencias.
+- **Tasa BCV:** cada 60 segundos consulta `/tasa-bcv`. Actualiza el encabezado,
+  la referencia en bolívares del presupuesto, la ficha de Eventos y cualquier
+  elemento marcado con `data-bcv-rate` o `data-bcv-usd`.
+- **DataTables:** cada 15 segundos, solo en reposo (5 segundos sin interacción),
+  sin modales, sin pestaña oculta y sin operaciones AJAX en curso. Conserva
+  página, orden, búsqueda y selección.
 
-Conserva:
+## No invasivo
 
-- la página actual;
-- la búsqueda y el orden;
-- las filas seleccionadas con checkbox (vuelve a marcarlas después del
-  refresco).
+- Nunca recarga la página completa.
+- No interrumpe formularios enfocados, modales, diálogos ni offcanvas abiertos.
+- No actualiza si la pestaña está oculta.
+- Los cambios de menú se aplican solo cuando el menú está cerrado.
+- El parámetro anticaché no cambia la lógica del servidor; Laravel lo ignora.
 
-Cubre, entre otras:
+## Implementación
 
-- Roles, Permisos, Categorías, Módulos, Usuarios.
-- Reportes de moderación, bloqueos entre usuarios y vetados de grupo.
-
-Para excluir una tabla: `data-live="off"` en el `<table>`.
-
-Para pausar todo desde un módulo:
-
-```js
-window.LiveTables.pause();
-window.LiveTables.resume();
-```
-
-## Matriz de perfiles
-
-La matriz es una tabla local con cambios preparados sin aplicar. Su refresco es
-propio:
-
-- consulta el servidor cada 30 segundos;
-- **no se ejecuta si hay cambios sin aplicar** o si hay un modal/campo enfocado;
-- solo vuelve a cargar cuando los datos del servidor cambiaron de verdad;
-- conserva la búsqueda y los filtros.
-
-## Contadores
-
-- **Control de Notificaciones**: `GET /administracion/notificaciones/contadores`
-  devuelve el tráfico y actualiza las tarjetas (hoy, 7 días, total, fallidos y
-  conversaciones) cada 20 segundos. Solo cambia texto; no recarga la página.
-- **Moderación**: `GET /moderacion/contadores` devuelve reportes, bloqueos
-  activos y vetos activos, y actualiza los tres contadores cada 20 segundos.
-
-## Eventos
-
-`GET /eventos/estado` devuelve el estado de las tarjetas. Cada 25 segundos, si
-no hay formularios abiertos ni campos enfocados:
-
-- actualiza nombre, estado, fecha de intercambio, participantes y fecha de
-  creación de las tarjetas existentes;
-- si aparece o desaparece un evento, o cambia el estado, reemplaza **solo el
-  bloque de tarjetas** con el HTML que devuelve el servidor, mediante AJAX y sin
-  recargar la página;
-- los botones de las tarjetas siguen funcionando porque sus manejadores están
-  delegados en el contenedor.
-
-El formulario de creación y sus modales **no se tocan mientras están abiertos**.
-Ningún refresco automático hace `location.reload()` ni una navegación completa.
+- `public/js/live-refresh.js`: anticaché global y menú vivo.
+- `app/Http/Controllers/ShellController.php`: HTML y firma del menú.
+- `routes/web.php`: ruta `/menu/estado`.
+- `public/js/alertas.js`: sondeo de notificaciones.
+- `public/js/live-tables.js`: refresco no invasivo de DataTables.
+- `public/js/chat.js`: sondeo incremental del chat.

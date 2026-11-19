@@ -7,6 +7,7 @@ use App\Http\Controllers\ContactoSoporteController;
 use App\Http\Controllers\DinamicaController;
 use App\Http\Controllers\EventoReinicioController;
 use App\Http\Controllers\EventosController;
+use App\Http\Controllers\ExchangeRateController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\GranRevelacionController;
 use App\Http\Controllers\GroupModerationController;
@@ -17,8 +18,8 @@ use App\Http\Controllers\ListaDeseosController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\LogoutController;
 use App\Http\Controllers\MatrizPerfilesController;
-use App\Http\Controllers\ModeracionBloqueosController;
-use App\Http\Controllers\ModeracionController;
+use App\Http\Controllers\MonitoreoAdminController;
+use App\Http\Controllers\ModeracionBloqueosController;use App\Http\Controllers\ModeracionController;
 use App\Http\Controllers\ModeracionGruposController;
 use App\Http\Controllers\ModulePageController;
 use App\Http\Controllers\ModulosController;
@@ -29,6 +30,7 @@ use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\PermisosController;
 use App\Http\Controllers\RolesController;
 use App\Http\Controllers\SessionController;
+use App\Http\Controllers\ShellController;
 use App\Http\Controllers\SolicitudAdminController;
 use App\Http\Controllers\SolicitudController;
 use App\Http\Controllers\SorteoCiegoController;
@@ -36,21 +38,86 @@ use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\UsuariosAsociadosController;
 use App\Http\Controllers\UsuariosController;
 use App\Http\Controllers\VerTuAmigoController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\URL;
 
 // Punto de entrada: sin sesión manda al login; con sesión muestra el panel.
 Route::get('/', [HomeController::class, 'index'])->name('home');
+
+// Cierre de sesión desde la pantalla de compatibilidad, con URL firmada.
+Route::get('/compatibilidad/cerrar-sesion', function (Request $request) {
+    abort_unless($request->hasValidSignature(), 403);
+
+    Auth::logout();
+    $request->session()->invalidate();
+    $request->session()->regenerateToken();
+
+    return redirect()->route('compatibilidad', [
+        'from' => (string) $request->query('from', ''),
+        'motivo' => 'incompatible',
+    ]);
+})->name('compatibilidad.logout');
+
+// Pantalla informativa para navegadores o sistemas no soportados.
+Route::get('/compatibilidad', function (Request $request) {
+    $from = (string) $request->query('from', '');
+
+    if ($from !== '') {
+        $scheme = strtolower((string) parse_url($from, PHP_URL_SCHEME));
+        $fromHost = parse_url($from, PHP_URL_HOST);
+
+        if (! in_array($scheme, ['http', 'https'], true)
+            || $fromHost === null
+            || strcasecmp($fromHost, $request->getHost()) !== 0) {
+            $from = '';
+        }
+    }
+
+    $motivo = $request->query('motivo') === 'incompatible' ? 'incompatible' : '';
+    $legacyEngine = preg_match(
+        '/MSIE\s|Trident\/|Edge\/|Presto\/|Konqueror\//i',
+        (string) $request->userAgent()
+    ) === 1;
+
+    // Si se llega directamente a esta pantalla con un motor histórico y una
+    // sesión abierta, también se cierra la sesión y se informa en la página.
+    if ($legacyEngine) {
+        if (Auth::check()) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
+
+        $motivo = 'incompatible';
+    }
+
+    $logoutUrl = Auth::check()
+        ? URL::temporarySignedRoute(
+            'compatibilidad.logout',
+            now()->addMinutes(30),
+            ['from' => $from ?: url('/')]
+        )
+        : '';
+
+    return view('compatibilidad', [
+        'from' => $from,
+        'motivo' => $motivo,
+        'logoutUrl' => $logoutUrl,
+    ]);
+})->name('compatibilidad');
 
 // Pantalla de acceso.
 Route::get('/login', [LoginController::class, 'index'])->name('login');
 
 // Solicitudes públicas: prerregistro y recuperación de contraseña.
 Route::get('/solicitudes/usuario-disponible', [SolicitudController::class, 'usuarioDisponible'])
-    ->middleware('throttle:30,1')
+    ->middleware('throttle:60,1')
     ->name('solicitudes.usuario');
 
 Route::post('/solicitudes/registro', [SolicitudController::class, 'registro'])
-    ->middleware('throttle:5,1')
+    ->middleware('throttle:10,1')
     ->name('solicitudes.registro');
 
 Route::post('/solicitudes/recuperacion', [SolicitudController::class, 'recuperacion'])
@@ -64,6 +131,16 @@ Route::post('/login', [LoginController::class, 'login'])->name('login.attempt');
 Route::get('/sesion/estado', [SessionController::class, 'estado'])
     ->middleware('auth')
     ->name('sesion.estado');
+
+// Menú vivo: el navegador lo consulta para reflejar cambios sin recargar.
+Route::get('/menu/estado', [ShellController::class, 'menu'])
+    ->middleware('auth')
+    ->name('menu.estado');
+
+// Tasa BCV para actualizar montos y referencias sin recargar.
+Route::get('/tasa-bcv', [ExchangeRateController::class, 'show'])
+    ->middleware('auth')
+    ->name('tasa.bcv');
 
 // Acceso con Google por OAuth (flujo de redirección).
 Route::get('/auth/google/redirect', [GoogleAuthController::class, 'googleLogin'])->name('google.redirect');
@@ -799,6 +876,13 @@ Route::get('/participantes/{participant}/obsequios', [ParticipantesController::c
     ->middleware('auth')
     ->whereNumber('participant')
     ->name('participantes.obsequios');
+
+// Consulta de los módulos de administración (lista de deseos, usuarios
+// obsequiados y pistas): tabla de usuarios con búsqueda y filtro de estatus.
+Route::get('/monitoreo/{tipo}/datos', [MonitoreoAdminController::class, 'datos'])
+    ->middleware('auth')
+    ->whereIn('tipo', ['deseos', 'obsequios', 'pistas'])
+    ->name('monitoreo.datos');
 
 // Usuarios asociados (monitoreo de las parejas del evento). La página la sirve
 // el enrutador de módulos; aquí queda la consulta del DataTable.

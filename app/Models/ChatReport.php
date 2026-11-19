@@ -2,13 +2,17 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ChatReport extends Model
 {
+    use HasAuditFields, SoftDeletes;
     public const STATUS_PENDING = 'pendiente';
 
     public const STATUS_ATTENDING = 'atendiendo';
@@ -23,11 +27,8 @@ class ChatReport extends Model
 
     public const TYPE_SUPPORT = 'soporte';
 
-    /** Solicitud pública de registro (tipo «Usuarios»). */
+    /** Solicitud pública de registro o gestión de cuenta (tipo «Usuarios»). */
     public const TYPE_USER_REGISTRATION = 'registro';
-
-    /** Solicitud de cuenta: restablecer contraseña o desbloquear. */
-    public const TYPE_ACCOUNT = 'cuenta';
 
     /**
      * Tipos válidos y su etiqueta para la interfaz.
@@ -40,7 +41,6 @@ class ChatReport extends Model
         self::TYPE_HELP => 'Ayuda',
         self::TYPE_SUPPORT => 'Soporte',
         self::TYPE_USER_REGISTRATION => 'Usuarios',
-        self::TYPE_ACCOUNT => 'Cuenta',
     ];
 
     protected $table = 'chat_reports';
@@ -52,7 +52,7 @@ class ChatReport extends Model
     public static function openAccountRequest(User $user, string $kind, string $reason): self
     {
         $existing = static::query()
-            ->where('type', self::TYPE_ACCOUNT)
+            ->where('type', self::TYPE_USER_REGISTRATION)
             ->where('status', '!=', self::STATUS_CLOSED)
             ->where('payload->action', $kind)
             ->where('payload->user_id', $user->id)
@@ -63,7 +63,7 @@ class ChatReport extends Model
         }
 
         return static::create([
-            'type' => self::TYPE_ACCOUNT,
+            'type' => self::TYPE_USER_REGISTRATION,
             'status' => self::STATUS_PENDING,
             'reporter_id' => $user->id,
             'reason' => $reason,
@@ -98,6 +98,7 @@ class ChatReport extends Model
         'closed_at',
         'closed_by',
         'close_observation',
+        'managed_at',
     ];
 
     protected $attributes = [
@@ -110,6 +111,7 @@ class ChatReport extends Model
         return [
             'taken_at' => 'datetime',
             'closed_at' => 'datetime',
+            'managed_at' => 'datetime',
             'payload' => 'array',
         ];
     }
@@ -205,6 +207,47 @@ class ChatReport extends Model
         return $this->status === self::STATUS_CLOSED;
     }
 
+    public function isManaged(): bool
+    {
+        if ($this->managed_at !== null) {
+            return true;
+        }
+
+        // Las solicitudes de registro se consideran gestionadas en cuanto el
+        // usuario ya existe, aunque el caso se haya creado desde el módulo de
+        // Usuarios y no se haya marcado managed_at.
+        if (! $this->isUserRegistration() || $this->isAccountRequest()) {
+            return false;
+        }
+
+        $payload = $this->payload ?: [];
+        $email = mb_strtolower(trim((string) ($payload['email'] ?? '')));
+        $username = mb_strtolower(trim((string) ($payload['username'] ?? '')));
+
+        if ($email === '' && $username === '') {
+            return false;
+        }
+
+        return User::query()
+            ->where(function ($query) use ($email, $username) {
+                if ($email !== '') {
+                    $query->whereRaw('LOWER(email) = ?', [$email]);
+                }
+
+                if ($username !== '') {
+                    $query->orWhereRaw('LOWER(username) = ?', [$username]);
+                }
+            })
+            ->exists();
+    }
+
+    public function markManaged(): void
+    {
+        if ($this->managed_at === null) {
+            $this->forceFill(['managed_at' => now()])->save();
+        }
+    }
+
     public function isModeration(): bool
     {
         return $this->type === self::TYPE_MODERATION;
@@ -232,7 +275,9 @@ class ChatReport extends Model
 
     public function isAccountRequest(): bool
     {
-        return $this->type === self::TYPE_ACCOUNT;
+        $payload = $this->payload ?: [];
+
+        return in_array($payload['action'] ?? null, ['reset', 'unlock'], true);
     }
 
     public function statusLabel(): string
@@ -249,3 +294,6 @@ class ChatReport extends Model
         return self::TYPES[$this->type] ?? self::TYPES[self::TYPE_MODERATION];
     }
 }
+
+
+

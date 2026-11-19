@@ -2,7 +2,9 @@
 
 ## Acción principal del perfil
 
-El perfil tiene una acción principal fija al final, según cómo se abrió:
+El perfil de la conversación muestra la acción principal debajo de los datos de
+identidad (nombre, `@usuario` y correo); la ficha de un miembro la mantiene al
+pie. La acción depende de cómo se abrió el perfil:
 
 | Contexto | Acción | Qué hace |
 | --- | --- | --- |

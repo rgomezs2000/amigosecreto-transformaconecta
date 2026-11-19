@@ -247,7 +247,7 @@ class PermisosTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('permissions', ['id' => $permission->id]);
+        $this->assertSoftDeleted('permissions', ['id' => $permission->id]);
     }
 
     public function test_elimina_varios_y_reporta_los_bloqueados(): void
@@ -267,7 +267,8 @@ class PermisosTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('permissions', ['id' => $libre->id]);
+        $this->assertSoftDeleted('permissions', ['id' => $libre->id]);
         $this->assertDatabaseHas('permissions', ['id' => $usado->id]);
     }
 }
+

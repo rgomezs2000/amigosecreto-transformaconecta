@@ -12,6 +12,7 @@ use App\Http\Controllers\GranRevelacionController;
 use App\Http\Controllers\IntercambioPistasController;
 use App\Http\Controllers\ListaDeseosController;
 use App\Http\Controllers\MatrizPerfilesController;
+use App\Http\Controllers\MonitoreoAdminController;
 use App\Http\Controllers\ModeracionController;
 use App\Http\Controllers\ModulosController;
 use App\Http\Controllers\NotificacionesController;
@@ -62,6 +63,8 @@ final class ModulePages
         'gran-revelacion' => ['controller' => GranRevelacionController::class, 'action' => 'index'],
         'participantes' => ['controller' => ParticipantesController::class, 'action' => 'index'],
         'usuarios-asociados' => ['controller' => UsuariosAsociadosController::class, 'action' => 'index'],
+        'usuarios-obsequiados' => ['controller' => MonitoreoAdminController::class, 'action' => 'obsequiados'],
+        'pistas' => ['controller' => MonitoreoAdminController::class, 'action' => 'pistas'],
         // Centro de ayuda: las tres pantallas son estáticas y leen la base.
         'acerca-de' => ['controller' => AyudaController::class, 'action' => 'acercaDe'],
         'ayuda' => ['controller' => AyudaController::class, 'action' => 'guia'],

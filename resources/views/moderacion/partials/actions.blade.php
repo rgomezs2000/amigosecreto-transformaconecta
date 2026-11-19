@@ -45,4 +45,13 @@
             <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
         </a>
     @endif
+
+    {{-- Cerrar caso: siempre el último botón de la bandeja. También está
+         disponible para casos «Por atender» que deban descartarse. --}}
+    @if ($report->isPending() || ($report->isAttending() && (int) $report->assigned_to === (int) auth()->id()))
+        <button type="button" class="btn btn-sm btn-outline-secondary moderacion-close"
+                data-id="{{ $report->id }}" title="Cerrar caso" aria-label="Cerrar caso">
+            <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+        </button>
+    @endif
 </div>

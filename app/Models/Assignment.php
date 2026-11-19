@@ -2,13 +2,17 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Assignment extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $fillable = [
         'event_id',
         'giver_id',
@@ -64,3 +68,6 @@ class Assignment extends Model
         return $this->revealed_at !== null;
     }
 }
+
+
+

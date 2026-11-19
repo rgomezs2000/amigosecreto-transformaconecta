@@ -20,7 +20,7 @@ return [
     'default_source' => env('EXCHANGE_DEFAULT_SOURCE', 'oficial'),
 
     // La tasa se cachea para no golpear la API en cada petición.
-    'cache_ttl' => (int) env('EXCHANGE_CACHE_TTL', 300),
+    'cache_ttl' => (int) env('EXCHANGE_CACHE_TTL', 60),
 
     'provider' => [
         'name' => env('EXCHANGE_PROVIDER', 'dolarapi'),

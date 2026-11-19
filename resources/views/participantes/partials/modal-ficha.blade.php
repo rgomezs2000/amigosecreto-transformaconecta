@@ -6,6 +6,7 @@
     </x-slot:body>
 
     <x-slot:footer>
+        <div class="participante-ficha-actions" id="participante-ficha-actions"></div>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
     </x-slot:footer>
 </x-app-modal>

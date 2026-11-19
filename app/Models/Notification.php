@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Notifications\DatabaseNotificationCollection;
 
@@ -16,6 +18,7 @@ use Illuminate\Notifications\DatabaseNotificationCollection;
  */
 class Notification extends DatabaseNotification
 {
+    use HasAuditFields;
     /**
      * @var array<string, string>
      */
@@ -76,3 +79,4 @@ class Notification extends DatabaseNotification
             : null;
     }
 }
+

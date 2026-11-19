@@ -221,4 +221,29 @@
     window.confirmAction = function (message, title, onConfirm) {
         return AppDialog.confirm(message, onConfirm, { title: title });
     };
+
+    // Chrome bloquea/avisa cuando un modal se oculta con el foco todavía en un
+    // botón interno y Bootstrap le pone aria-hidden. Se retira el foco antes
+    // de que Bootstrap oculte el diálogo.
+    function releaseBootboxFocus(modal) {
+        if (!modal || !modal.classList || !modal.classList.contains('bootbox')) {
+            return;
+        }
+
+        var active = document.activeElement;
+
+        if (active && modal.contains(active) && typeof active.blur === 'function') {
+            active.blur();
+        }
+    }
+
+    document.addEventListener('hide.bs.modal', function (event) {
+        releaseBootboxFocus(event.target);
+    }, true);
+
+    if (window.jQuery) {
+        window.jQuery(document).on('hide.bs.modal', '.bootbox', function () {
+            releaseBootboxFocus(this);
+        });
+    }
 })(window);

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -11,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class AuditLog extends Model
 {
+    use HasAuditFields;
     public $timestamps = false;
 
     protected $fillable = [
@@ -38,3 +41,4 @@ class AuditLog extends Model
         return $this->belongsTo(User::class);
     }
 }
+

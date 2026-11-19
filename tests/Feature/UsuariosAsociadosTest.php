@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Assignment;
 use App\Models\Event;
+use App\Models\EventParticipant;
 use App\Models\Module;
 use App\Models\Permission;
 use App\Models\Profile;
@@ -92,6 +93,12 @@ class UsuariosAsociadosTest extends TestCase
             'giver_id' => $this->carla->id,
             'receiver_id' => $this->diego->id,
             'drawn_at' => now(),
+        ]);
+
+        EventParticipant::create([
+            'event_id' => $this->historico->id,
+            'user_id' => $this->carla->id,
+            'status' => 'active',
         ]);
     }
 
@@ -209,10 +216,10 @@ class UsuariosAsociadosTest extends TestCase
             ->assertOk()
             ->assertJsonPath('recordsTotal', 1)
             ->assertJsonPath('data.0.nombre', 'Carla Mora')
-            ->assertJsonPath('data.0.usuario', 'carla')
             ->assertJsonPath('data.0.amigo', 'Diego Paz');
 
-        $this->assertStringContainsString('El evento terminó', $response->json('aviso_html'));
+        $this->assertStringContainsString('Activo', $response->json('data.0.estatus'));
+        $this->assertStringContainsString('El evento ya finalizó', $response->json('estado_html'));
     }
 
     public function test_datos_busca_por_usuario_o_por_amigo_secreto(): void
@@ -287,7 +294,7 @@ class UsuariosAsociadosTest extends TestCase
         $this->actingAs($this->admin())
             ->get($this->pagina())
             ->assertOk()
-            ->assertSee('El evento terminó: esta consulta es histórica')
+            ->assertSee('El evento ya finalizó')
             ->assertSee('usuarios-asociados-table', false);
     }
 }

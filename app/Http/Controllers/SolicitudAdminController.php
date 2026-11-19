@@ -27,13 +27,14 @@ class SolicitudAdminController extends Controller
             'assigned_to' => $report->assigned_to ?: $admin->id,
             'taken_by' => $report->taken_by ?: $admin->id,
             'taken_at' => $report->taken_at ?: now(),
+            'managed_at' => $report->managed_at ?: now(),
             'close_observation' => $observation,
         ])->save();
     }
 
     private function accountReport(ChatReport $report, string $action): ?User
     {
-        if ($report->type !== ChatReport::TYPE_ACCOUNT) {
+        if (! $report->isAccountRequest()) {
             return null;
         }
 
@@ -81,6 +82,10 @@ class SolicitudAdminController extends Controller
             return $managerError;
         }
 
+        if ($report->isManaged()) {
+            return api_error('Este caso ya fue gestionado; solo queda cerrarlo.', 409);
+        }
+
         try {
             $password = Str::password(12);
             $user->updatePassword($password);
@@ -97,8 +102,8 @@ class SolicitudAdminController extends Controller
             return api_success($sent
                 ? 'Contraseña restablecida y correo enviado.'
                 : 'Contraseña restablecida, pero no se pudo enviar el correo.', [
-                'mail_sent' => $sent,
-            ]);
+                    'mail_sent' => $sent,
+                ]);
         } catch (\Throwable $exception) {
             Log::error('Error al restablecer desde el caso', [
                 'report_id' => $report->id,
@@ -148,7 +153,7 @@ class SolicitudAdminController extends Controller
     {
         $this->ensureAdmin($request);
 
-        if ($report->type !== ChatReport::TYPE_USER_REGISTRATION) {
+        if ($report->type !== ChatReport::TYPE_USER_REGISTRATION || $report->isAccountRequest()) {
             return api_error('El caso no es una solicitud de registro.', 422);
         }
 
@@ -217,7 +222,7 @@ class SolicitudAdminController extends Controller
         return api_success($sent
             ? 'Solicitud rechazada y aviso enviado por correo.'
             : 'Solicitud rechazada. No se pudo enviar el correo de aviso.', [
-            'mail_sent' => $sent,
-        ]);
+                'mail_sent' => $sent,
+            ]);
     }
 }

@@ -21,6 +21,10 @@ class ShareAppShell
      */
     public function handle(Request $request, Closure $next): Response
     {
+        if ($request->is('compatibilidad') || $request->is('compatibilidad/*')) {
+            return $next($request);
+        }
+
         if (Auth::check()) {
             $user = Auth::user();
 

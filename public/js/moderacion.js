@@ -449,6 +449,31 @@
             openReportDetail(row);
         });
 
+        function openCloseModal(reportId) {
+            if (!reportId) {
+                return;
+            }
+
+            detailReportId = reportId;
+            $('#moderacion-close-observation').val('');
+            $('#moderacion-close-confirmed').prop('checked', false);
+            $('#moderacion-close-error').text('').removeAttr('data-kind');
+
+            if (closeModal) {
+                closeModal.show();
+            }
+        }
+
+        $('#moderacion-table').on('click', '.moderacion-close', function (event) {
+            event.stopPropagation();
+
+            var row = rowDataFor(reportesTable, $(this));
+
+            if (row) {
+                openCloseModal(row.id);
+            }
+        });
+
         /* ------------------------------------------------------------------
            Ficha del caso: pestañas, adjuntos y sugerencia
            ------------------------------------------------------------------ */
@@ -603,7 +628,9 @@
             $('#moderacion-detail-refer').prop('hidden', !row.can_refer);
 
             var $createUser = $('#moderacion-solicitud-crear');
-            var solicitudAbierta = row.status_class !== 'cerrado' && Boolean(row.can_manage);
+            var solicitudAbierta = row.status_class !== 'cerrado'
+                && Boolean(row.can_manage)
+                && !row.is_managed;
 
             if (row.create_user_url && solicitudAbierta) {
                 $createUser.attr('href', row.create_user_url).prop('hidden', false);
@@ -777,7 +804,10 @@
                 return;
             }
 
-            $.getJSON(detalleUrl.replace('__ID__', encodeURIComponent(id)))
+            var url = detalleUrl.replace('__ID__', encodeURIComponent(id));
+            url += (url.indexOf('?') === -1 ? '?' : '&') + '_=' + Date.now();
+
+            $.getJSON(url)
                 .done(function (response) {
                     var data = response || {};
                     var report = data.report || {};
@@ -1068,6 +1098,7 @@
 
                 $('#moderacion-sugerencia-body').val('');
                 $('#moderacion-sugerencia-error').text('Respuesta enviada.').attr('data-kind', 'success');
+                $('#moderacion-detail-refer').prop('hidden', true);
             }).fail(function (xhr) {
                 window.App.processing($button, false);
                 var message = (xhr.responseJSON || {}).message || 'No se pudo enviar la respuesta.';
@@ -1089,17 +1120,7 @@
         });
 
         $('#moderacion-detail-close').on('click', function () {
-            if (!detailReportId) {
-                return;
-            }
-
-            $('#moderacion-close-observation').val('');
-            $('#moderacion-close-confirmed').prop('checked', false);
-            $('#moderacion-close-error').text('').removeAttr('data-kind');
-
-            if (closeModal) {
-                closeModal.show();
-            }
+            openCloseModal(detailReportId);
         });
 
         function caseError(xhr) {
@@ -1378,23 +1399,19 @@
                 var chatId = response && (response.ticket_chat_id
                     || (response.report && response.report.ticket_chat_id));
 
-                if (detailType === 'sugerencia') {
-                    // La sugerencia se responde desde su pestaña: se recarga la
-                    // ficha para habilitar el formulario sin cerrar el modal.
+                var report = response && response.report ? response.report : null;
+                var isRequestCase = detailType === 'registro'
+                    || Boolean(report && (
+                        report.create_user_url
+                        || report.password_change_url
+                        || report.account_action === 'reset'
+                        || report.account_action === 'unlock'
+                    ));
+
+                if (detailType === 'sugerencia' || isRequestCase) {
+                    // Tomar el caso solo habilita la ficha. El alta del usuario
+                    // o el cambio de contraseña se inician con sus botones.
                     loadReportDetail(detailReportId);
-                    return;
-                }
-
-                var createUserUrl = response && response.report && response.report.create_user_url;
-
-                if (createUserUrl) {
-                    // Los casos de registro no tienen chat: se formaliza el alta
-                    // en Usuarios con los datos de la solicitud ya cargados.
-                    if (modal) {
-                        modal.hide();
-                    }
-
-                    window.location.assign(createUserUrl);
                     return;
                 }
 

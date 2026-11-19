@@ -66,6 +66,10 @@
 
         var currentId = null;
         var currentModeration = false;
+        /** Últimos datos de la conversación abierta (papel del usuario, tipo). */
+        var currentConversation = null;
+        /** Miembro sobre el que se abrió el menú contextual. */
+        var activeMember = null;
         var conversationBlocked = false;
         var conversationBlockLabel = '';
         // Si la conversación abierta es un chat de caso (ticket), al volver se
@@ -420,19 +424,40 @@
                 meta.push(event.status);
             }
 
+            if (event.phase && event.phase !== event.status) {
+                meta.push('Etapa: ' + event.phase);
+            }
+
             if (event.exchange_at) {
                 meta.push('Intercambio ' + event.exchange_at);
             }
 
             meta.push(event.participants + (event.participants === 1 ? ' participante' : ' participantes'));
 
-            return '<div class="chat-event" data-event-id="' + event.id + '">' +
+            var actions = '<div class="chat-event__actions">' +
+                '<button type="button" class="btn btn-sm btn-outline-secondary chat-event-open" data-event-id="' +
+                event.id + '" data-invitation-token="' + escape(event.invitation_token || '') + '">Ver detalle</button>';
+
+            if (event.can_respond && event.invitation_token) {
+                actions += '<button type="button" class="btn btn-sm btn-success chat-event-accept" data-processing-manual="true" data-event-id="' +
+                    event.id + '" data-invitation-token="' + escape(event.invitation_token) +
+                    '" data-accept-url="' + escape(event.accept_url || '') +
+                    '">Aceptar invitación</button>' +
+                    '<button type="button" class="btn btn-sm btn-outline-danger chat-event-reject" data-processing-manual="true" data-event-id="' +
+                    event.id + '" data-invitation-token="' + escape(event.invitation_token) +
+                    '" data-reject-url="' + escape(event.reject_url || '') +
+                    '">Rechazar</button>';
+            }
+
+            actions += '</div>';
+
+            return '<div class="chat-event" data-event-id="' + event.id +
+                '" data-invitation-token="' + escape(event.invitation_token || '') + '">' +
                 '<p class="chat-event__eyebrow">Evento</p>' +
                 '<p class="chat-event__name">' + escape(event.name) +
                 ' <span class="chat-event__year">' + escape(event.year) + '</span></p>' +
                 '<p class="chat-event__meta">' + escape(meta.join(' · ')) + '</p>' +
-                '<button type="button" class="btn btn-sm btn-outline-secondary chat-event-open" data-event-id="' +
-                event.id + '">Ver detalle</button>' +
+                actions +
                 '</div>';
         }
 
@@ -487,6 +512,8 @@
                 ' style="background:' + color + '"' +
                 (message.sender_id ? ' data-chat-open-profile="' + Number(message.sender_id) + '"' : '') +
                 ' data-sender-name="' + escape(message.sender) + '"' +
+                ' data-sender-owner="' + (message.sender_is_owner ? '1' : '0') + '"' +
+                ' data-sender-admin="' + (message.sender_is_admin ? '1' : '0') + '"' +
                 ' data-group="' + (message.conversation_type === 'group' ? '1' : '0') + '">' + inner + '</span>';
         }
 
@@ -502,6 +529,8 @@
                 '<span class="chat-sender' + (clickable ? ' chat-sender--link' : '') + '" style="color:' + color + '"' +
                 (clickable ? ' data-chat-open-profile="' + Number(message.sender_id) + '"' : '') +
                 ' data-sender-name="' + escape(message.sender) + '"' +
+                ' data-sender-owner="' + (message.sender_is_owner ? '1' : '0') + '"' +
+                ' data-sender-admin="' + (message.sender_is_admin ? '1' : '0') + '"' +
                 ' data-group="' + (message.conversation_type === 'group' ? '1' : '0') + '">' +
                 escape(message.sender) + '</span>' +
                 (isSystem ? ' <span class="chat-sender__tag">Soporte</span>' : '') +
@@ -1430,6 +1459,7 @@
         // Estado de la conversación abierta: solo lectura y etiqueta de rol
         // del sistema junto al nombre en la barra del chat.
         function applyConversation(conversation) {
+            currentConversation = conversation || null;
             currentIsReport = !!(conversation && conversation.is_report);
 
             var blocked = !!(conversation && (conversation.blocked || conversation.blocked_by));
@@ -2926,6 +2956,299 @@
             });
         }
 
+        function hideMemberMenu() {
+            $('#chat-member-menu').prop('hidden', true).css({ top: '', left: '' });
+            activeMember = null;
+        }
+
+        function memberFromRow($row) {
+            return {
+                id: parseInt($row.attr('data-member-id'), 10) || null,
+                name: $row.attr('data-member-name') || '',
+                isOwner: $row.attr('data-member-owner') === '1',
+                isAdmin: $row.attr('data-member-admin') === '1'
+            };
+        }
+
+        function memberFromSender($node) {
+            return {
+                id: parseInt($node.attr('data-chat-open-profile'), 10) || null,
+                name: $node.attr('data-sender-name') || '',
+                isOwner: $node.attr('data-sender-owner') === '1',
+                isAdmin: $node.attr('data-sender-admin') === '1'
+            };
+        }
+
+        /**
+         * Menú de un miembro dentro de un grupo o una sala. Las opciones
+         * dependen del papel de quien mira: el dueño gestiona a los miembros
+         * (suspender, expulsar y banear en grupos; expulsar en salas), un
+         * miembro puede silenciar, bloquear y reportar a otro miembro, y la
+         * administración silencia y reporta.
+         */
+        function showMemberMenu(event, member) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            hideContextMenu();
+            hideListMenu();
+            hideUserMenu();
+            hideContentMenu();
+
+            var target = {
+                id: member.id,
+                name: member.name || '',
+                isOwner: !!member.isOwner,
+                isAdmin: !!member.isAdmin
+            };
+
+            if (!target.id) {
+                return;
+            }
+
+            activeMember = target;
+
+            var roles = viewerMemberRoles();
+            var isSelf = String(target.id) === String(roles.id);
+            var flags = userFlags(target.id);
+            var show = {};
+
+            if (isSelf) {
+                show.profile = true;
+            } else if (target.isAdmin) {
+                // A la administración del sistema no se le modera: solo se
+                // puede conversar o ver su perfil.
+                show.chat = true;
+                show.profile = true;
+            } else if (roles.isOwner) {
+                show.chat = true;
+                show.profile = true;
+                show.mute = true;
+                show.block = true;
+                show.report = true;
+
+                if (roles.isRoom) {
+                    show.expel = true;
+                } else {
+                    show.suspend = true;
+                    show.expel = true;
+                    show.ban = true;
+                }
+            } else if (roles.isAdmin) {
+                show.chat = true;
+                show.profile = true;
+                show.mute = true;
+                show.report = true;
+            } else if (target.isOwner) {
+                show.chat = true;
+                show.profile = true;
+                show.mute = true;
+                show.report = true;
+            } else {
+                show.chat = true;
+                show.profile = true;
+                show.mute = true;
+                show.block = true;
+                show.report = true;
+            }
+
+            var $menu = $('#chat-member-menu');
+
+            $menu.find('[data-member-action]').each(function () {
+                var action = $(this).data('member-action');
+
+                if (action === 'mute') {
+                    $(this).prop('hidden', !show.mute || !!flags.muted);
+                    return;
+                }
+
+                if (action === 'unmute') {
+                    $(this).prop('hidden', !show.mute || !flags.muted);
+                    return;
+                }
+
+                if (action === 'block') {
+                    $(this).prop('hidden', !show.block || !!flags.blocked);
+                    return;
+                }
+
+                if (action === 'unblock') {
+                    $(this).prop('hidden', !show.block || !flags.blocked);
+                    return;
+                }
+
+                $(this).prop('hidden', !show[action]);
+            });
+
+            $menu.prop('hidden', false).css({ top: '0px', left: '0px' });
+            placeMenu($menu, event);
+        }
+
+        /** Ejecuta una acción del menú o de la ficha de un miembro. */
+        function handleMemberAction(action, member) {
+            if (!member || !member.id) {
+                return;
+            }
+
+            var roles = viewerMemberRoles();
+
+            if (action === 'chat') {
+                closeChatProfile();
+                openMessageWithUser(member.id, member.name);
+                return;
+            }
+
+            if (action === 'profile') {
+                var wasStandalone = profileStandalone;
+
+                openChatProfile(currentId, wasStandalone ? 'list' : 'conversation');
+                pendingMemberName = member.name;
+                pendingMemberId = member.id;
+                return;
+            }
+
+            if (action === 'mute' || action === 'unmute') {
+                post(chatBase + '/usuarios/' + member.id + '/silenciar', {})
+                    .done(function () {
+                        refresh().done(function () {
+                            if (profileView === 'member' && currentMemberProfile) {
+                                openMemberCard(currentMemberProfile.id);
+                            }
+                        });
+                    })
+                    .fail(profileError);
+                return;
+            }
+
+            if (action === 'block' || action === 'unblock') {
+                var blocking = action === 'block';
+
+                AppDialog.confirm(
+                    blocking
+                        ? '¿Bloquear a ' + member.name + '? En un grupo o sala, el bloqueo puede sacarlo de la conversación.'
+                        : '¿Desbloquear a ' + member.name + '?',
+                    function () {
+                        var call = blocking
+                            ? post(chatBase + '/usuarios/' + member.id + '/bloquear', {})
+                            : remove(chatBase + '/usuarios/' + member.id + '/bloquear', {});
+
+                        call.done(function () {
+                            // El bloqueo puede sacar a alguien del grupo o de
+                            // la sala: se vuelve a la conversación y se
+                            // refrescan las listas.
+                            closeChatProfile();
+                            refresh();
+                        }).fail(profileError);
+                    }
+                );
+                return;
+            }
+
+            if (action === 'report') {
+                openReportModal('user', member.id, 'Vas a reportar a ' + (member.name || 'esta persona') + '.');
+                return;
+            }
+
+            if (action === 'suspend') {
+                promptMemberSuspension(member);
+                return;
+            }
+
+            if (action === 'expel') {
+                AppDialog.confirm(
+                    '¿Expulsar a ' + member.name + ' de ' + (roles.isRoom ? 'la sala' : 'este grupo') + '?',
+                    function () {
+                        post(chatBase + '/' + currentId + '/expulsar/' + member.id, {})
+                            .done(function (response) {
+                                AppDialog.alert((response && response.message) || 'Miembro expulsado.');
+                                closeChatProfile();
+                                refresh();
+                            })
+                            .fail(profileError);
+                    }
+                );
+                return;
+            }
+
+            if (action === 'ban') {
+                AppDialog.confirm(
+                    '¿Banear a ' + member.name + '? Se le expulsa del grupo y no podrá volver.',
+                    function () {
+                        post(chatBase + '/grupo/' + currentId + '/banear/' + member.id, {})
+                            .done(function (response) {
+                                AppDialog.alert((response && response.message) || 'Usuario vetado.');
+                                closeChatProfile();
+                                refresh();
+                            })
+                            .fail(profileError);
+                    }
+                );
+                return;
+            }
+
+            if (action === 'delete-group') {
+                AppDialog.confirm(
+                    roles.isRoom
+                        ? '¿Eliminar esta sala? No se puede deshacer.'
+                        : '¿Eliminar este grupo? No se puede deshacer.',
+                    function () {
+                        remove(chatBase + '/' + currentId, {})
+                            .done(function () {
+                                closeChatProfile();
+                                showList();
+                                refresh();
+                            })
+                            .fail(profileError);
+                    }
+                );
+            }
+        }
+
+        /** Suspensión de un miembro: días y motivo opcional. */
+        function promptMemberSuspension(member) {
+            AppDialog.custom({
+                title: 'Suspender a ' + (member.name || ''),
+                centerVertical: true,
+                message:
+                    '<p class="chat-hint">No podrá escribir, reaccionar, adjuntar archivos ni enviar audios en el grupo mientras dure la suspensión.</p>' +
+                    '<label class="form-label" for="chat-suspend-days">Días de suspensión</label>' +
+                    '<input type="number" class="form-control" id="chat-suspend-days" value="1" min="1" max="365">' +
+                    '<label class="form-label mt-2" for="chat-suspend-reason">Motivo (opcional)</label>' +
+                    '<input type="text" class="form-control" id="chat-suspend-reason" maxlength="500">',
+                buttons: {
+                    cancel: { label: 'Cancelar', className: 'btn-outline-secondary' },
+                    suspend: {
+                        label: 'Suspender',
+                        className: 'btn-warning',
+                        callback: function () {
+                            var days = parseInt($('#chat-suspend-days').val(), 10);
+                            var reason = $.trim($('#chat-suspend-reason').val());
+
+                            if (!days || days < 1 || days > 365) {
+                                AppDialog.alert('Indica entre 1 y 365 días.');
+                                return false;
+                            }
+
+                            post(chatBase + '/grupo/' + currentId + '/suspender/' + member.id, {
+                                days: days,
+                                reason: reason || null
+                            }).done(function (response) {
+                                AppDialog.alert((response && response.message) || 'Usuario suspendido.');
+                                refresh().done(function () {
+                                    var conversationId = currentId;
+                                    var standalone = profileStandalone;
+
+                                    openChatProfile(conversationId, standalone ? 'list' : 'conversation');
+                                    pendingMemberName = member.name;
+                                    pendingMemberId = member.id;
+                                });
+                            }).fail(profileError);
+                        }
+                    }
+                }
+            });
+        }
+
         /**
          * Menú de una persona de la pestaña Usuarios:
          * silenciar, bloquear/desbloquear y reportar.
@@ -3257,7 +3580,34 @@
             stopChatPolling();
         });
 
-        $('.chat-tab').on('click', function () {
+        // La tira de pestañas se desplaza con la rueda del ratón: al pasar el
+        // puntero por las pestañas, la rueda mueve la tira en horizontal en vez
+        // de hacer scroll en la página. Solo se intercepta cuando hay pestañas
+        // fuera de la vista.
+        var tabStrip = document.querySelector('#chat-panel > .chat-tabs');
+
+        if (tabStrip) {
+            tabStrip.addEventListener('wheel', function (event) {
+                var delta = event.deltaY !== 0 ? event.deltaY : event.deltaX;
+
+                if (!delta || tabStrip.scrollWidth <= tabStrip.clientWidth) {
+                    return;
+                }
+
+                if (event.deltaMode === 1) {
+                    delta *= 16;
+                } else if (event.deltaMode === 2) {
+                    delta *= tabStrip.clientWidth;
+                }
+
+                event.preventDefault();
+                tabStrip.scrollLeft += delta;
+            }, { passive: false });
+        }
+
+        // Solo las pestañas de la bandeja cambian de panel: las de la galería
+        // del perfil tienen su propio manejador (data-gallery).
+        $('#chat-panel > .chat-tabs .chat-tab').on('click', function () {
             var tab = $(this).data('tab');
 
             selectTab(tab);
@@ -3320,16 +3670,10 @@
             );
         });
 
+        // Un clic sobre una persona abre la conversación con ella. Su perfil se
+        // abre desde el menú contextual (clic derecho → Ver perfil).
         $widget.on('click', '.chat-user-open', function () {
-            var userId = $(this).data('id');
-
-            post(chatBase + '/usuarios/' + userId + '/conversacion', {})
-                .done(function (response) {
-                    openProfileFromList(response.conversation_id);
-                })
-                .fail(function (xhr) {
-                    AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo abrir el perfil.');
-                });
+            openMessageWithUser($(this).data('id'), $(this).data('name') || '');
         });
 
         $widget.on('contextmenu', '.chat-user-open', function (event) {
@@ -3340,8 +3684,27 @@
             showList();
         });
 
+        // Clic derecho en un mensaje: sobre el nombre o el avatar de quien lo
+        // envió (en un grupo o sala) se abren las acciones del miembro; en
+        // cualquier otro punto, las acciones del mensaje.
         $('#chat-messages').on('contextmenu', '.chat-message', function (event) {
+            var $sender = $(event.target).closest('[data-chat-open-profile]');
+
+            if ($sender.length && currentConversation && currentConversation.is_group) {
+                showMemberMenu(event, memberFromSender($sender));
+                return;
+            }
+
             showContextMenu(event, $(this));
+        });
+
+        $('#chat-member-menu').on('click', '[data-member-action]', function () {
+            var action = $(this).data('member-action');
+            var member = activeMember;
+
+            hideMemberMenu();
+
+            handleMemberAction(action, member);
         });
 
         $widget.on('contextmenu', '.chat-conversation-open', function (event) {
@@ -3409,6 +3772,10 @@
 
             if (!$(event.target).closest('#chat-user-menu').length) {
                 hideUserMenu();
+            }
+
+            if (!$(event.target).closest('#chat-member-menu').length) {
+                hideMemberMenu();
             }
         });
 
@@ -3642,11 +4009,6 @@
                         AppDialog.alert((xhr.responseJSON || {}).message || 'No se pudo crear la invitación.');
                     });
 
-                return;
-            }
-
-            if (action === 'member-back') {
-                showProfileSection('main');
                 return;
             }
 
@@ -5395,8 +5757,16 @@
                             return;
                         }
 
-                        callback(new File([blob], name + '.webp', {
-                            type: 'image/webp',
+                        // Safari puede devolver PNG aunque se solicite WebP.
+                        var outputType = String(blob.type || 'image/jpeg').toLowerCase();
+                        var extension = outputType.indexOf('png') !== -1
+                            ? 'png'
+                            : outputType.indexOf('webp') !== -1
+                                ? 'webp'
+                                : 'jpg';
+
+                        callback(new File([blob], name + '.' + extension, {
+                            type: outputType,
                             lastModified: Date.now()
                         }));
                     }, 'image/webp', 0.82);
@@ -6202,6 +6572,11 @@
                 return;
             }
 
+            if (!window.MediaRecorder) {
+                AppDialog.alert('Este navegador no permite grabar audio. Actualízalo o usa otro navegador compatible.');
+                return;
+            }
+
             navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
                 micStream = stream;
                 recorderChunks = [];
@@ -6214,7 +6589,13 @@
                     options.mimeType = 'audio/webm;codecs=opus';
                 }
 
-                recorder = new MediaRecorder(stream, options);
+                try {
+                    recorder = new MediaRecorder(stream, options);
+                } catch (error) {
+                    // Safari puede rechazar opciones de bitrate; se usa el
+                    // formato predeterminado del navegador.
+                    recorder = new MediaRecorder(stream);
+                }
 
                 recorder.ondataavailable = function (event) {
                     if (event.data.size > 0) {
@@ -6223,8 +6604,33 @@
                 };
 
                 recorder.onstop = function () {
-                    var blob = new Blob(recorderChunks, { type: 'audio/webm' });
-                    var file = new File([blob], 'audio.webm', { type: 'audio/webm' });
+                    // Safari/WebKit graba normalmente en audio/mp4; no se debe
+                    // etiquetar como WebM ni guardar con extensión .webm.
+                    var fallbackMime = 'audio/webm';
+
+                    if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
+                        if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                            fallbackMime = 'audio/mp4';
+                        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+                            fallbackMime = 'audio/ogg;codecs=opus';
+                        }
+                    }
+
+                    var recordedMime = String(
+                        (recorder && recorder.mimeType) || options.mimeType || fallbackMime
+                    ).toLowerCase();
+                    var extension = 'webm';
+
+                    if (recordedMime.indexOf('mp4') !== -1 || recordedMime.indexOf('m4a') !== -1) {
+                        extension = 'm4a';
+                    } else if (recordedMime.indexOf('ogg') !== -1) {
+                        extension = 'ogg';
+                    } else if (recordedMime.indexOf('wav') !== -1) {
+                        extension = 'wav';
+                    }
+
+                    var blob = new Blob(recorderChunks, { type: recordedMime });
+                    var file = new File([blob], 'audio.' + extension, { type: recordedMime });
 
                     if (micStream) {
                         micStream.getTracks().forEach(function (track) { track.stop(); });
@@ -6305,6 +6711,7 @@
         var profileMedia = [];
         var profileView = 'main';
         var pendingMemberName = null;
+        var pendingMemberId = null;
         var profileOrigin = 'conversation';
         var profileConversationId = null;
         var profileStandalone = false;
@@ -6606,7 +7013,11 @@
                 badge = '<span class="chat-profile__member-badge chat-profile__member-badge--danger">' + escape(member.status) + '</span>';
             }
 
-            return '<div class="chat-profile__member" data-member-id="' + Number(member.id) + '" data-search="'
+            return '<div class="chat-profile__member" data-member-id="' + Number(member.id) + '"'
+                + ' data-member-name="' + escape(member.name || '') + '"'
+                + ' data-member-owner="' + (member.is_owner ? '1' : '0') + '"'
+                + ' data-member-admin="' + (member.is_admin ? '1' : '0') + '"'
+                + ' data-search="'
                 + escape((String(member.name || '') + ' ' + String(member.username || '')).toLowerCase()) + '">'
                 + '<span class="chat-profile__member-avatar">' + escape(profileInitials(member.name)) + '</span>'
                 + '<div class="chat-profile__member-main">'
@@ -6725,10 +7136,10 @@
             });
         }
 
-        function profileOption(action, icon, label, variant) {
+        function profileOption(action, icon, label, variant, attribute) {
             return '<button type="button" class="chat-profile__option'
                 + (variant === 'danger' ? ' chat-profile__option--danger' : '')
-                + '" data-profile-action="' + action + '">'
+                + '" data-' + (attribute || 'profile-action') + '="' + action + '">'
                 + '<i class="fa-solid ' + icon + '" aria-hidden="true"></i>'
                 + '<span>' + escape(label) + '</span>'
                 + '</button>';
@@ -6812,7 +7223,23 @@
                 html += '<p class="chat-profile__moderating">Estás moderando esta conversación</p>';
             }
 
-            html += '</div>';
+            // Acción principal del perfil: va debajo del correo (o de los datos
+            // de identidad). «Buscar» si el perfil se abrió dentro de la
+            // conversación; «Mensaje» o «Conversación» si se abrió desde una
+            // lista.
+            var primaryHtml = '';
+
+            if (!data.is_secret || data.secret_role === 'giver') {
+                if (profileOrigin === 'conversation') {
+                    primaryHtml = profilePrimaryButton('search', 'fa-magnifying-glass', 'Buscar');
+                } else if (data.is_group || data.is_broadcast) {
+                    primaryHtml = profilePrimaryButton('open-conversation', 'fa-comments', 'Conversación');
+                } else {
+                    primaryHtml = profilePrimaryButton('open-message', 'fa-comment', 'Mensaje');
+                }
+            }
+
+            html += primaryHtml + '</div>';
 
             if (data.is_group) {
                 var members = data.members || [];
@@ -6873,42 +7300,48 @@
                 + '<p class="chat-profile__media-empty">Cargando contenido...</p>'
                 + '</div></div>';
 
-            if (!data.is_group && !data.is_broadcast && !data.is_secret && !data.is_moderating && !data.is_moderating) {
+            // Grupos en común: el contador del mini título dice cuántos hay y,
+            // si no hay ninguno, lo avisa ahí mismo. Debajo solo se listan los
+            // grupos que existen.
+            if (!data.is_group && !data.is_broadcast && !data.is_secret && !data.is_moderating) {
                 var groups = data.common_groups || [];
-                var groupsTitle = groups.length === 1 ? '1 grupo en común' : groups.length + ' grupos en común';
+                var canOfferGroups = !data.blocked && !data.blocked_by;
 
-                if (!groups.length) {
-                    groupsTitle = 'No hay grupos en común';
-                }
+                if (groups.length || canOfferGroups) {
+                    var groupsCount = groups.length === 1
+                        ? '1 grupo en común'
+                        : groups.length + ' grupos en común';
 
-                html += '<div class="chat-profile__card chat-profile__card--groups">'
-                    + '<div class="chat-profile__section-head">'
-                    + '<span class="chat-profile__section-title">Grupos en común</span>'
-                    + '<span class="chat-profile__count">' + escape(groupsTitle) + '</span>'
-                    + '</div>'
-                    + (data.blocked || data.blocked_by
-                        ? ''
-                        : '<div class="chat-profile__common-actions">'
+                    html += '<div class="chat-profile__card chat-profile__card--groups">'
+                        + '<div class="chat-profile__section-head">'
+                        + '<span class="chat-profile__section-title">Grupos en común</span>'
+                        + '<span class="chat-profile__count">'
+                        + escape(groups.length ? groupsCount : 'No hay grupos en común')
+                        + '</span>'
+                        + '</div>';
+
+                    if (canOfferGroups) {
+                        html += '<div class="chat-profile__common-actions">'
                             + '<button type="button" class="chat-profile__common-action" data-profile-action="group">'
                             + '<i class="fa-solid fa-user-group" aria-hidden="true"></i> Crear grupo con ' + escape(name)
                             + '</button>'
                             + '<button type="button" class="chat-profile__common-action" data-profile-action="add-groups">'
                             + '<i class="fa-solid fa-user-plus" aria-hidden="true"></i> Añadir a ' + escape(name) + ' a grupos'
                             + '</button>'
-                            + '</div>');
+                            + '</div>';
+                    }
 
-                if (groups.length) {
-                    html += '<div class="chat-profile__common-list">' + groups.map(function (group) {
-                        return '<button type="button" class="chat-profile__common-group" data-profile-group="' + Number(group.id) + '">'
-                            + '<span class="chat-profile__common-name">' + escape(group.name || 'Grupo') + '</span>'
-                            + '<span class="chat-profile__common-members">' + escape((group.members || []).join(', ')) + '</span>'
-                            + '</button>';
-                    }).join('') + '</div>';
-                } else {
-                    html += '<p class="chat-profile__empty">No hay grupos en común</p>';
+                    if (groups.length) {
+                        html += '<div class="chat-profile__common-list">' + groups.map(function (group) {
+                            return '<button type="button" class="chat-profile__common-group" data-profile-group="' + Number(group.id) + '">'
+                                + '<span class="chat-profile__common-name">' + escape(group.name || 'Grupo') + '</span>'
+                                + '<span class="chat-profile__common-members">' + escape((group.members || []).join(', ')) + '</span>'
+                                + '</button>';
+                        }).join('') + '</div>';
+                    }
+
+                    html += '</div>';
                 }
-
-                html += '</div>';
             }
 
             var options = [];
@@ -6966,24 +7399,86 @@
                 html += '<div class="chat-profile__options">' + options.join('') + '</div>';
             }
 
-            var primaryHtml = '';
-
-            if (!data.is_secret || data.secret_role === 'giver') {
-                if (profileOrigin === 'conversation') {
-                    primaryHtml = profilePrimaryButton('search', 'fa-magnifying-glass', 'Buscar');
-                } else if (data.is_group || data.is_broadcast) {
-                    primaryHtml = profilePrimaryButton('open-conversation', 'fa-comments', 'Conversación');
-                } else {
-                    primaryHtml = profilePrimaryButton('open-message', 'fa-comment', 'Mensaje');
-                }
-            }
-
             $('#chat-profile-main').html(html).prop('hidden', false);
-            profileMainPrimaryHtml = primaryHtml;
-            $('#chat-profile-footer').html(primaryHtml).prop('hidden', primaryHtml === '');
+            // La acción principal ya vive dentro de la identidad: el pie queda
+            // libre para la ficha de un miembro.
+            profileMainPrimaryHtml = '';
+            $('#chat-profile-footer').html('').prop('hidden', true);
             $('#chat-profile-loading').prop('hidden', true);
             showProfileSection('main');
             renderProfileMedia();
+        }
+
+        /** Estado de silencio y bloqueo de un usuario según el último resumen. */
+        function userFlags(userId) {
+            var list = lastUsers || [];
+
+            for (var index = 0; index < list.length; index += 1) {
+                if (String(list[index].id) === String(userId)) {
+                    return list[index];
+                }
+            }
+
+            return {};
+        }
+
+        /** Papel de quien mira el perfil dentro del grupo o de la sala. */
+        function viewerMemberRoles() {
+            return {
+                id: parseInt($widget.attr('data-user-id'), 10) || null,
+                isAdmin: isAdmin,
+                isOwner: profileData ? !!profileData.is_owner : !!(currentConversation && currentConversation.is_owner),
+                isRoom: profileData ? !!profileData.is_closed : !!(currentConversation && currentConversation.is_closed)
+            };
+        }
+
+        /**
+         * Acciones de la ficha de un miembro. Dependen de quién mira y de su
+         * papel: el dueño elimina el grupo desde su propia ficha y solo puede
+         * silenciar o reportar a los demás (en una sala, expulsar); un miembro
+         * puede silenciar, bloquear y reportar a otro miembro; la
+         * administración silencia y reporta.
+         */
+        function memberCardOptions(member) {
+            var roles = viewerMemberRoles();
+            var isSelf = String(member.id) === String(roles.id);
+            var flags = userFlags(member.id);
+            var options = [];
+
+            function add(action, icon, label, variant) {
+                options.push(profileOption(action, icon, label, variant, 'member-action'));
+            }
+
+            if (isSelf) {
+                if (roles.isOwner) {
+                    add('delete-group', 'fa-trash', roles.isRoom ? 'Eliminar sala' : 'Eliminar grupo', 'danger');
+                }
+            } else if (member.is_admin) {
+                // A la administración del sistema no se le modera.
+            } else if (roles.isAdmin) {
+                add(flags.muted ? 'unmute' : 'mute', 'fa-bell-slash', flags.muted ? 'Quitar silencio' : 'Silenciar');
+                add('report', 'fa-flag', 'Reportar');
+            } else if (roles.isOwner) {
+                if (roles.isRoom) {
+                    add('expel', 'fa-user-minus', 'Expulsar', 'danger');
+                } else {
+                    add(flags.muted ? 'unmute' : 'mute', 'fa-bell-slash', flags.muted ? 'Quitar silencio' : 'Silenciar');
+                    add('report', 'fa-flag', 'Reportar');
+                    // El dueño también gestiona al miembro desde su ficha.
+                    add('suspend', 'fa-clock', 'Suspender');
+                    add('expel', 'fa-user-minus', 'Expulsar', 'danger');
+                    add('ban', 'fa-user-slash', 'Banear', 'danger');
+                }
+            } else if (member.is_owner) {
+                add(flags.muted ? 'unmute' : 'mute', 'fa-bell-slash', flags.muted ? 'Quitar silencio' : 'Silenciar');
+                add('report', 'fa-flag', 'Reportar');
+            } else {
+                add(flags.muted ? 'unmute' : 'mute', 'fa-bell-slash', flags.muted ? 'Quitar silencio' : 'Silenciar');
+                add(flags.blocked ? 'unblock' : 'block', 'fa-ban', flags.blocked ? 'Desbloquear' : 'Bloquear');
+                add('report', 'fa-flag', 'Reportar');
+            }
+
+            return options.join('');
         }
 
         function openMemberCard(memberId) {
@@ -7003,7 +7498,9 @@
             $('#chat-member-name').text(member.name || '');
             $('#chat-member-username').text(member.username ? '@' + member.username : '');
             $('#chat-member-status').text([
-                member.is_owner ? 'Dueño del grupo' : '',
+                member.is_owner
+                    ? (profileData.is_closed ? 'Dueño de la sala' : 'Dueño del grupo')
+                    : '',
                 member.status || '',
                 member.online ? 'En línea' : ''
             ].filter(Boolean).join(' · '));
@@ -7013,7 +7510,9 @@
             var primaryHtml = String(member.id) === String(currentUserId)
                 ? ''
                 : profilePrimaryButton('member-message', 'fa-comment', 'Mensaje');
+            var optionsHtml = memberCardOptions(member);
 
+            $('#chat-member-options').html(optionsHtml).prop('hidden', optionsHtml === '');
             $('#chat-profile-footer').html(primaryHtml).prop('hidden', primaryHtml === '');
 
             showProfileSection('member');
@@ -7100,10 +7599,16 @@
                     profileData = response;
                     renderChatProfile(response);
 
-                    if (pendingMemberName) {
+                    if (pendingMemberId || pendingMemberName) {
+                        var wantedId = pendingMemberId;
                         var wanted = pendingMemberName;
+                        pendingMemberId = null;
                         pendingMemberName = null;
                         var found = (response.members || []).filter(function (member) {
+                            if (wantedId) {
+                                return String(member.id) === String(wantedId);
+                            }
+
                             return String(member.name || '').toLowerCase() === String(wanted).toLowerCase();
                         })[0];
 
@@ -7133,6 +7638,8 @@
                         return;
                     }
 
+                    pendingMemberId = null;
+                    pendingMemberName = null;
                     $('#chat-profile-loading')
                         .prop('hidden', false)
                         .text((xhr.responseJSON || {}).message || 'No se pudo cargar el perfil.');
@@ -7153,6 +7660,8 @@
             profileStandalone = false;
             profileOrigin = 'conversation';
             currentMemberProfile = null;
+            pendingMemberId = null;
+            pendingMemberName = null;
             $('#chat-profile').prop('hidden', true);
             $('#chat-gallery-panel').prop('hidden', true);
             $('#chat-profile-footer').prop('hidden', true).empty();
@@ -7328,11 +7837,6 @@
                 return;
             }
 
-            if (action === 'member-back') {
-                showProfileSection('main');
-                return;
-            }
-
             if (action === 'members') {
                 openProfileMembers();
                 return;
@@ -7491,11 +7995,13 @@
 
             var isGroup = $(this).attr('data-group') === '1';
             var senderName = $(this).attr('data-sender-name') || '';
+            var senderId = parseInt($(this).attr('data-chat-open-profile'), 10) || null;
 
             $('#chat-profile-open').trigger('click');
 
             if (isGroup && senderName) {
                 pendingMemberName = senderName;
+                pendingMemberId = senderId;
             }
         });
 
@@ -7615,6 +8121,17 @@
 
         $('#chat-profile').on('click', '[data-member-id]', function () {
             openMemberCard($(this).attr('data-member-id'));
+        });
+
+        // Clic derecho en un miembro de la lista: mismas acciones que en el
+        // nombre o avatar de sus mensajes.
+        $('#chat-profile').on('contextmenu', '[data-member-id]', function (event) {
+            showMemberMenu(event, memberFromRow($(this)));
+        });
+
+        // Acciones de la ficha del miembro.
+        $('#chat-profile').on('click', '[data-member-action]', function () {
+            handleMemberAction($(this).data('member-action'), currentMemberProfile);
         });
 
         $('#chat-profile').on('click', '[data-profile-action]', function () {
@@ -8637,7 +9154,7 @@
             }
 
             $('#chat-event-list').html(items.map(function (event) {
-                return '<button type="button" class="chat-event-item chat-event-attach" data-event-id="' + event.id + '">' +
+                return '<button type="button" class="chat-event-item chat-event-attach" data-event-id="' + event.id + '" data-processing-manual="true">' +
                     '<span class="chat-event-item__name">' + escape(event.name) +
                     ' <span class="chat-event-item__year">' + escape(event.year) + '</span></span>' +
                     '<span class="chat-event-item__meta">' + escape(event.status) +
@@ -8709,12 +9226,159 @@
             });
         }
 
-        function openEventSheet(eventId) {
-            var $body = $('#chat-event-sheet-body');
-            $body.html('<p class="chat-hint">Cargando...</p>');
-            window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modal-chat-event-sheet')).show();
+        var currentEventSheet = null;
+        var currentEventToken = '';
+        var currentRejectUrl = '';
 
-            $.getJSON(eventosUrl + '/' + eventId).done(function (response) {
+        function participationBadgeClass(key) {
+            if (key === 'active') {
+                return 'status-badge--active';
+            }
+
+            if (key === 'pending') {
+                return 'status-badge--pending';
+            }
+
+            return 'status-badge--inactive';
+        }
+
+        function renderEventSheet(event) {
+            // La etapa y el estado del evento son lo mismo: se muestran una
+            // sola vez y como etiqueta. Si está suspendido o pospuesto, ese
+            // aviso manda sobre el nombre de la fase.
+            var phase = event.status === 'Suspendido' || event.status === 'Pospuesto'
+                ? event.status
+                : (event.phase || event.status);
+
+            var rows = [
+                ['Evento', event.name],
+                ['Año', String(event.year)]
+            ];
+
+            if (event.has_participation && ! event.is_admin) {
+                rows.push([
+                    'Tu participación',
+                    event.participation_status || 'Sin participación',
+                    'status-badge ' + participationBadgeClass(event.participation_status_key)
+                ]);
+            }
+
+            rows.push([
+                'Etapa',
+                phase,
+                event.status === 'Suspendido' || event.status === 'Pospuesto'
+                    ? 'status-badge status-badge--' + (event.status_class || 'inactive')
+                    : 'fase-badge fase-badge--' + (Number(event.phase_number) || 1)
+            ]);
+
+            rows.push(['Fecha de intercambio', event.exchange_at || 'Sin fecha']);
+            rows.push(['Presupuesto', event.budget || 'Sin presupuesto']);
+
+            if (event.budget_ves) {
+                rows.push(['__budget_ref__', event.budget_ves]);
+            }
+
+            rows.push(['Inscripciones', event.registration_opens_at && event.registration_closes_at
+                ? event.registration_opens_at + ' al ' + event.registration_closes_at
+                : 'Sin fechas']);
+            rows.push(['Dinámica', event.dynamic_starts_at || 'Sin fecha']);
+            rows.push(['Participantes', String(event.participants)]);
+
+            $('#chat-event-sheet-body').html('<dl class="perfil-data chat-event-sheet__data">' +
+                rows.map(function (row) {
+                    if (row[0] === '__budget_ref__') {
+                        return '<div class="perfil-data__item">' +
+                            '<dt>Referencia en Bs.</dt>' +
+                            '<dd data-bcv-usd="' + escape(String(event.budget_raw || '')) + '">' +
+                            escape(row[1]) + '</dd>' +
+                            '</div>';
+                    }
+
+                    var value = row[2]
+                        ? '<span class="' + escape(row[2]) + '">' + escape(row[1]) + '</span>'
+                        : escape(row[1]);
+
+                    return '<div class="perfil-data__item">' +
+                        '<dt>' + escape(row[0]) + '</dt>' +
+                        '<dd>' + value + '</dd>' +
+                        '</div>';
+                }).join('') +
+                '</dl>' +
+                (event.participation_reason
+                    ? '<p class="field-message">Motivo: ' + escape(event.participation_reason) + '</p>'
+                    : ''));
+
+            var actions = '';
+
+            if (event.can_respond && ! event.is_admin) {
+                actions = '<button type="button" class="btn btn-success chat-event-sheet-accept" data-processing-manual="true" data-accept-url="' +
+                    escape(event.accept_url || '') + '" data-invitation-token="' +
+                    escape(event.invitation_token || '') + '">Aceptar invitación</button>' +
+                    '<button type="button" class="btn btn-outline-danger chat-event-sheet-reject" data-processing-manual="true" data-reject-url="' +
+                    escape(event.reject_url || '') + '" data-invitation-token="' +
+                    escape(event.invitation_token || '') + '">Rechazar invitación</button>';
+            } else if (event.can_wishlist && event.wishlist_url && ! event.is_admin) {
+                actions = '<a class="btn btn-outline-secondary" href="' + escape(event.wishlist_url) +
+                    '">Lista de deseos</a>';
+            }
+
+            $('#chat-event-sheet-actions').html(actions);
+        }
+
+        function openRejectEventModal(url) {
+            currentRejectUrl = String(url || '');
+            $('#chat-event-reject-reason').val('');
+            $('#chat-event-reject-confirmed').prop('checked', false);
+            $('#chat-event-reject-error').text('').removeAttr('data-kind');
+            window.bootstrap.Modal.getOrCreateInstance(
+                document.getElementById('modal-chat-event-reject')
+            ).show();
+        }
+
+        function acceptEventInvitation(url, $button) {
+            if (!url) {
+                return;
+            }
+
+            $button.prop('disabled', true).attr('aria-busy', 'true');
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                dataType: 'json',
+                headers: {
+                    'X-CSRF-TOKEN': token,
+                    'Accept': 'application/json'
+                }
+            }).done(function (response) {
+                window.AppDialog.success((response && response.message) || 'Aceptaste la invitación. Ya estás activo en el evento.');
+                refreshOpenEventSheet();
+                refreshEventCards();
+            }).fail(function (xhr) {
+                $button.prop('disabled', false).removeAttr('aria-busy');
+                window.AppDialog.error((xhr.responseJSON || {}).message || 'No se pudo aceptar la invitación.');
+            });
+        }
+
+        function refreshOpenEventSheet() {
+            if (! currentEventSheet) {
+                return;
+            }
+
+            loadEventSheet(currentEventSheet.id, currentEventToken, false);
+        }
+
+        function loadEventSheet(eventId, invitationToken, showModal) {
+            var $body = $('#chat-event-sheet-body');
+            var tokenParam = invitationToken ? '?invitation_token=' + encodeURIComponent(invitationToken) : '';
+
+            if (showModal) {
+                $body.html('<p class="chat-hint">Cargando...</p>');
+                $('#chat-event-sheet-actions').empty();
+                window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modal-chat-event-sheet')).show();
+            }
+
+            $.getJSON(eventosUrl + '/' + eventId + tokenParam).done(function (response) {
                 var event = (response && response.event) || null;
 
                 if (! event) {
@@ -8722,30 +9386,123 @@
                     return;
                 }
 
-                var rows = [
-                    ['Evento', event.name],
-                    ['Año', String(event.year)],
-                    ['Estado', event.status],
-                    ['Intercambio', event.exchange_at || 'Sin fecha'],
-                    ['Inscripciones', event.registration_opens_at && event.registration_closes_at
-                        ? event.registration_opens_at + ' al ' + event.registration_closes_at
-                        : 'Sin fechas'],
-                    ['Dinámica', event.dynamic_starts_at || 'Sin fecha'],
-                    ['Participantes', String(event.participants)]
-                ];
-
-                $body.html('<dl class="perfil-data chat-event-sheet__data">' +
-                    rows.map(function (row) {
-                        return '<div class="perfil-data__item">' +
-                            '<dt>' + escape(row[0]) + '</dt>' +
-                            '<dd>' + escape(row[1]) + '</dd>' +
-                            '</div>';
-                    }).join('') +
-                    '</dl>');
+                currentEventSheet = event;
+                currentEventToken = event.invitation_token || invitationToken || '';
+                renderEventSheet(event);
             }).fail(function (xhr) {
                 $body.html('<p class="chat-hint">' + escape((xhr.responseJSON || {}).message || 'No se pudo abrir el evento.') + '</p>');
             });
         }
+
+        function openEventSheet(eventId, invitationToken) {
+            currentEventSheet = null;
+            currentEventToken = String(invitationToken || '');
+            loadEventSheet(eventId, currentEventToken, true);
+        }
+
+        function refreshEventCards() {
+            if (! isPanelOpen() || document.hidden) {
+                return;
+            }
+
+            $('#chat-messages .chat-event[data-event-id]').each(function () {
+                var $card = $(this);
+                var eventId = parseInt($card.attr('data-event-id'), 10) || 0;
+                var invitationToken = String($card.attr('data-invitation-token') || '');
+                var query = invitationToken ? '?invitation_token=' + encodeURIComponent(invitationToken) : '';
+
+                if (! eventId) {
+                    return;
+                }
+
+                $.getJSON(eventosUrl + '/' + eventId + query).done(function (response) {
+                    var event = response && response.event;
+
+                    if (! event || ! $card[0].isConnected) {
+                        return;
+                    }
+
+                    var html = eventCardHtml(event);
+
+                    if ($card[0].outerHTML !== html) {
+                        $card.replaceWith(html);
+                    }
+                });
+            });
+        }
+
+        $(document).on('click', '.chat-event-accept', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            acceptEventInvitation($(this).attr('data-accept-url'), $(this));
+        });
+
+        $(document).on('click', '.chat-event-reject, .chat-event-sheet-reject', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            openRejectEventModal($(this).attr('data-reject-url'));
+        });
+
+        $(document).on('click', '.chat-event-sheet-accept', function (event) {
+            event.preventDefault();
+            acceptEventInvitation($(this).attr('data-accept-url'), $(this));
+        });
+
+        $('#chat-event-reject-confirm').on('click', function () {
+            var url = currentRejectUrl;
+            var reason = $.trim($('#chat-event-reject-reason').val());
+            var confirmed = $('#chat-event-reject-confirmed').is(':checked');
+            var $error = $('#chat-event-reject-error');
+
+            $error.text('').removeAttr('data-kind');
+
+            if (! url) {
+                return;
+            }
+
+            if (reason.length < 3) {
+                $error.attr('data-kind', 'error').text('Escribe el motivo del rechazo.');
+                return;
+            }
+
+            if (! confirmed) {
+                $error.attr('data-kind', 'error').text('Confirma que deseas rechazar la invitación.');
+                return;
+            }
+
+            var $button = $(this);
+            $button.prop('disabled', true).attr('aria-busy', 'true');
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                dataType: 'json',
+                headers: {
+                    'X-CSRF-TOKEN': token,
+                    'Accept': 'application/json'
+                },
+                data: { reason: reason }
+            }).done(function (response) {
+                $button.prop('disabled', false).removeAttr('aria-busy');
+                window.bootstrap.Modal.getOrCreateInstance(
+                    document.getElementById('modal-chat-event-reject')
+                ).hide();
+                window.AppDialog.success((response && response.message) || 'Rechazaste la invitación.');
+                refreshOpenEventSheet();
+                refreshEventCards();
+            }).fail(function (xhr) {
+                $button.prop('disabled', false).removeAttr('aria-busy');
+                $error.attr('data-kind', 'error')
+                    .text((xhr.responseJSON || {}).message || 'No se pudo rechazar la invitación.');
+            });
+        });
+
+        window.setInterval(function () {
+            if (isPanelOpen() && ! document.hidden) {
+                refreshEventCards();
+            }
+        }, 20000);
+
 
         $('#chat-attach-menu').on('click', '[data-attach="poll"]', function () {
             $('#chat-attach-menu').prop('hidden', true);
@@ -8803,7 +9560,10 @@
         });
 
         $(document).on('click', '.chat-event-open', function () {
-            openEventSheet(parseInt($(this).attr('data-event-id'), 10) || 0);
+            openEventSheet(
+                parseInt($(this).attr('data-event-id'), 10) || 0,
+                $(this).attr('data-invitation-token') || ''
+            );
         });
 
         // El contador se consulta aunque el panel esté cerrado: así el botón

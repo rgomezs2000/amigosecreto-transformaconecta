@@ -87,7 +87,7 @@
                     <p class="field-message amigo-hint" id="evento-presupuesto-bs-hint">
                         Se calcula con la tasa oficial del BCV y no se guarda en la base.
                         @if ($tasa !== null)
-                            Tasa actual: <strong>Bs. {{ format_rate($tasa) }}</strong> por US$.
+                            Tasa actual: Bs. <strong data-bcv-rate>{{ format_rate($tasa) }}</strong> por US$.
                         @else
                             Tasa no disponible.
                         @endif

@@ -5,11 +5,6 @@
 @section('shell-eyebrow', 'Amigo secreto')
 
 @section('page')
-    <a class="module-back" href="{{ route('dashboard') }}">
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-        <span>Volver al panel</span>
-    </a>
-
     <div class="participantes-page">
         @if ($events->isEmpty())
             <section class="matriz-card" aria-label="Usuarios asociados">
@@ -20,6 +15,10 @@
                 </p>
             </section>
         @else
+            <div id="usuarios-asociados-estado">
+                @include('participantes.partials.estado', ['estado' => $estado])
+            </div>
+
             <section class="matriz-card participantes-toolbar" aria-label="Consulta de usuarios asociados">
                 <div class="participantes-field participantes-field--event">
                     <label for="usuarios-asociados-evento" class="form-label">Evento</label>
@@ -47,10 +46,6 @@
                 </div>
             </section>
 
-            <div id="usuarios-asociados-aviso" aria-live="polite">
-                @include('usuarios-asociados.partials.aviso', ['event' => $event])
-            </div>
-
             <section class="roles-table-card" aria-label="Listado de usuarios asociados">
                 <table id="usuarios-asociados-table"
                        class="table table-striped align-middle w-100 roles-table"
@@ -59,7 +54,7 @@
                         <tr>
                             <th scope="col" class="roles-id">Id</th>
                             <th scope="col" class="roles-name">Nombre</th>
-                            <th scope="col" class="roles-name">Usuario</th>
+                            <th scope="col" class="roles-name">Estatus de participación</th>
                             <th scope="col" class="roles-name">Amigo secreto</th>
                         </tr>
                     </thead>
@@ -68,7 +63,7 @@
                         <tr>
                             <th scope="col" class="roles-id">Id</th>
                             <th scope="col" class="roles-name">Nombre</th>
-                            <th scope="col" class="roles-name">Usuario</th>
+                            <th scope="col" class="roles-name">Estatus de participación</th>
                             <th scope="col" class="roles-name">Amigo secreto</th>
                         </tr>
                     </tfoot>

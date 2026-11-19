@@ -3,10 +3,12 @@
 use App\Http\Middleware\EnsureModuleAccess;
 use App\Http\Middleware\EnsureSingleSession;
 use App\Http\Middleware\EnsureSuperAdmin;
+use App\Http\Middleware\EnsureSupportedBrowser;
 use App\Http\Middleware\ShareAppShell;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -22,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
 
         $middleware->web(append: [
+            EnsureSupportedBrowser::class,
             ShareAppShell::class,
             EnsureSingleSession::class,
         ]);
@@ -64,5 +67,41 @@ return Application::configure(basePath: dirname(__DIR__))
                 419,
                 ['csrf_expired' => true]
             );
+        });
+
+        // Los límites de las solicitudes públicas deben explicar qué pasó en
+        // español, no mostrar el «Too Many Attempts» técnico de Laravel.
+        $exceptions->render(function (ThrottleRequestsException $exception, Request $request) {
+            if (! $request->expectsJson()) {
+                return null;
+            }
+
+            $retry = max(1, (int) ($exception->getHeaders()['Retry-After'] ?? 60));
+
+            if ($request->is('solicitudes/registro')) {
+                return api_error(
+                    'Has realizado varios intentos de registro seguidos. Espera '.$retry.' segundos antes de volver a intentarlo.',
+                    429,
+                    ['retry_after' => $retry]
+                );
+            }
+
+            if ($request->is('solicitudes/recuperacion')) {
+                return api_error(
+                    'Has solicitado la recuperación demasiadas veces. Espera '.$retry.' segundos antes de volver a intentarlo.',
+                    429,
+                    ['retry_after' => $retry]
+                );
+            }
+
+            if ($request->is('solicitudes/usuario-disponible')) {
+                return api_error(
+                    'Estás consultando el usuario demasiadas veces. Espera '.$retry.' segundos.',
+                    429,
+                    ['retry_after' => $retry]
+                );
+            }
+
+            return null;
         });
     })->create();

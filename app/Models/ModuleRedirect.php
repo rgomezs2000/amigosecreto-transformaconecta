@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -11,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ModuleRedirect extends Model
 {
+    use HasAuditFields;
     protected $fillable = [
         'path',
         'module_id',
@@ -21,3 +24,4 @@ class ModuleRedirect extends Model
         return $this->belongsTo(Module::class);
     }
 }
+

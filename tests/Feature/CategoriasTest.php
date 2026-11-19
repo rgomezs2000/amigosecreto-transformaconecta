@@ -248,7 +248,7 @@ class CategoriasTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('categories', ['id' => $category->id]);
+        $this->assertSoftDeleted('categories', ['id' => $category->id]);
     }
 
     public function test_elimina_varias_y_reporta_las_bloqueadas(): void
@@ -283,7 +283,7 @@ class CategoriasTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertDatabaseMissing('categories', ['id' => $libre->id]);
+        $this->assertSoftDeleted('categories', ['id' => $libre->id]);
         $this->assertDatabaseHas('categories', ['id' => $usada->id]);
     }
 
@@ -317,3 +317,4 @@ class CategoriasTest extends TestCase
             ->assertSee('General');
     }
 }
+

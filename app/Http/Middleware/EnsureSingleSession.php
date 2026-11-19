@@ -61,6 +61,8 @@ class EnsureSingleSession
             || $request->is('login')
             || $request->is('login/*')
             || $request->is('logout')
+            || $request->is('compatibilidad')
+            || $request->is('compatibilidad/*')
             || $request->is('auth/google/*')) {
             return $next($request);
         }

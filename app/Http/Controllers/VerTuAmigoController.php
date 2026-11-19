@@ -6,6 +6,7 @@ use App\Enums\EventStatus;
 use App\Models\Event;
 use App\Models\EventParticipant;
 use App\Models\Module;
+use App\Models\User;
 use App\Models\WishItem;
 use App\Services\SorteoService;
 use App\Support\FaseEvento;
@@ -30,7 +31,7 @@ class VerTuAmigoController extends Controller
         $this->ensureModuleAccess();
 
         $user = $request->user();
-        $event = $this->eventoActual();
+        $event = $this->eventoActual($request, $user);
         $participacion = $event !== null ? $this->participacion($event, $user->id) : null;
         $estado = $this->sorteo->estado($event, $user);
         $assignment = $event !== null ? $this->sorteo->asignacionDe($event, $user) : null;
@@ -87,7 +88,7 @@ class VerTuAmigoController extends Controller
     {
         $this->ensureModuleAccess();
 
-        $event = $this->eventoActual();
+        $event = $this->eventoActual($request, $request->user());
 
         if ($event === null) {
             return api_error('Todavía no hay un evento activo.', 409);
@@ -143,11 +144,38 @@ class VerTuAmigoController extends Controller
             ->first();
     }
 
-    private function eventoActual(): ?Event
+    /**
+     * Evento que corresponde al usuario.
+     *
+     * Primero manda la invitación abierta (parámetro `invitacion`) y después el
+     * evento en el que el usuario tiene participación: con varios eventos del
+     * mismo año, tomar el último creado mostraba «Sin invitación» aunque la
+     * persona ya hubiera aceptado la suya.
+     */
+    private function eventoActual(Request $request, User $user): ?Event
     {
-        $event = Event::query()->orderByDesc('year')->first();
+        $token = trim((string) $request->query('invitacion', ''));
 
-        return FaseEvento::sincronizar($event);
+        if ($token !== '') {
+            $participacion = EventParticipant::query()
+                ->with('event')
+                ->where('invitation_token', $token)
+                ->first();
+
+            if ($participacion !== null && (int) $participacion->user_id === (int) $user->id) {
+                return FaseEvento::sincronizar($participacion->event);
+            }
+        }
+
+        $propio = Event::query()
+            ->whereHas('participants', fn ($query) => $query->whereKey($user->id))
+            ->orderByDesc('year')
+            ->orderByDesc('id')
+            ->first();
+
+        return FaseEvento::sincronizar(
+            $propio ?? Event::query()->orderByDesc('year')->orderByDesc('id')->first()
+        );
     }
 
     /**

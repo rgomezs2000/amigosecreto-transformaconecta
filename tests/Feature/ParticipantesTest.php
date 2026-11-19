@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Models\WishItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -521,6 +522,72 @@ class ParticipantesTest extends TestCase
         $this->assertStringContainsString('participantes-table', $html);
         $this->assertMatchesRegularExpression('/<option value="'.$actual->id.'"\s+selected/', $html);
         $this->assertDoesNotMatchRegularExpression('/<option value="'.$anterior->id.'"\s+selected/', $html);
+    }
+
+    public function test_los_datos_omiten_usuarios_con_cuenta_eliminada(): void
+    {
+        $this->modulo();
+        $admin = $this->admin();
+        $event = $this->evento();
+        $user = $this->participante('Cuenta Borrada', 'borrada@example.com', 'borrada');
+
+        $this->participar($event, $user);
+        $user->delete();
+
+        $this->actingAs($admin)
+            ->getJson('/participantes/datos?evento='.$event->id)
+            ->assertOk()
+            ->assertJsonPath('recordsTotal', 0)
+            ->assertJsonPath('recordsFiltered', 0)
+            ->assertJsonPath('estado.participantes', 0)
+            ->assertJsonCount(0, 'data');
+    }
+
+    public function test_la_ficha_ofrece_las_acciones_segun_el_estado(): void
+    {
+        $this->modulo();
+        $admin = $this->admin();
+        $event = $this->evento();
+        $user = $this->participante('Ana Acciones', 'ana-acciones@example.com', 'ana-acciones');
+
+        $participation = EventParticipant::create([
+            'event_id' => $event->id,
+            'user_id' => $user->id,
+            'status' => 'pending',
+            'invitation_token' => Str::random(64),
+        ]);
+
+        $xml = $this->actingAs($admin)
+            ->getJson('/participantes/'.$user->id.'/ficha?evento='.$event->id)
+            ->assertOk()
+            ->json('actions_html');
+
+        $this->assertStringContainsString('btn-ficha-email', $xml);
+        $this->assertStringContainsString('btn-ficha-chat', $xml);
+        $this->assertStringContainsString('btn-ficha-notify', $xml);
+        $this->assertStringContainsString('btn-ficha-link', $xml);
+        $this->assertStringContainsString('btn-ficha-discard', $xml);
+        $this->assertStringNotContainsString('btn-ficha-expel', $xml);
+
+        $participation->forceFill(['status' => 'active', 'confirmed_at' => now()])->save();
+
+        $xml = $this->actingAs($admin)
+            ->getJson('/participantes/'.$user->id.'/ficha?evento='.$event->id)
+            ->assertOk()
+            ->json('actions_html');
+
+        $this->assertStringContainsString('btn-ficha-wishlist', $xml);
+        $this->assertStringContainsString('btn-ficha-expel', $xml);
+        $this->assertStringNotContainsString('btn-ficha-email', $xml);
+
+        $participation->forceFill(['status' => 'dismissed'])->save();
+
+        $xml = $this->actingAs($admin)
+            ->getJson('/participantes/'.$user->id.'/ficha?evento='.$event->id)
+            ->assertOk()
+            ->json('actions_html');
+
+        $this->assertStringNotContainsString('btn-ficha-', (string) $xml);
     }
 
     /**

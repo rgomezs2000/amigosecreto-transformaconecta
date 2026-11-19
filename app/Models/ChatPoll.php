@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ChatPoll extends Model
 {
+    use HasAuditFields;
     protected $table = 'chat_polls';
 
     protected $fillable = [
@@ -73,3 +76,4 @@ class ChatPoll extends Model
         }
     }
 }
+

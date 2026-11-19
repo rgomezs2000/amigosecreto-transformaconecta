@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class SessionKick extends Model
 {
+    use HasAuditFields;
     protected $table = 'session_kicks';
 
     protected $fillable = [
@@ -28,3 +31,4 @@ class SessionKick extends Model
         return $this->belongsTo(User::class);
     }
 }
+

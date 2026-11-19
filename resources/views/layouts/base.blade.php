@@ -5,12 +5,59 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <meta name="theme-color" content="#F9FAFB">
+    <link rel="icon" href="{{ asset('favicon.ico') }}">
     <title>@yield('title', 'Amigo Secreto Inclusivo')</title>
+
+    @php
+        // Este bloque nunca debe impedir que una página de error se muestre: si
+        // la sesión, el cifrado o el enrutador fallan, se usa una URL simple.
+        try {
+            $compatFrom = request()->fullUrl();
+            $compatGateUrl = auth()->check()
+                ? \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                    'compatibilidad.logout',
+                    now()->addMinutes(30),
+                    ['from' => $compatFrom]
+                )
+                : route('compatibilidad', ['from' => $compatFrom, 'motivo' => 'incompatible']);
+        } catch (\Throwable $errorCompatibilidad) {
+            $compatGateUrl = url('/compatibilidad');
+        }
+    @endphp
+
+    {{-- Compatibilidad: si el navegador o el sistema no están soportados, se
+         muestra la pantalla informativa antes de cargar el front-end. --}}
+    <script src="{{ asset('js/browser-support.js') }}?v={{ filemtime(public_path('js/browser-support.js')) }}"></script>
+    <script>
+        (function () {
+            if (!window.BrowserSupport) {
+                return;
+            }
+
+            if (window.location.pathname.indexOf('/compatibilidad') !== -1) {
+                return;
+            }
+
+            var result = null;
+
+            try {
+                result = window.BrowserSupport.analyze();
+            } catch (error) {
+                return;
+            }
+
+            if (!result || result.supported) {
+                return;
+            }
+
+            window.location.replace(@json($compatGateUrl));
+        }());
+    </script>
 
     {{-- Librerías por CDN: sin NPM, sin Vite, sin compilación de assets. --}}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
     <link href="{{ asset('css/style.css') }}?v={{ filemtime(public_path('css/style.css')) }}" rel="stylesheet">
@@ -19,6 +66,8 @@
 </head>
 <body class="app-body"
       data-session-status-url="{{ auth()->check() ? route('sesion.estado') : '' }}"
+      data-live-menu-url="{{ auth()->check() ? route('menu.estado') : '' }}"
+      data-live-rate-url="{{ auth()->check() ? route('tasa.bcv') : '' }}"
       data-login-url="{{ route('login') }}">
     <a class="skip-link" href="#contenido">Saltar al contenido principal</a>
 
@@ -27,6 +76,7 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootbox@6.0.4/dist/bootbox.min.js"></script>
+    <script src="{{ asset('js/live-refresh.js') }}?v={{ filemtime(public_path('js/live-refresh.js')) }}"></script>
     <script src="{{ asset('js/dialogos.js') }}?v={{ filemtime(public_path('js/dialogos.js')) }}"></script>
     <script src="{{ asset('js/functions.js') }}?v={{ filemtime(public_path('js/functions.js')) }}"></script>
     <script src="{{ asset('js/scripts.js') }}?v={{ filemtime(public_path('js/scripts.js')) }}"></script>

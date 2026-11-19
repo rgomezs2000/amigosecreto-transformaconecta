@@ -17,7 +17,12 @@
                         <h3 class="evento-card__name" data-evento-field="name">{{ $event->name }}</h3>
                         <p class="evento-card__phase">
                             <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>
-                            <span data-evento-field="phase">{{ \App\Support\FaseEvento::etiquetaDe($event) }}</span>
+                            @php($paso = \App\Support\FaseEvento::paso($event))
+                            @include('partials.fase-badge', [
+                                'fase' => $paso,
+                                'texto' => 'Fase '.$paso.' · '.\App\Support\FaseEvento::etiqueta($paso),
+                                'campo' => 'phase',
+                            ])
                         </p>
                     </div>
                     <span class="status-badge status-badge--{{ $badge }}" data-evento-field="status">{{ $event->statusLabel() }}</span>

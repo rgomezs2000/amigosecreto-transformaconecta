@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -10,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 class ExchangeRate extends Model
 {
+    use HasAuditFields;
     protected $fillable = [
         'rate_date',
         'base',
@@ -42,3 +45,4 @@ class ExchangeRate extends Model
         return round($usd * (float) $this->rate, 2);
     }
 }
+

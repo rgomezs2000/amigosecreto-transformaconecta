@@ -4,14 +4,27 @@ namespace App\Models;
 
 use App\Enums\EventStatus;
 use App\Enums\ParticipantStatus;
+use App\Models\Concerns\HasAuditFields;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Event extends Model
 {
+    use HasAuditFields, SoftDeletes;
+
+    protected static function booted(): void
+    {
+        static::deleting(function (Event $event) {
+            EventParticipant::query()
+                ->where('event_id', $event->id)
+                ->delete();
+        });
+    }
+
     /**
      * Valores por defecto en memoria, para que un evento recién creado ya
      * tenga moneda y banderas aunque la base las complete.
@@ -221,6 +234,7 @@ class Event extends Model
     public function pendingParticipationsCount(): int
     {
         return $this->participations()
+            ->whereHas('user')
             ->where('status', ParticipantStatus::Pending->value)
             ->count();
     }
@@ -229,6 +243,7 @@ class Event extends Model
     public function activeParticipationsCount(): int
     {
         return $this->participations()
+            ->whereHas('user')
             ->where('status', ParticipantStatus::Active->value)
             ->count();
     }

@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class UserPermissionModule extends Model
 {
+    use HasAuditFields;
     protected $table = 'user_permission_module';
 
     protected $fillable = [
@@ -43,3 +46,4 @@ class UserPermissionModule extends Model
         return $this->belongsTo(Module::class);
     }
 }
+

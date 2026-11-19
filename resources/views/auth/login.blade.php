@@ -182,6 +182,7 @@
 
         <footer class="login-footer">
             <p>Amigo Secreto Inclusivo · {{ now()->year }}</p>
+            <p><a href="{{ route('compatibilidad') }}">Compatibilidad de navegadores</a></p>
         </footer>
     </div>
 </main>
@@ -195,7 +196,9 @@
     var $estadoUsuario = document.getElementById('solicitud-usuario-estado');
     var $registroEstado = document.getElementById('solicitud-registro-estado');
     var $recuperacionEstado = document.getElementById('solicitud-recuperacion-estado');
+    var $registroBoton = document.getElementById('solicitud-registro-enviar');
     var disponible = null;
+    var enviandoRegistro = false;
     var timer = null;
 
     function abrir(modal) {
@@ -282,6 +285,16 @@
         }
 
         confirmDialog('¿Deseas registrarte y participar? Tu solicitud será evaluada por la administración.', function () {
+            if (enviandoRegistro) {
+                return;
+            }
+
+            enviandoRegistro = true;
+
+            if ($registroBoton) {
+                $registroBoton.disabled = true;
+            }
+
             fetch('{{ route('solicitudes.registro') }}', {
                 method: 'POST',
                 headers: {
@@ -315,6 +328,12 @@
                 window.AppDialog.success(mensajeExito, { title: 'Solicitud registrada' });
             }).catch(function () {
                 mensaje($registroEstado, 'No se pudo enviar la solicitud. Intenta de nuevo.', 'error');
+            }).finally(function () {
+                enviandoRegistro = false;
+
+                if ($registroBoton) {
+                    $registroBoton.disabled = false;
+                }
             });
         });
     }

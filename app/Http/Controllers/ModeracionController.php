@@ -430,6 +430,7 @@ class ModeracionController extends Controller
         );
 
         $this->reporteAvisos->sugerenciaRespondida($report, $message);
+        $report->markManaged();
 
         return api_success('Respuesta enviada.', [
             'reply' => [
@@ -504,11 +505,11 @@ class ModeracionController extends Controller
     {
         $this->ensureModeracionAccess();
 
-        if (! $report->isAttending()) {
-            return api_error('El caso no está en atención.', 422);
+        if (! $report->isPending() && ! $report->isAttending()) {
+            return api_error('El caso ya está cerrado.', 422);
         }
 
-        if ((int) $report->assigned_to !== (int) $request->user()->id) {
+        if ($report->isAttending() && (int) $report->assigned_to !== (int) $request->user()->id) {
             return api_error('Solo el administrador que tomó el caso puede cerrarlo.', 403);
         }
 
@@ -524,16 +525,33 @@ class ModeracionController extends Controller
             return api_response(false, $validator->errors()->first(), ['errors' => $validator->errors()], 422);
         }
 
-        $affected = ChatReport::query()
-            ->whereKey($report->id)
-            ->where('status', ChatReport::STATUS_ATTENDING)
-            ->where('assigned_to', $request->user()->id)
-            ->update([
-                'status' => ChatReport::STATUS_CLOSED,
-                'closed_at' => now(),
-                'closed_by' => $request->user()->id,
-                'close_observation' => $request->input('close_observation'),
-            ]);
+        if ($report->isPending()) {
+            // Cerrar directamente un caso «Por atender» permite descartar
+            // solicitudes erróneas sin tener que tomarlas primero.
+            $affected = ChatReport::query()
+                ->whereKey($report->id)
+                ->where('status', ChatReport::STATUS_PENDING)
+                ->update([
+                    'status' => ChatReport::STATUS_CLOSED,
+                    'assigned_to' => $request->user()->id,
+                    'taken_by' => $request->user()->id,
+                    'taken_at' => now(),
+                    'closed_at' => now(),
+                    'closed_by' => $request->user()->id,
+                    'close_observation' => $request->input('close_observation'),
+                ]);
+        } else {
+            $affected = ChatReport::query()
+                ->whereKey($report->id)
+                ->where('status', ChatReport::STATUS_ATTENDING)
+                ->where('assigned_to', $request->user()->id)
+                ->update([
+                    'status' => ChatReport::STATUS_CLOSED,
+                    'closed_at' => now(),
+                    'closed_by' => $request->user()->id,
+                    'close_observation' => $request->input('close_observation'),
+                ]);
+        }
 
         if ($affected === 0) {
             return api_error('El caso cambió de estado. Recarga la lista.', 409);
@@ -613,6 +631,10 @@ class ModeracionController extends Controller
 
         if ((int) $report->assigned_to !== (int) $user->id) {
             return api_error('Solo el administrador que gestiona el caso puede remitirlo.', 403);
+        }
+
+        if ($report->isManaged()) {
+            return api_error('Este caso ya tuvo una gestión efectiva; no se puede remitir.', 422);
         }
 
         $validator = validator($request->all(), [
@@ -767,11 +789,15 @@ class ModeracionController extends Controller
         $registrationHasData = trim((string) ($registrationPayload['email'] ?? '')) !== '';
         $registrationUserExists = $registrationHasData
             && User::query()->whereRaw('LOWER(email) = ?', [mb_strtolower((string) $registrationPayload['email'])])->exists();
-        $createUserUrl = $canManage && $report->isUserRegistration() && ! $registrationUserExists
+        $createUserUrl = $canManage
+            && $report->isUserRegistration()
+            && ! $report->isAccountRequest()
+            && ! $registrationUserExists
             ? module_url('usuarios').($registrationHasData ? '?solicitud='.$report->id : '')
             : null;
         $canRejectRegistration = $canManage
             && $report->isUserRegistration()
+            && ! $report->isAccountRequest()
             && $registrationHasData
             && ! $registrationUserExists;
 
@@ -785,12 +811,14 @@ class ModeracionController extends Controller
         // usuario en el módulo Usuarios, en lugar de ejecutar el cambio aquí.
         $passwordChangeUrl = null;
 
-        if ($canManage && $accountAction === 'reset') {
+        if ($canManage && $accountAction === 'reset' && ! $report->isManaged()) {
             $resetUserId = (int) (($report->payload ?: [])['user_id'] ?? 0);
             $resetUser = $resetUserId > 0 ? User::query()->find($resetUserId) : null;
 
             if ($resetUser !== null) {
-                $passwordChangeUrl = module_url('usuarios').'?buscar='.urlencode($resetUser->username);
+                $passwordChangeUrl = module_url('usuarios')
+                    .'?buscar='.urlencode($resetUser->username)
+                    .'&restablecer='.$resetUser->id;
             }
         }
 
@@ -827,7 +855,7 @@ class ModeracionController extends Controller
             'closed_by_name' => $report->closedBy?->name ?? '—',
             'close_observation' => (string) ($report->close_observation ?? ''),
             'can_take' => $report->isPending(),
-            'can_close' => $report->isAttending() && $isMine,
+            'can_close' => $report->isPending() || ($report->isAttending() && $isMine),
             'can_reply_suggestion' => $report->isSuggestion() && $report->isAttending() && $isMine,
             'reporter' => e($reporterName),
             'reporter_raw' => $reporterName,
@@ -849,10 +877,11 @@ class ModeracionController extends Controller
             'account_action' => $accountAction,
             'password_change_url' => $passwordChangeUrl,
             'can_manage' => $canManage,
+            'is_managed' => $report->isManaged(),
             'can_reject_registration' => $canRejectRegistration,
             'has_ticket_chat' => $ticketChat !== null,
             // Remisión: solo el gestor actual puede remitir el caso.
-            'can_refer' => $report->isAttending() && $isMine,
+            'can_refer' => $report->isAttending() && $isMine && ! $report->isManaged(),
             'referrals' => $referrals,
             'actions' => view('moderacion.partials.actions', [
                 'report' => $report,

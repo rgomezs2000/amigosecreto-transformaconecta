@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -13,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ChatModerationRead extends Model
 {
+    use HasAuditFields;
     protected $table = 'chat_moderation_reads';
 
     protected $fillable = ['user_id', 'conversation_id', 'last_read_at'];
@@ -32,3 +35,4 @@ class ChatModerationRead extends Model
         return $this->belongsTo(Conversation::class, 'conversation_id');
     }
 }
+

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -14,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class EmailLog extends Model
 {
+    use HasAuditFields;
     public const STATUS_SENT = 'sent';
 
     public const STATUS_FAILED = 'failed';
@@ -50,3 +53,4 @@ class EmailLog extends Model
         return $this->status === self::STATUS_SENT;
     }
 }
+

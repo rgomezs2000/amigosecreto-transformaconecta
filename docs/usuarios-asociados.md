@@ -6,7 +6,10 @@ fichas, no muestra listas de deseos ni obsequios y no modifica nada.
 
 ## Formulario
 
-Igual que **Participantes**, en una sola columna:
+Igual que **Participantes**, en una sola columna. Encima del formulario va la
+sección con el estado del evento: **etiqueta de fase con su color**, etiqueta
+del estado del evento, nombre, año, fecha de intercambio, el mensaje de la fase
+y los contadores de invitados, activos, pendientes, asignados y sin asignar.
 
 1. **Evento**: por defecto el actual y en curso; el selector lista todos los
    eventos, también los históricos.
@@ -22,22 +25,20 @@ DataTable paginada en el servidor, de solo lectura, con cuatro columnas:
 | --- | --- |
 | Id | Id del usuario (quien regala). |
 | Nombre | Nombre del usuario. |
-| Usuario | Nombre de acceso del usuario. |
+| Estatus de participación | Etiqueta con el estado de su participación: Activo, Rechazado, Descartado, Expulsado, Retirado o En espera. |
 | Amigo secreto | Nombre del amigo secreto asignado. |
 
 Si el evento todavía no tiene sorteo, la tabla lo indica («Las parejas aparecen
 cuando se realiza el sorteo»).
-
-![Usuarios asociados](usuarios-asociados.png)
 
 ## Apertura y cierre por evento
 
 - El módulo se activa cuando existe al menos un evento. Sin eventos, la página
   explica cómo crearlo.
 - Consulta por defecto el evento actual y en curso.
-- Los eventos terminados se consultan en modo histórico: la página muestra el
-  aviso «El evento terminó: esta consulta es histórica y de solo lectura» y los
-  datos se mantienen disponibles.
+- Los eventos terminados se consultan en modo histórico: la sección de estado
+  indica «El evento ya finalizó. La información queda disponible en solo
+  lectura» y los datos se mantienen disponibles.
 - Si el evento está suspendido se avisa y la consulta también es de solo
   lectura.
 
@@ -56,13 +57,14 @@ administración. La página la sirve el enrutador de módulos en
 - `app/Http/Controllers/UsuariosAsociadosController.php`: consulta y DataTable.
 - `app/Http/Controllers/Concerns/ResuelveEventoConsulta.php`: evento actual y
   evento elegido, compartido con Participantes.
+- `app/Http/Controllers/Concerns/ResuelveEstadoEvento.php`: estado, fase y
+  contadores del evento para la sección superior.
+- `resources/views/partials/fase-badge.blade.php`: etiqueta de fase con color.
 - `app/Support/ModulePages.php`: asocia el módulo a su controlador.
-- `resources/views/usuarios-asociados/`: página y aviso de histórico.
+- `resources/views/usuarios-asociados/`: página.
 - `public/js/usuarios-asociados.js`: DataTable, búsqueda, evento y limpiar.
-- `database/migrations/2026_11_15_000002_activate_usuarios_asociados_module.php`:
-  orden (76) y acceso del perfil Administrador.
 - `tests/Feature/UsuariosAsociadosTest.php`: acceso, eventos, búsqueda,
-  paginación, histórico y cierre.
+  paginación, estatus de participación e histórico.
 
 ## Pruebas
 

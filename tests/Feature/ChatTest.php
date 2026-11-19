@@ -562,7 +562,7 @@ class ChatTest extends TestCase
             ->assertOk()
             ->assertJsonPath('blocked', false);
 
-        $this->assertDatabaseMissing('chat_blocks', [
+        $this->assertSoftDeleted('chat_blocks', [
             'blocker_id' => $luis->id,
             'blocked_id' => $ana->id,
         ]);
@@ -678,7 +678,7 @@ class ChatTest extends TestCase
             ->deleteJson('/chat/'.$conversation->id)
             ->assertOk();
 
-        $this->assertDatabaseMissing('chat_conversations', ['id' => $conversation->id]);
+        $this->assertSoftDeleted('chat_conversations', ['id' => $conversation->id]);
         $this->assertDatabaseMissing('chat_messages', ['conversation_id' => $conversation->id]);
     }
 
@@ -964,6 +964,58 @@ class ChatTest extends TestCase
             ->assertOk()
             ->assertSee('data-tab="secret"', false)
             ->assertDontSee('data-tab="moderation"', false);
+    }
+
+    /**
+     * El widget maneja su propio estado de carga: el aviso automático de AJAX
+     * no debe sustituir las pestañas, el botón de mensajes ni las filas de las
+     * listas con un «Procesando...».
+     */
+    public function test_el_widget_no_usa_el_aviso_automatico_de_procesamiento(): void
+    {
+        $ana = $this->userWithChat('Ana', UserRole::Participant);
+
+        $this->actingAs($ana)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertSee('id="chat-widget" data-processing-manual="true"', false);
+    }
+
+    /**
+     * El menú de un miembro necesita saber si el remitente es el dueño del
+     * grupo y si es administrador del sistema.
+     */
+    public function test_los_mensajes_indican_si_el_remitente_es_el_dueno_del_grupo(): void
+    {
+        $owner = $this->userWithChat('Owner', UserRole::Participant);
+        $member = $this->userWithChat('Member', UserRole::Participant);
+
+        $group = Conversation::create([
+            'name' => 'Grupo de remitentes',
+            'type' => 'group',
+            'created_by' => $owner->id,
+        ]);
+
+        $group->users()->attach($owner->id, ['role' => 'moderator']);
+        $group->users()->attach($member->id, ['role' => 'member']);
+
+        $this->actingAs($owner)
+            ->postJson('/chat/'.$group->id.'/mensajes', ['body' => 'Del dueño'])
+            ->assertOk();
+
+        $this->actingAs($member)
+            ->postJson('/chat/'.$group->id.'/mensajes', ['body' => 'Del miembro'])
+            ->assertOk();
+
+        $response = $this->actingAs($member)
+            ->getJson('/chat/'.$group->id.'/mensajes')
+            ->assertOk();
+
+        $items = collect($response->json('messages'))->keyBy('body');
+
+        $this->assertTrue($items['Del dueño']['sender_is_owner']);
+        $this->assertFalse($items['Del miembro']['sender_is_owner']);
+        $this->assertFalse($items['Del dueño']['sender_is_admin']);
     }
 
     /**
@@ -2387,7 +2439,7 @@ class ChatTest extends TestCase
             ->assertOk()
             ->assertJsonCount(0, 'items');
 
-        $this->assertDatabaseMissing('chat_message_attachments', ['message_id' => $message->id]);
+        $this->assertSoftDeleted('chat_message_attachments', ['message_id' => $message->id]);
         Storage::disk('public')->assertMissing($path);
 
         $this->assertNull($message->fresh()->attachment_path);
@@ -2711,7 +2763,7 @@ class ChatTest extends TestCase
         $this->assertNull($message->attachment_path);
         $this->assertNull($message->attachment_name);
         Storage::disk('public')->assertMissing($path);
-        $this->assertDatabaseMissing('chat_message_attachments', ['message_id' => $message->id]);
+        $this->assertSoftDeleted('chat_message_attachments', ['message_id' => $message->id]);
 
         $this->actingAs($ana)
             ->getJson('/chat/'.$conversation->id.'/media')
@@ -2788,3 +2840,5 @@ class ChatTest extends TestCase
             ->assertJsonPath('conversations.0.pinned_message.id', $message->id);
     }
 }
+
+

@@ -167,7 +167,7 @@ class ObsequiosAmigoTest extends TestCase
         $this->actingAs($this->ana)
             ->get($this->pagina())
             ->assertOk()
-            ->assertSee('El evento aún no ha comenzado')
+            ->assertSee('Estás en la fase de unión: favor esperar el sorteo.')
             ->assertDontSee('Obsequio para tu amigo secreto')
             ->assertDontSee('Nuevo consumible');
 
@@ -333,7 +333,7 @@ class ObsequiosAmigoTest extends TestCase
             ->deleteJson('/amigo-secreto/ver-tu-amigo/consumibles/'.$chocolate->id)
             ->assertOk();
 
-        $this->assertDatabaseMissing('consumable_gifts', ['id' => $chocolate->id]);
+        $this->assertSoftDeleted('consumable_gifts', ['id' => $chocolate->id]);
     }
 
     public function test_los_consumibles_respetan_el_tope_del_evento(): void
@@ -412,3 +412,4 @@ class ObsequiosAmigoTest extends TestCase
             ->assertForbidden();
     }
 }
+

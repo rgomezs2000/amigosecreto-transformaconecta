@@ -2,8 +2,11 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -16,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class HelpArticle extends Model
 {
+    use HasAuditFields, SoftDeletes;
     public const KIND_SECTION = 'section';
 
     public const KIND_FAQ = 'faq';
@@ -71,3 +75,6 @@ class HelpArticle extends Model
         return $query->orderBy('sort_order')->orderBy('id');
     }
 }
+
+
+

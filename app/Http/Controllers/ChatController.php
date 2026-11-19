@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ParticipantStatus;
 use App\Enums\UserRole;
 use App\Models\ChatBlock;
 use App\Models\ChatGroupAudit;
@@ -16,6 +17,7 @@ use App\Models\ChatReaction;
 use App\Models\ChatReport;
 use App\Models\Conversation;
 use App\Models\Event;
+use App\Models\EventParticipant;
 use App\Models\GroupBan;
 use App\Models\GroupSuspension;
 use App\Models\Module;
@@ -26,6 +28,7 @@ use App\Services\ReporteAdjuntos;
 use App\Services\ReporteAvisos;
 use App\Services\ReporteChat;
 use App\Support\ChatMentions;
+use App\Support\FaseEvento;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -818,6 +821,11 @@ class ChatController extends Controller
                 && ! $hideAdminBadge
                 && ! $message->is_moderation
                 && $message->user?->role === UserRole::Admin,
+            // Dueño del grupo o de la sala: las acciones sobre el miembro
+            // dependen de su papel.
+            'sender_is_owner' => ! $ocultarRemitente
+                && $conversation !== null
+                && (int) $conversation->created_by === (int) $message->user_id,
             'is_moderation' => $message->is_moderation,
             'mine' => $message->user_id === $user->id,
             'created_at' => $message->created_at?->format('H:i'),
@@ -871,7 +879,12 @@ class ChatController extends Controller
                 )
                 : null,
             'event' => ! $deleted && $message->event !== null
-                ? $this->eventData($message->event)
+                ? $this->eventData(
+                    $message->event,
+                    $user,
+                    $message->event_invitation_token,
+                    true
+                )
                 : null,
         ];
     }
@@ -1270,6 +1283,10 @@ class ChatController extends Controller
                 $message,
                 $message->is_moderation ? 'Moderación' : $user->name
             );
+
+            if ($user->role === UserRole::Admin && $conversation->isReportChat()) {
+                $conversation->report?->markManaged();
+            }
 
             if ($conversation->type === 'broadcast') {
                 $this->replicateBroadcastMessage($conversation, $message, $user);
@@ -1721,7 +1738,7 @@ class ChatController extends Controller
             ->withCount('participants')
             ->orderByDesc('year')
             ->get()
-            ->map(fn (Event $event) => $this->eventData($event))
+            ->map(fn (Event $event) => $this->eventData($event, request()->user()))
             ->values();
 
         return api_success('Eventos disponibles.', ['events' => $events]);
@@ -1731,13 +1748,21 @@ class ChatController extends Controller
      * Ficha de un evento para la burbuja del chat, disponible para todos los
      * usuarios del chat (también administradores).
      */
-    public function fichaEvento(Event $event): JsonResponse
+    public function fichaEvento(Request $request, Event $event): JsonResponse
     {
         $this->ensureAccess();
 
         $event->loadCount('participants');
+        $token = $request->query('invitation_token');
 
-        return api_success('Ficha del evento.', ['event' => $this->eventData($event)]);
+        return api_success('Ficha del evento.', [
+            'event' => $this->eventData(
+                $event,
+                $request->user(),
+                is_string($token) ? $token : null,
+                true
+            ),
+        ]);
     }
 
     /**
@@ -1875,8 +1900,42 @@ class ChatController extends Controller
     /**
      * Resumen de un evento para la burbuja y la ficha del chat.
      */
-    private function eventData(Event $event): array
-    {
+    private function eventData(
+        Event $event,
+        ?User $viewer = null,
+        ?string $invitationToken = null,
+        bool $requireValidToken = false
+    ): array {
+        $viewer ??= request()->user();
+        $isAdmin = $viewer?->isAdmin() ?? false;
+        $participation = $viewer !== null && ! $isAdmin
+            ? EventParticipant::query()
+                ->where('event_id', $event->id)
+                ->where('user_id', $viewer->id)
+                ->first()
+            : null;
+
+        $validToken = false;
+
+        if ($requireValidToken) {
+            $validToken = $participation !== null
+                && $participation->status === ParticipantStatus::Pending
+                && filled($invitationToken)
+                && filled($participation->invitation_token)
+                && hash_equals((string) $participation->invitation_token, (string) $invitationToken);
+        }
+
+        $canRespond = ! $isAdmin
+            && $validToken
+            && $participation !== null
+            && $participation->status === ParticipantStatus::Pending
+            && $event->status->allowsInvitations()
+            && ! $event->isSuspended()
+            && ! $event->status->isFinished();
+
+        $budget = $event->budget();
+        $rate = dollar_rate();
+
         return [
             'id' => (int) $event->id,
             'name' => $event->name,
@@ -1889,6 +1948,8 @@ class ChatController extends Controller
             'status_class' => $event->isSuspended()
                 ? 'blocked'
                 : ($event->status->isFinished() ? 'inactive' : 'active'),
+            'phase' => FaseEvento::etiquetaDe($event),
+            'phase_number' => FaseEvento::paso($event),
             'exchange_at' => $event->exchange_at?->format('d/m/Y'),
             'exchange_at_iso' => $event->exchange_at?->toIso8601String(),
             'registration_opens_at' => $event->registration_opens_at?->format('d/m/Y'),
@@ -1896,6 +1957,32 @@ class ChatController extends Controller
             'dynamic_starts_at' => $event->dynamic_starts_at?->format('d/m/Y'),
             'participants' => (int) ($event->participants_count ?? $event->participants()->count()),
             'suspended' => $event->isSuspended(),
+            'budget' => $budget !== null ? 'US$ '.format_rate($budget) : null,
+            'budget_raw' => $budget,
+            'budget_ves' => $budget !== null && $rate !== null
+                ? 'Bs. '.format_rate($budget * $rate)
+                : null,
+            'is_admin' => $isAdmin,
+            'has_participation' => $participation !== null,
+            'participation_status' => $participation?->status->label(),
+            'participation_status_key' => $participation?->status->value,
+            'participation_reason' => $participation?->status_reason,
+            'can_respond' => $canRespond,
+            'invitation_token' => $canRespond ? $participation->invitation_token : null,
+            'accept_url' => $canRespond
+                ? route('invitacion.aceptar', ['token' => $participation->invitation_token])
+                : null,
+            'reject_url' => $canRespond
+                ? route('invitacion.rechazar', ['token' => $participation->invitation_token])
+                : null,
+            'can_wishlist' => ! $isAdmin
+                && $participation !== null
+                && $participation->status === ParticipantStatus::Active,
+            'wishlist_url' => ! $isAdmin
+                && $participation !== null
+                && $participation->status === ParticipantStatus::Active
+                ? module_url('lista-de-deseos')
+                : null,
         ];
     }
 
@@ -2307,6 +2394,10 @@ class ChatController extends Controller
         $message->attachments()->whereKey($attachment->id)->delete();
         Storage::disk('public')->delete($attachment->path);
 
+        if ($user->role === UserRole::Admin && $message->conversation?->isReportChat()) {
+            $message->conversation->report?->markManaged();
+        }
+
         if ($message->attachments()->count() === 0) {
             return api_success('Se eliminó el contenido y el mensaje.', [
                 'message_deleted' => true,
@@ -2379,6 +2470,10 @@ class ChatController extends Controller
         // El adjunto pertenece al mensaje: al eliminarlo no debe quedar ni en la
         // galería ni ocupando espacio en el almacenamiento.
         $this->purgeMessageAttachments($message);
+
+        if ($byAdmin && $message->conversation?->isReportChat()) {
+            $message->conversation->report?->markManaged();
+        }
 
         // La encuesta también vive dentro del mensaje: si el mensaje se elimina,
         // la encuesta y sus votos desaparecen con él.
@@ -3471,10 +3566,17 @@ class ChatController extends Controller
             return api_error('No puedes bloquear a un administrador.', 422);
         }
 
-        ChatBlock::query()->firstOrCreate([
+        $block = ChatBlock::withTrashed()->firstOrNew([
             'blocker_id' => $current->id,
             'blocked_id' => $user->id,
         ]);
+
+        // Si ya existía un bloqueo lógico, se reactiva en lugar de chocar con
+        // la clave única de la tabla.
+        $block->forceFill([
+            'deleted_at' => null,
+            'deleted_by' => null,
+        ])->save();
 
         $this->applyBlockToSharedChats($current, $user);
 
@@ -3844,6 +3946,7 @@ class ChatController extends Controller
                 'name' => $member->name,
                 'username' => $member->username,
                 'is_owner' => (int) $member->id === (int) $conversation->created_by,
+                'is_admin' => $member->role === UserRole::Admin,
                 'online' => $member->last_seen_at !== null && $member->last_seen_at->gte(now()->subMinutes(5)),
                 'status' => $status,
             ];
@@ -4013,6 +4116,7 @@ class ChatController extends Controller
             'id' => $member->id,
             'name' => $member->name,
             'is_owner' => $member->id === $conversation->created_by,
+            'is_admin' => $member->role === UserRole::Admin,
             'suspended_until' => $suspensions->get($member->id)?->until?->format('d/m/Y H:i'),
             'banned' => $bans->has($member->id),
         ])->values();

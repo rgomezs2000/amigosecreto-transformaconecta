@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ChatMessage extends Model
 {
+    use HasAuditFields;
+
     protected $table = 'chat_messages';
 
     protected $fillable = [
@@ -27,6 +30,7 @@ class ChatMessage extends Model
         'delivered_at',
         'type',
         'event_id',
+        'event_invitation_token',
         'attachment_path',
         'attachment_name',
         'attachment_mime',

@@ -1,2 +1,5 @@
-2026/11/18-00:02:58.105 6520 Creating DB C:\xampp\htdocs\amigosecreto-transformaconecta\storage\framework\edge-cdp\Default\EdgeCoupons/coupons_data.db since it was missing.
-2026/11/18-00:02:58.177 6520 Reusing MANIFEST C:\xampp\htdocs\amigosecreto-transformaconecta\storage\framework\edge-cdp\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/11/18-11:41:45.118 7a0c Creating DB C:\xampp\htdocs\amigosecreto-transformaconecta\storage\framework\edge-cdp\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/11/18-11:41:45.689 7a0c Reusing MANIFEST C:\xampp\htdocs\amigosecreto-transformaconecta\storage\framework\edge-cdp\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/11/18-11:41:49.163 7c9c Level-0 table #5: started
+2026/11/18-11:41:49.200 7c9c Level-0 table #5: 683273 bytes OK
+2026/11/18-11:41:49.212 7c9c Delete type=0 #3

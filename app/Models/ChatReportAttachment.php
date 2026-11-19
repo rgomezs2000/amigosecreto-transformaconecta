@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ChatReportAttachment extends Model
 {
+    use HasAuditFields, SoftDeletes;
     public const KIND_IMAGE = 'image';
 
     public const KIND_VIDEO = 'video';
@@ -72,3 +76,6 @@ class ChatReportAttachment extends Model
         return $size.' B';
     }
 }
+
+
+

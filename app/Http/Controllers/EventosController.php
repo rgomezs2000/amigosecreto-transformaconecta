@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Enums\EventStatus;
 use App\Enums\ParticipantStatus;
-use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventParticipant;
@@ -316,26 +315,55 @@ class EventosController extends Controller
     {
         $this->ensureAccess();
 
+        $validator = Validator::make($request->all(), [
+            'channel' => ['nullable', 'in:notify,email,chat,link'],
+        ], [
+            'channel.in' => 'Canal de invitación no válido.',
+        ]);
+
+        if ($validator->fails()) {
+            return api_response(false, $validator->errors()->first(), [
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
         $participacion = $this->participacion($event, $user);
 
         if ($participacion->status !== ParticipantStatus::Pending) {
-            return api_error('Solo se puede invitar a quien está pendiente.', 409);
+            return api_error('La invitación ya fue respondida; no se pueden crear nuevas invitaciones.', 409);
         }
 
+        $channel = $validator->validated()['channel'] ?? null;
+
         try {
-            $this->invitaciones->enviar($event, $participacion);
+            if ($channel === null) {
+                $this->invitaciones->enviar($event, $participacion);
+                $invitationUrl = $participacion->fresh()?->invitationUrl();
+                $message = 'Invitación enviada por notificación, correo y chat.';
+            } else {
+                $resultado = $this->invitaciones->enviarCanal($event, $participacion, $channel);
+                $invitationUrl = $resultado['invitation_url'];
+                $message = match ($channel) {
+                    'notify' => 'Notificación enviada en el sistema.',
+                    'email' => 'Invitación enviada por correo.',
+                    'chat' => 'Invitación enviada al chat del sistema.',
+                    'link' => 'Enlace personal creado y listo para copiar.',
+                };
+            }
         } catch (Throwable $exception) {
             Log::error('Error al enviar la invitación individual', [
                 'event_id' => $event->id,
                 'user_id' => $user->id,
+                'channel' => $channel,
                 'error' => $exception->getMessage(),
             ]);
 
-            return api_error('No se pudo enviar la invitación. Intenta de nuevo.', 500);
+            return api_error($exception->getMessage(), 409);
         }
 
-        return api_success('Invitación enviada.', [
-            'invitation_url' => $participacion->fresh()?->invitationUrl(),
+        return api_success($message, [
+            'channel' => $channel,
+            'invitation_url' => $invitationUrl,
         ]);
     }
 
@@ -620,6 +648,10 @@ class EventosController extends Controller
             'notes' => $participacion->notes ?? '',
             'invited_at' => format_date($participacion->invited_at, 'd/m/Y H:i', ''),
             'invitation_url' => $participacion->invitationUrl(),
+            'wishlist_url' => module_url('participantes')
+                .'?evento='.$event->id
+                .'&participante='.$participacion->user->id
+                .'&accion=deseos',
         ]);
 
         return api_success('Participantes encontrados.', [

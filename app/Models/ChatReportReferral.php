@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -13,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ChatReportReferral extends Model
 {
+    use HasAuditFields;
     protected $table = 'chat_report_referrals';
 
     protected $fillable = [
@@ -37,3 +40,4 @@ class ChatReportReferral extends Model
         return $this->belongsTo(User::class, 'to_admin_id');
     }
 }
+

@@ -2,9 +2,12 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -13,6 +16,7 @@ use Illuminate\Support\Str;
 
 class Module extends Model
 {
+    use HasAuditFields, SoftDeletes;
     /**
      * Icono por defecto: se usa cuando el módulo no tiene uno asignado, para
      * que menús, perfiles y el inicio nunca queden sin icono.
@@ -422,3 +426,6 @@ class Module extends Model
         });
     }
 }
+
+
+

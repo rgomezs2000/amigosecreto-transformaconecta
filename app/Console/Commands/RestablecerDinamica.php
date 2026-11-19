@@ -145,6 +145,10 @@ class RestablecerDinamica extends Command
 
         $progress->step($run, $total, $total, 'Avisos por correo a los usuarios eliminados', $enviados);
 
+        // Los avisos por correo generan nuevos logs de Firestore: se limpian
+        // también para que el sistema quede realmente en cero.
+        DB::table('firestore_logs')->delete();
+
         $progress->finish(
             $run,
             true,
@@ -193,6 +197,7 @@ class RestablecerDinamica extends Command
             'Asignaciones' => fn (): int => DB::table('assignments')->delete(),
             'Participaciones del evento' => fn (): int => DB::table('event_participants')->delete(),
             'Auditoría' => fn (): int => DB::table('audit_logs')->delete(),
+            'Logs de Firestore' => fn (): int => DB::table('firestore_logs')->delete(),
             'Eventos' => fn (): int => DB::table('events')->delete(),
             'Notificaciones' => fn (): int => DB::table('notifications')->delete(),
             'Correos registrados' => fn (): int => DB::table('email_logs')->delete(),

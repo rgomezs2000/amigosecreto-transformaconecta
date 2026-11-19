@@ -2,8 +2,11 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -14,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class Clue extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $fillable = [
         'assignment_id',
         'template_key',
@@ -40,3 +44,6 @@ class Clue extends Model
         return $query->whereNull('read_at');
     }
 }
+
+
+

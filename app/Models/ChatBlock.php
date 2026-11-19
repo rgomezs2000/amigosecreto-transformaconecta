@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ChatBlock extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $table = 'chat_blocks';
 
     protected $fillable = ['blocker_id', 'blocked_id'];
@@ -33,3 +37,6 @@ class ChatBlock extends Model
             ->exists();
     }
 }
+
+
+

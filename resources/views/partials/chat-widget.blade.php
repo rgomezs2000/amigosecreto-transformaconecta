@@ -1,4 +1,7 @@
-<div class="chat-widget" id="chat-widget"
+{{-- Los botones del widget manejan su propio estado de carga: el aviso
+     automático «Procesando...» no debe sustituir las pestañas, el botón de
+     mensajes ni las filas de las listas. --}}
+<div class="chat-widget" id="chat-widget" data-processing-manual="true"
      data-url-resumen="{{ route('chat.resumen') }}"
      data-url-contador="{{ route('chat.contador') }}"
      data-url-abrir="{{ route('chat.abrir') }}"
@@ -325,16 +328,45 @@
                 </button>
             </div>
 
-            <div class="chat-attach-menu" id="chat-attach-menu" hidden>
-                <button type="button" class="chat-context-item" data-attach="camera-photo">Cámara: foto</button>
-                <button type="button" class="chat-context-item" data-attach="camera-video">Cámara: video</button>
-                <button type="button" class="chat-context-item" data-attach="image">Imágenes</button>
-                <button type="button" class="chat-context-item" data-attach="video">Videos</button>
-                <button type="button" class="chat-context-item" data-attach="file">Archivos y documentos</button>
-                <button type="button" class="chat-context-item" data-attach="contact">Contacto</button>
-                <button type="button" class="chat-context-item" data-attach="location">Ubicación</button>
-                <button type="button" class="chat-context-item" data-attach="poll" data-participant-only="1">Encuesta</button>
-                <button type="button" class="chat-context-item" data-attach="event" data-participant-only="1">Evento</button>
+            {{-- Paleta de adjuntos: icono con la etiqueta corta debajo, en
+                 cuadrícula de tres columnas y sin bordes. --}}
+            <div class="chat-attach-menu" id="chat-attach-menu" role="group" aria-label="Adjuntar al mensaje" hidden>
+                <button type="button" class="chat-context-item" data-attach="camera-photo" title="Cámara: foto">
+                    <i class="fa-solid fa-camera" aria-hidden="true"></i>
+                    <span>Foto</span>
+                </button>
+                <button type="button" class="chat-context-item" data-attach="camera-video" title="Cámara: video">
+                    <i class="fa-solid fa-video" aria-hidden="true"></i>
+                    <span>Video</span>
+                </button>
+                <button type="button" class="chat-context-item" data-attach="image" title="Imágenes de la galería">
+                    <i class="fa-regular fa-image" aria-hidden="true"></i>
+                    <span>Imágenes</span>
+                </button>
+                <button type="button" class="chat-context-item" data-attach="video" title="Videos de la galería">
+                    <i class="fa-solid fa-film" aria-hidden="true"></i>
+                    <span>Videos</span>
+                </button>
+                <button type="button" class="chat-context-item" data-attach="file" title="Archivos y documentos">
+                    <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+                    <span>Archivos</span>
+                </button>
+                <button type="button" class="chat-context-item" data-attach="contact" title="Contacto">
+                    <i class="fa-regular fa-address-card" aria-hidden="true"></i>
+                    <span>Contacto</span>
+                </button>
+                <button type="button" class="chat-context-item" data-attach="location" title="Ubicación">
+                    <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+                    <span>Ubicación</span>
+                </button>
+                <button type="button" class="chat-context-item" data-attach="poll" data-participant-only="1" title="Encuesta">
+                    <i class="fa-solid fa-square-poll-vertical" aria-hidden="true"></i>
+                    <span>Encuesta</span>
+                </button>
+                <button type="button" class="chat-context-item" data-attach="event" data-participant-only="1" title="Evento">
+                    <i class="fa-regular fa-calendar-days" aria-hidden="true"></i>
+                    <span>Evento</span>
+                </button>
             </div>
 
             <input type="file" id="chat-camera-photo" accept="image/*" capture="environment" hidden>
@@ -384,9 +416,10 @@
                             <p class="chat-profile__email" id="chat-member-status"></p>
                         </div>
                     </div>
-                    <button type="button" class="chat-profile__link" data-profile-action="member-back">
-                        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Volver al grupo
-                    </button>
+
+                    {{-- Acciones sobre el miembro según quién mira y su papel en
+                         el grupo o la sala (silenciar, bloquear, expulsar…). --}}
+                    <div class="chat-profile__options" id="chat-member-options" hidden></div>
                 </div>
 
                 <div class="chat-profile__section" data-profile-section="audit" hidden>
@@ -493,6 +526,23 @@
             <button type="button" class="chat-context-item chat-context-item--danger" data-user-action="block" hidden>Bloquear</button>
             <button type="button" class="chat-context-item" data-user-action="unblock" hidden>Desbloquear</button>
             <button type="button" class="chat-context-item" data-user-action="report">Reportar</button>
+        </div>
+
+        {{-- Acciones sobre un miembro de un grupo o sala: se abre con el clic
+             derecho en su nombre/avatar de un mensaje o en una fila de
+             miembros del perfil. Las opciones visibles dependen del papel de
+             quien mira y del papel del miembro. --}}
+        <div class="chat-context-menu chat-list-menu" id="chat-member-menu" hidden>
+            <button type="button" class="chat-context-item" data-member-action="chat">Conversación</button>
+            <button type="button" class="chat-context-item" data-member-action="profile">Ver perfil</button>
+            <button type="button" class="chat-context-item" data-member-action="mute">Silenciar</button>
+            <button type="button" class="chat-context-item" data-member-action="unmute" hidden>Quitar silencio</button>
+            <button type="button" class="chat-context-item" data-member-action="block">Bloquear</button>
+            <button type="button" class="chat-context-item" data-member-action="unblock" hidden>Desbloquear</button>
+            <button type="button" class="chat-context-item" data-member-action="report">Reportar</button>
+            <button type="button" class="chat-context-item" data-member-action="suspend" hidden>Suspender</button>
+            <button type="button" class="chat-context-item" data-member-action="expel" hidden>Expulsar</button>
+            <button type="button" class="chat-context-item chat-context-item--danger" data-member-action="ban" hidden>Banear</button>
         </div>
 
         <div class="chat-context-menu chat-list-menu" id="chat-list-menu" hidden>
@@ -820,7 +870,33 @@
     </x-slot:body>
 
     <x-slot:footer>
+        <div class="chat-event-sheet__actions" id="chat-event-sheet-actions"></div>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+    </x-slot:footer>
+</x-app-modal>
+
+{{-- Rechazo de una invitación al evento: motivo y confirmación. --}}
+<x-app-modal id="modal-chat-event-reject" title="Rechazar invitación">
+    <x-slot:body>
+        <p class="chat-hint">Cuéntale a la organización por qué no participas. La invitación quedará rechazada.</p>
+
+        <div class="field">
+            <label for="chat-event-reject-reason" class="form-label">Motivo del rechazo</label>
+            <textarea class="form-control" id="chat-event-reject-reason" rows="3" maxlength="1000"
+                      placeholder="Escribe el motivo..."></textarea>
+            <p class="field-message" id="chat-event-reject-error" role="status" aria-live="polite"></p>
+        </div>
+
+        <label class="form-check">
+            <input class="form-check-input" type="checkbox" id="chat-event-reject-confirmed">
+            <span class="form-check-label">Confirmo que deseo rechazar la invitación.</span>
+        </label>
+    </x-slot:body>
+
+    <x-slot:footer>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-outline-danger" id="chat-event-reject-confirm"
+                data-processing-manual="true">Rechazar invitación</button>
     </x-slot:footer>
 </x-app-modal>
 

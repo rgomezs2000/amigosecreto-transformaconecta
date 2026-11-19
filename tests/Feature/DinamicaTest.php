@@ -405,10 +405,20 @@ class DinamicaTest extends TestCase
 
         $superAdmin = $this->superAdmin();
 
+        DB::table('firestore_logs')->insert([
+            'action' => 'set',
+            'collection' => 'prueba',
+            'documents' => 1,
+            'status' => 'ok',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
         $this->artisan('dinamica:reiniciar', ['--force' => true])->assertSuccessful();
 
         $this->assertSame(0, DB::table('events')->count());
         $this->assertSame(0, DB::table('chat_messages')->count());
+        $this->assertSame(0, DB::table('firestore_logs')->count());
         $this->assertSame(1, User::query()->count());
         $this->assertDatabaseHas('users', ['id' => $superAdmin->id, 'username' => 'admin']);
     }

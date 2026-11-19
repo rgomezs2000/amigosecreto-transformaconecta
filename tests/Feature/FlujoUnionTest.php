@@ -11,6 +11,7 @@ use App\Models\Clue;
 use App\Models\Conversation;
 use App\Models\Event;
 use App\Models\EventParticipant;
+use App\Models\ExchangeGift;
 use App\Models\Module;
 use App\Models\Profile;
 use App\Models\User;
@@ -113,6 +114,182 @@ class FlujoUnionTest extends TestCase
             ->assertOk()
             ->assertSee('Invitación al evento')
             ->assertSee('Responder invitación');
+    }
+
+    public function test_ver_tu_amigo_muestra_activo_y_la_fase_de_union(): void
+    {
+        $ana = $this->participante();
+        $event = $this->evento();
+        $token = $this->participacion($event, $ana)->invitation_token;
+
+        $this->actingAs($ana)
+            ->postJson('/invitacion/'.$token.'/aceptar')
+            ->assertOk();
+
+        $this->actingAs($ana)
+            ->get(module_url('ver-tu-amigo').'?invitacion='.$token)
+            ->assertOk()
+            ->assertSee('Activo')
+            ->assertSee('Aceptaste la invitación: estás activo en el evento.')
+            ->assertSee('Estás en la fase de unión: favor esperar el sorteo.')
+            ->assertSee('Mi lista de deseos');
+    }
+
+    public function test_ver_tu_amigo_muestra_cada_estado_de_la_participacion(): void
+    {
+        $event = $this->evento();
+
+        $casos = [
+            'activo' => ParticipantStatus::Active,
+            'rechazado' => ParticipantStatus::Declined,
+            'retirado' => ParticipantStatus::Withdrawn,
+            'expulsado' => ParticipantStatus::Expelled,
+            'descartado' => ParticipantStatus::Dismissed,
+        ];
+
+        foreach ($casos as $slug => $status) {
+            $user = $this->participante('Persona '.$slug, $slug);
+
+            EventParticipant::create([
+                'event_id' => $event->id,
+                'user_id' => $user->id,
+                'status' => $status->value,
+            ]);
+
+            $this->actingAs($user)
+                ->get($this->path('ver-tu-amigo'))
+                ->assertOk()
+                ->assertSee($status->label());
+        }
+    }
+
+    public function test_ver_tu_amigo_prioriza_el_evento_del_participante(): void
+    {
+        $ana = $this->participante();
+
+        $suyo = Event::create([
+            'name' => 'Evento de Ana',
+            'year' => (int) now()->year,
+            'status' => EventStatus::Registration,
+            'exchange_at' => now()->addDays(10),
+            'max_value' => 100,
+        ]);
+
+        EventParticipant::create([
+            'event_id' => $suyo->id,
+            'user_id' => $ana->id,
+            'status' => ParticipantStatus::Active->value,
+            'confirmed_at' => now(),
+        ]);
+
+        Event::create([
+            'name' => 'Evento Ajeno',
+            'year' => (int) now()->year,
+            'status' => EventStatus::Registration,
+            'exchange_at' => now()->addDays(12),
+            'max_value' => 100,
+        ]);
+
+        $this->actingAs($ana)
+            ->get($this->path('ver-tu-amigo'))
+            ->assertOk()
+            ->assertSee('Evento de Ana')
+            ->assertDontSee('Evento Ajeno')
+            ->assertSee('Activo');
+    }
+
+    public function test_ver_tu_amigo_en_sorteo_ciego_ofrece_el_boton(): void
+    {
+        $ana = $this->participante();
+        $event = $this->evento();
+        $token = $this->participacion($event, $ana)->invitation_token;
+
+        $this->actingAs($ana)
+            ->postJson('/invitacion/'.$token.'/aceptar')
+            ->assertOk();
+
+        $event->update(['status' => EventStatus::DrawEnabled]);
+
+        $this->actingAs($ana)
+            ->get(module_url('ver-tu-amigo').'?invitacion='.$token)
+            ->assertOk()
+            ->assertSee('Todavía no has descubierto a tu amigo secreto.')
+            ->assertSee(module_url('asignar-amigo'), false);
+    }
+
+    public function test_abrir_la_invitacion_con_otro_usuario_muestra_el_modal_de_usuario_invalido(): void
+    {
+        $ana = $this->participante('Ana Invitada', 'ana-invitada');
+        $beto = $this->participante('Beto Equivocado', 'beto-equivocado');
+        $event = $this->evento();
+        $token = $this->participacion($event, $ana)->invitation_token;
+
+        $this->actingAs($beto)
+            ->get('/invitacion/'.$token)
+            ->assertRedirect(route('dashboard', ['invitacion' => 'usuario-invalido']))
+            ->assertSessionHas(
+                'invitacion_usuario_invalido',
+                'Usuario inválido para esta invitación. Favor intentarlo con el usuario correcto.'
+            );
+
+        $this->actingAs($beto)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('modal-invitacion-usuario-invalido', false)
+            ->assertSee('getOrCreateInstance', false)
+            ->assertSee('Usuario inválido para esta invitación. Favor intentarlo con el usuario correcto.');
+    }
+
+    public function test_login_desde_la_invitacion_lleva_al_modulo_del_usuario_correcto(): void
+    {
+        $ana = $this->participante('Ana Login', 'ana-login');
+        $event = $this->evento();
+        $token = $this->participacion($event, $ana)->invitation_token;
+
+        $this->get('/invitacion/'.$token)
+            ->assertRedirect(route('login'))
+            ->assertSessionHas('url.intended', route('invitacion.abrir', ['token' => $token]));
+
+        $this->postJson('/login', [
+            'login' => 'ana-login',
+            'password' => 'password',
+        ])
+            ->assertOk()
+            ->assertJsonPath('redirect', route('invitacion.abrir', ['token' => $token]));
+
+        $this->actingAs($ana)
+            ->get(route('invitacion.abrir', ['token' => $token]))
+            ->assertRedirect(module_url('ver-tu-amigo').'?invitacion='.$token);
+    }
+
+    public function test_login_desde_la_invitacion_con_otro_usuario_muestra_el_modal(): void
+    {
+        $ana = $this->participante('Ana Destino', 'ana-destino');
+        $beto = $this->participante('Beto Login', 'beto-login');
+        $event = $this->evento();
+        $token = $this->participacion($event, $ana)->invitation_token;
+
+        $this->get('/invitacion/'.$token)->assertRedirect(route('login'));
+
+        $this->postJson('/login', [
+            'login' => 'beto-login',
+            'password' => 'password',
+        ])
+            ->assertOk()
+            ->assertJsonPath('redirect', route('invitacion.abrir', ['token' => $token]));
+
+        $this->actingAs($beto)
+            ->get(route('invitacion.abrir', ['token' => $token]))
+            ->assertRedirect(route('dashboard', ['invitacion' => 'usuario-invalido']))
+            ->assertSessionHas(
+                'invitacion_usuario_invalido',
+                'Usuario inválido para esta invitación. Favor intentarlo con el usuario correcto.'
+            );
+
+        $this->actingAs($beto)
+            ->get(route('dashboard', ['invitacion' => 'usuario-invalido']))
+            ->assertOk()
+            ->assertSee('modal-invitacion-usuario-invalido', false);
     }
 
     public function test_aceptar_invitacion_activa_al_participante_y_habilita_el_sorteo(): void
@@ -261,7 +438,7 @@ class FlujoUnionTest extends TestCase
             ->deleteJson('/lista-de-deseos/'.$item->id)
             ->assertOk();
 
-        $this->assertDatabaseCount('wish_items', 0);
+        $this->assertSoftDeleted('wish_items', ['id' => $item->id]);
     }
 
     public function test_intercambio_de_pistas_crud_y_recibidas_solo_lectura(): void
@@ -308,7 +485,7 @@ class FlujoUnionTest extends TestCase
             ->deleteJson('/intercambio-de-pistas/'.$clue->id)
             ->assertOk();
 
-        $this->assertDatabaseCount('clues', 0);
+        $this->assertSoftDeleted('clues', ['id' => $clue->id]);
     }
 
     public function test_las_paginas_de_lista_de_deseos_y_pistas_renderizan_para_el_activo(): void
@@ -453,7 +630,7 @@ class FlujoUnionTest extends TestCase
             'drawn_at' => now(),
         ]);
 
-        $gift = \App\Models\ExchangeGift::create([
+        $gift = ExchangeGift::create([
             'assignment_id' => $assignment->id,
             'product' => 'Una taza artesanal',
             'value' => 25,

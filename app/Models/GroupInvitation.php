@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class GroupInvitation extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $table = 'chat_group_invitations';
 
     protected $fillable = [
@@ -48,3 +52,6 @@ class GroupInvitation extends Model
         return $this->accepted_at === null && $this->rejected_at === null;
     }
 }
+
+
+

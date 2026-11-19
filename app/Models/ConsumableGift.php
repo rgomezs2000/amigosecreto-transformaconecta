@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAuditFields;
+
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ConsumableGift extends Model
 {
+    use HasAuditFields, SoftDeletes;
     protected $fillable = [
         'assignment_id',
         'name',
@@ -30,3 +34,6 @@ class ConsumableGift extends Model
         return $this->belongsTo(Assignment::class);
     }
 }
+
+
+

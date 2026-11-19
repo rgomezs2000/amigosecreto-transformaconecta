@@ -9,6 +9,7 @@
         $activo = $participacion?->status->isParticipating() ?? false;
         $pendiente = $participacion?->status === \App\Enums\ParticipantStatus::Pending;
         $puedeRetirar = $activo && (! $event?->hasAssignments() || $event?->status->allowsRegistration());
+        $fase = $event !== null ? \App\Support\FaseEvento::paso($event) : 1;
     @endphp
 
     <section class="sorteo-page amigo-page" aria-label="Ver tu amigo">
@@ -44,17 +45,19 @@
                         <span>
                             Presupuesto máximo por obsequio:
                             <strong>US$ {{ format_rate($event->budget()) }}</strong>
-                            @if (dollar_rate() !== null)
-                                · referencia <strong>Bs. {{ format_rate($event->budget() * dollar_rate()) }}</strong>
-                                a la tasa BCV
-                            @endif
+                            · referencia
+                            <strong data-bcv-usd="{{ $event->budget() }}">
+                                Bs. {{ dollar_rate() !== null ? format_rate($event->budget() * dollar_rate()) : '—' }}
+                            </strong>
+                            a la tasa BCV
                         </span>
                     </p>
                 @endif
             </article>
 
-            {{-- Actividad de la invitación: siempre visible si no está activo. --}}
-            @if (! $activo)
+            {{-- Actividad de la invitación: muestra el estado de la
+                 participación (activo, rechazado, retirado, expulsado…). --}}
+            @if ($event !== null)
                 <article class="sorteo-card amigo-invitacion"
                          data-status="{{ $participacion?->status->value ?? '' }}"
                          data-auto-open="{{ $pendiente ? '1' : '0' }}"
@@ -68,6 +71,8 @@
                             <p class="sorteo-card__text">
                                 @if ($pendiente)
                                     Todavía no has respondido. Acepta para entrar al sorteo o rechaza indicando el motivo.
+                                @elseif ($participacion?->status === \App\Enums\ParticipantStatus::Active)
+                                    Aceptaste la invitación: estás activo en el evento.
                                 @elseif ($participacion?->status === \App\Enums\ParticipantStatus::Declined)
                                     Rechazaste la invitación. El motivo quedó registrado.
                                 @elseif ($participacion?->status === \App\Enums\ParticipantStatus::Withdrawn)
@@ -106,19 +111,35 @@
             @endif
 
             @if ($activo && ! $estado['revelado'])
-                {{-- Aceptó pero el sorteo aún no la/lo tocó. --}}
-                <article class="sorteo-card">
+                {{-- Aceptó pero todavía no tiene amigo secreto descubierto. --}}
+                <article class="sorteo-card amigo-fase" data-fase="{{ $fase }}">
                     <header class="sorteo-card__head">
                         <div>
-                            <h2 class="sorteo-card__title">Aún no tienes amigo secreto</h2>
-                            <p class="sorteo-card__text">{{ $estado['mensaje'] }}</p>
+                            <h2 class="sorteo-card__title">
+                                @if ($fase === 2)
+                                    Fase de unión
+                                @elseif ($fase === 3)
+                                    Sorteo ciego
+                                @else
+                                    Aún no tienes amigo secreto
+                                @endif
+                            </h2>
+                            <p class="sorteo-card__text">
+                                @if ($fase === 2)
+                                    Estás en la fase de unión: favor esperar el sorteo.
+                                @elseif ($fase === 3)
+                                    Todavía no has descubierto a tu amigo secreto. Entra al sorteo ciego para verlo.
+                                @else
+                                    {{ $estado['mensaje'] }}
+                                @endif
+                            </p>
                         </div>
                     </header>
 
-                    @if ($event->status === \App\Enums\EventStatus::Registration)
+                    @if ($fase === 2)
                         <p class="sorteo-note">
                             <i class="fa-solid fa-hourglass-half" aria-hidden="true"></i>
-                            <span>Estás activo. Puedes ir escribiendo tu lista de deseos mientras el evento pasa al sorteo ciego.</span>
+                            <span>Mientras esperas, puedes ir escribiendo tu lista de deseos.</span>
                         </p>
 
                         <div class="sorteo-actions">
@@ -134,11 +155,11 @@
                                 </button>
                             @endif
                         </div>
-                    @else
+                    @elseif ($fase === 3)
                         <div class="sorteo-actions">
                             <a class="btn btn-primary" href="{{ module_url('asignar-amigo') }}">
                                 <i class="fa-solid fa-dice" aria-hidden="true"></i>
-                                <span>Ir al Sorteo ciego</span>
+                                <span>Sorteo ciego</span>
                             </a>
 
                             @if ($puedeRetirar)
@@ -147,6 +168,13 @@
                                     <span>Retirar</span>
                                 </button>
                             @endif
+                        </div>
+                    @elseif ($puedeRetirar)
+                        <div class="sorteo-actions">
+                            <button type="button" class="btn btn-outline-danger btn-amigo-retirar">
+                                <i class="fa-solid fa-person-walking-arrow-right" aria-hidden="true"></i>
+                                <span>Retirar</span>
+                            </button>
                         </div>
                     @endif
                 </article>

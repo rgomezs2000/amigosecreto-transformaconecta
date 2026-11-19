@@ -473,7 +473,10 @@ class ChatPollEventTest extends TestCase
         $this->actingAs($ana)
             ->getJson('/chat/eventos/'.$event->id)
             ->assertOk()
-            ->assertJsonPath('event.name', 'Evento que debe seguir');
+            ->assertJsonPath('event.name', 'Evento que debe seguir')
+            ->assertJsonPath('event.phase', 'Unión')
+            ->assertJsonPath('event.status', 'Unión')
+            ->assertJsonPath('event.status_class', 'active');
     }
 
     public function test_la_moderacion_no_adjunta_eventos(): void

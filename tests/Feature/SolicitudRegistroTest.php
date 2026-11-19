@@ -190,6 +190,16 @@ class SolicitudRegistroTest extends TestCase
 
         // La solicitud sigue abierta: se cierra desde su propio ticket.
         $this->assertSame(ChatReport::STATUS_ATTENDING, $report->refresh()->status);
+        $this->assertNotNull($report->managed_at);
+
+        $otro = $this->makeUser('Otro Destino', UserRole::Admin, ['moderacion']);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/remitir', [
+                'admin_id' => $otro->id,
+                'observation' => 'Ya se creó el usuario',
+            ])
+            ->assertStatus(422);
     }
 
     public function test_no_se_puede_crear_un_usuario_con_correo_duplicado(): void
@@ -368,6 +378,16 @@ class SolicitudRegistroTest extends TestCase
         $this->assertNotSame($hashOriginal, $user->fresh()->password);
         $this->assertSame($admin->id, $report->refresh()->taken_by);
         $this->assertSame(ChatReport::STATUS_ATTENDING, $report->status);
+        $this->assertNotNull($report->managed_at);
+
+        $destino = $this->makeUser('Destino Clave', UserRole::Admin, ['moderacion']);
+
+        $this->actingAs($admin)
+            ->postJson('/moderacion/reportes/'.$report->id.'/remitir', [
+                'admin_id' => $destino->id,
+                'observation' => 'Ya se cambió la contraseña',
+            ])
+            ->assertStatus(422);
 
         Mail::assertSent(\App\Mail\NotificationMail::class, fn ($mail) => $mail->hasTo($user->email));
     }
@@ -542,3 +562,5 @@ class SolicitudRegistroTest extends TestCase
             ->assertStatus(422);
     }
 }
+
+

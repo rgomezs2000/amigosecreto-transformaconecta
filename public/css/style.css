@@ -31,12 +31,16 @@
     --radius-lg: 16px;
     --shadow: 0 1px 2px rgba(30, 41, 59, .06), 0 8px 24px rgba(30, 41, 59, .06);
     --content-width: 30rem;
-    --font-sans: Arial, "Montserrat", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", sans-serif;
+    --font-sans: "Montserrat", Arial, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", sans-serif;
     --font-display: "Montserrat", Arial, "Segoe UI", system-ui, sans-serif;
+    --bs-body-font-family: var(--font-sans);
+    --bs-font-sans-serif: var(--font-sans);
 }
 
 html {
     font-size: 100%;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 body.app-body {
@@ -46,8 +50,16 @@ body.app-body {
     background: var(--bg);
     color: var(--ink);
     font-family: var(--font-sans);
+    letter-spacing: -.005em;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+    font-family: var(--font-sans);
 }
 
 /* Botones grandes y táctiles (mínimo 48 px de alto). */
@@ -160,6 +172,156 @@ body.app-body {
     margin-top: .375rem;
     color: var(--muted);
     font-size: .9375rem;
+}
+
+/* --------------------------------------------------------------------------
+   Controles de selección: checkbox, radio y switch
+   Un mismo lenguaje visual para todo el sistema: borde suave, acento verde,
+   foco visible y una marca blanca limpia.
+   -------------------------------------------------------------------------- */
+
+.form-check {
+    display: flex;
+    align-items: flex-start;
+    gap: .7rem;
+    min-height: 1.75rem;
+    padding-left: 0;
+    margin-bottom: .75rem;
+}
+
+.form-check:last-child {
+    margin-bottom: 0;
+}
+
+.form-check-input {
+    flex: 0 0 auto;
+    float: none;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin: .125rem 0 0;
+    border: 2px solid #B8C5D3;
+    border-radius: 7px;
+    background-color: var(--surface);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: .9rem;
+    box-shadow: 0 1px 2px rgba(30, 41, 59, .08);
+    cursor: pointer;
+}
+
+.form-check-input[type="radio"] {
+    border-radius: 50%;
+    background-size: 100%;
+}
+
+.form-check-input:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+
+.form-check-input:focus {
+    border-color: var(--accent);
+    outline: 3px solid rgba(47, 111, 98, .22);
+    outline-offset: 2px;
+    box-shadow: 0 1px 2px rgba(30, 41, 59, .08);
+}
+
+.form-check-input:checked,
+.form-check-input:indeterminate {
+    border-color: var(--accent);
+    background-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(47, 111, 98, .28);
+}
+
+.form-check-input[type="checkbox"]:checked {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.4' d='m3.5 8.5 3 3 6-7'/%3e%3c/svg%3e");
+}
+
+.form-check-input[type="checkbox"]:indeterminate {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-width='2.4' d='M4 8h8'/%3e%3c/svg%3e");
+}
+
+.form-check-input[type="radio"]:checked {
+    background-image: radial-gradient(circle at center, #fff 0 34%, transparent 36%);
+}
+
+.form-check-input.is-invalid {
+    border-color: var(--error);
+}
+
+.form-check-input.is-invalid:checked {
+    background-color: var(--error);
+    border-color: var(--error);
+}
+
+.form-check-input:disabled {
+    border-color: #D5DEE7;
+    background-color: var(--surface-2);
+    box-shadow: none;
+    cursor: not-allowed;
+    opacity: .72;
+}
+
+.form-check-input:disabled:checked {
+    background-color: #94A3B8;
+    border-color: #94A3B8;
+}
+
+.form-check-label {
+    color: var(--ink);
+    font-weight: 500;
+    line-height: 1.5;
+    cursor: pointer;
+}
+
+.form-check-input:disabled ~ .form-check-label,
+.form-check-input:disabled + .form-check-label {
+    color: var(--muted);
+    cursor: not-allowed;
+    opacity: .7;
+}
+
+/* Switch tipo píldora, alineado con las tarjetas y botones del sistema. */
+.form-check.form-switch {
+    align-items: center;
+    gap: .75rem;
+    min-height: 2rem;
+    margin-bottom: .75rem;
+}
+
+.form-switch .form-check-input {
+    width: 2.75rem;
+    height: 1.5rem;
+    margin: 0;
+    border: 0;
+    border-radius: 999px;
+    background-color: #DCE4EB;
+    background-image: radial-gradient(circle at 25% 50%, #fff 0 .44rem, transparent .47rem);
+    background-size: 100% 100%;
+    box-shadow: inset 0 1px 2px rgba(30, 41, 59, .14);
+}
+
+.form-switch .form-check-input:checked {
+    border: 0;
+    background-color: var(--accent);
+    background-image: radial-gradient(circle at 75% 50%, #fff 0 .44rem, transparent .47rem);
+    box-shadow: 0 2px 8px rgba(47, 111, 98, .28);
+}
+
+.form-switch .form-check-input:focus {
+    outline: 3px solid rgba(47, 111, 98, .22);
+    outline-offset: 2px;
+    box-shadow: inset 0 1px 2px rgba(30, 41, 59, .14);
+}
+
+.form-switch .form-check-input:disabled {
+    background-color: #E2E8F0;
+    box-shadow: none;
+    cursor: not-allowed;
+    opacity: .7;
+}
+
+.form-switch .form-check-input:disabled:checked {
+    background-color: #94A3B8;
 }
 
 /* Botones */
@@ -1114,6 +1276,40 @@ textarea:focus-visible,
     font-weight: 700;
 }
 
+/* Páginas de error autónomas: una sola tarjeta centrada en la pantalla. */
+.error-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 2rem 1rem;
+}
+
+.error-standalone {
+    width: 100%;
+}
+
+.error-shell {
+    width: min(680px, 100%);
+    margin: 0 auto;
+    text-align: center;
+}
+
+.error-shell .dashboard-top {
+    display: block;
+    padding: 0;
+}
+
+.error-shell .dashboard-heading {
+    max-width: 100%;
+}
+
+.error-shell .error-page {
+    margin: 0 auto;
+    padding: 1.25rem 0 0;
+}
+
 /* Perfil propio */
 .perfil-page {
     display: grid;
@@ -1453,6 +1649,52 @@ textarea:focus-visible,
     color: #64748B;
 }
 
+/* Etiquetas de fase: cada paso del flujo con su color. */
+.fase-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    padding: .2rem .6rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: #F8FAFC;
+    color: #475569;
+    font-size: .78rem;
+    font-weight: 700;
+    line-height: 1.35;
+    white-space: nowrap;
+}
+
+.fase-badge--1 {
+    background: #F1F5F9;
+    border-color: #E2E8F0;
+    color: #475569;
+}
+
+.fase-badge--2 {
+    background: #E8F3EF;
+    border-color: #BFDCD3;
+    color: #275E53;
+}
+
+.fase-badge--3 {
+    background: #EDE9FE;
+    border-color: #DDD6FE;
+    color: #5B21B6;
+}
+
+.fase-badge--4 {
+    background: #FEF3C7;
+    border-color: #FDE68A;
+    color: #92400E;
+}
+
+.fase-badge--5 {
+    background: #DCFCE7;
+    border-color: #BBF7D0;
+    color: #166534;
+}
+
 /* Eventos */
 .eventos-page {
     display: grid;
@@ -1463,8 +1705,19 @@ textarea:focus-visible,
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 1rem;
+}
+
+/* Las acciones de creación siempre van ancladas a la izquierda, debajo del
+   título y la descripción del módulo. */
+.eventos-toolbar > div {
+    flex: 1 1 100%;
+}
+
+.eventos-toolbar > .btn {
+    flex: 0 0 auto;
+    align-self: flex-start;
 }
 
 .eventos-title {
@@ -1624,6 +1877,25 @@ textarea:focus-visible,
     display: none;
 }
 
+.evento-participant .table-actions {
+    flex-wrap: wrap;
+}
+
+#participantes-table .table-actions {
+    flex-wrap: wrap;
+}
+
+.participante-ficha-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-right: auto;
+}
+
+.participante-ficha-actions:empty {
+    display: none;
+}
+
 .evento-participant__data {
     min-width: 12rem;
     padding-right: 5.5rem;
@@ -1741,7 +2013,7 @@ textarea:focus-visible,
 .chat-widget {
     position: fixed;
     right: 1.25rem;
-    bottom: calc(1.25rem + var(--chat-keyboard, 0px));
+    bottom: calc(1.25rem + var(--chat-keyboard, 0px) + env(safe-area-inset-bottom, 0px));
     z-index: 1040;
     transition: bottom .15s ease-out;
 }
@@ -2870,20 +3142,55 @@ textarea:focus-visible,
     background: #F1F5F9;
 }
 
+/* Paleta de adjuntos: cuadrícula de iconos con la etiqueta corta debajo.
+   Sin bordes: el panel se separa del contenido solo con la sombra. */
 .chat-attach-menu {
     position: fixed;
     z-index: 1100;
     display: grid;
-    min-width: 11rem;
-    padding: .3rem;
+    grid-template-columns: repeat(3, 4.6rem);
+    gap: .1rem;
+    padding: .45rem;
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 12px 30px rgba(30, 41, 59, .18);
+    border: 0;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 18px 40px rgba(30, 41, 59, .18);
 }
 
 .chat-attach-menu[hidden] {
     display: none;
+}
+
+.chat-attach-menu .chat-context-item {
+    display: grid;
+    justify-items: center;
+    gap: .3rem;
+    padding: .55rem .2rem;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--muted);
+    font-size: .6875rem;
+    font-weight: 600;
+    line-height: 1.15;
+    text-align: center;
+}
+
+.chat-attach-menu .chat-context-item i {
+    color: var(--accent);
+    font-size: 1.15rem;
+    line-height: 1;
+}
+
+.chat-attach-menu .chat-context-item:hover,
+.chat-attach-menu .chat-context-item:focus-visible {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+}
+
+.chat-attach-menu .chat-context-item:hover i,
+.chat-attach-menu .chat-context-item:focus-visible i {
+    color: var(--accent-strong);
 }
 
 .chat-date {
@@ -5360,6 +5667,13 @@ div.dt-processing {
     font-weight: 700;
 }
 
+/* La acción principal del perfil va debajo del correo, dentro de la ficha de
+   identidad, y ocupa todo el ancho. */
+.chat-profile__identity .chat-profile__primary {
+    width: 100%;
+    margin-top: .35rem;
+}
+
 .chat-profile__option {
     display: flex;
     align-items: center;
@@ -5967,6 +6281,12 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
     gap: 1.25rem;
 }
 
+.participantes-ayuda {
+    margin: 0;
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
 .participantes-toolbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -6538,13 +6858,13 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
        abajo, sin tapar el formulario ni los mensajes. */
     .chat-widget {
         right: 0;
-        bottom: var(--chat-keyboard, 0px);
+        bottom: calc(var(--chat-keyboard, 0px) + env(safe-area-inset-bottom, 0px));
     }
 
     .chat-toggle {
         position: fixed;
         right: 1rem;
-        bottom: calc(1rem + var(--chat-keyboard, 0px));
+        bottom: calc(1rem + var(--chat-keyboard, 0px) + env(safe-area-inset-bottom, 0px));
         z-index: 1044;
     }
 
@@ -6552,7 +6872,7 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
         position: fixed;
         top: 0;
         right: 0;
-        bottom: var(--chat-keyboard, 0px);
+        bottom: calc(var(--chat-keyboard, 0px) + env(safe-area-inset-bottom, 0px));
         left: 0;
         width: 100%;
         height: auto;
@@ -7782,9 +8102,26 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
     overflow-wrap: anywhere;
 }
 
+.chat-event__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+    margin-top: .5rem;
+}
+
 .chat-event-open {
     justify-self: start;
-    margin-top: .35rem;
+}
+
+.chat-event-sheet__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-right: auto;
+}
+
+.chat-event-sheet__actions:empty {
+    display: none;
 }
 
 .chat-event-list {
@@ -8735,9 +9072,44 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
 
 /* Grupos en común en el perfil del chat */
 .chat-profile__count { color: var(--muted); font-size: .78rem; }
-.chat-profile__common-list { display: grid; gap: .4rem; }
-.chat-profile__common-group { display: grid; gap: .15rem; width: 100%; padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); text-align: left; }
-.chat-profile__common-group:hover { border-color: var(--accent); }
+
+/* Acciones y grupos: filas con un solo separador, sin recuadros internos. */
+.chat-profile__common-actions { display: grid; gap: 0; margin: 0; }
+.chat-profile__common-action {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    width: 100%;
+    padding: .6rem .75rem;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--accent-strong);
+    font-size: .85rem;
+    font-weight: 600;
+    text-align: left;
+}
+.chat-profile__common-action:hover { background: var(--accent-soft); }
+.chat-profile__common-action:last-child { border-bottom: 0; }
+/* Si debajo va la lista de grupos, el último botón conserva su separador. */
+.chat-profile__common-actions:not(:last-child) .chat-profile__common-action:last-child {
+    border-bottom: 1px solid var(--border);
+}
+
+.chat-profile__common-list { display: grid; gap: 0; border-top: 0; }
+.chat-profile__common-group {
+    display: grid;
+    gap: .15rem;
+    width: 100%;
+    padding: .6rem .75rem;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+}
+.chat-profile__common-group:hover { background: var(--accent-soft); }
+.chat-profile__common-group:last-child { border-bottom: 0; }
 .chat-profile__common-name { font-weight: 600; color: var(--text); }
 .chat-profile__common-members { color: var(--muted); font-size: .8rem; }
 
@@ -8757,12 +9129,6 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
 .chat-message__avatar { position: absolute; left: -2.15rem; top: .4rem; }
 .chat-message--mine .chat-message__avatar { left: auto; right: -2.15rem; }
 .chat-sender--link { text-decoration: none; }
-.chat-profile__common-actions { display: grid; gap: .4rem; margin-bottom: .55rem; }
-.chat-profile__common-action { display: flex; align-items: center; gap: .45rem; padding: .5rem .6rem; border: 1px dashed var(--border); border-radius: 8px; background: transparent; color: var(--accent-strong); font-size: .85rem; font-weight: 600; text-align: left; }
-.chat-profile__common-action:hover { border-color: var(--accent); background: var(--accent-soft); }
-.chat-profile__common-group { border-radius: 0; border-left: 0; border-right: 0; border-bottom: 0; }
-.chat-profile__common-list { border-top: 1px solid var(--border); }
-.chat-profile__common-group:last-child { border-bottom: 1px solid var(--border); }
 .chat-profile__member.is-highlighted { background: var(--accent-soft); border-radius: 8px; }
 .chat-messages { padding-left: 2.3rem; padding-right: 2.3rem; }
 .chat-messages { padding-left: 2.7rem; padding-right: 2.7rem; }
@@ -9342,11 +9708,20 @@ body .select2-container--bootstrap-5 .select2-dropdown .select2-results__options
     outline-offset: 2px;
 }
 
+/* iOS Safari hace zoom automático al enfocar campos con letra menor a 16px. */
+@media (max-width: 768px) {
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+        font-size: 16px;
+    }
+}
+
 /* ==========================================================================
    Reestructuración del flujo (Creación → Unión → Sorteo → Pistas → Revelación)
    ========================================================================== */
 
-/* Tipografía: Arial para el texto y Montserrat para títulos y controles. */
+/* Tipografía: Montserrat en todo el sistema; Arial queda como respaldo. */
 h1, h2, h3, h4, h5, h6,
 .dashboard-title,
 .dashboard-eyebrow,
@@ -9357,6 +9732,12 @@ h1, h2, h3, h4, h5, h6,
 .amigo-card__name,
 .revelacion-regalo__name {
     font-family: var(--font-display);
+    letter-spacing: -.015em;
+}
+
+.dashboard-title {
+    font-weight: 800;
+    letter-spacing: -.03em;
 }
 
 .btn,
@@ -9445,9 +9826,24 @@ h1, h2, h3, h4, h5, h6,
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 1rem;
     margin: 0 0 1rem;
+}
+
+.amigo-tabla-toolbar {
+    justify-content: space-between;
+}
+
+.lista-deseos-toolbar__search,
+.pistas-toolbar__search {
+    flex: 1 1 100%;
+}
+
+.lista-deseos-toolbar__actions,
+.pistas-toolbar__actions {
+    flex: 0 0 auto;
+    align-self: flex-start;
 }
 
 .amigo-tabla-toolbar .form-label,
@@ -9474,11 +9870,6 @@ h1, h2, h3, h4, h5, h6,
     min-width: min(22rem, 70vw);
 }
 
-.lista-deseos-toolbar__search,
-.pistas-toolbar__search {
-    flex: 1 1 18rem;
-}
-
 .amigo-tabla__empty {
     text-align: center;
     color: var(--muted);
@@ -9487,16 +9878,54 @@ h1, h2, h3, h4, h5, h6,
 /* Invitación. */
 .invitacion-opciones {
     display: grid;
-    gap: .65rem;
-    margin: .75rem 0 1rem;
-    padding: .85rem 1rem;
+    gap: .55rem;
+    margin: .85rem 0 1rem;
+    padding: .9rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-2);
 }
 
+.invitacion-opciones .form-check {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: .8rem;
+    min-height: 0;
+    margin: 0;
+    padding: .8rem .9rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    cursor: pointer;
+    transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+
+.invitacion-opciones .form-check:hover {
+    border-color: var(--accent);
+}
+
+.invitacion-opciones .form-check:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(47, 111, 98, .16);
+}
+
+.invitacion-opciones .form-check:has(.form-check-input:checked) {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.invitacion-opciones .form-check-input {
+    width: 1.25rem;
+    height: 1.25rem;
+    margin: 0;
+    align-self: center;
+}
+
 .invitacion-opciones .form-check-label {
     font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
 }
 
 .participantes-motivo {
@@ -9622,3 +10051,31 @@ h1, h2, h3, h4, h5, h6,
 .amigo-gift__wide {
     grid-column: 1 / -1;
 }
+
+/* Burbuja de confirmación al copiar el enlace personal de una invitación. */
+.evento-link-bubble {
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    z-index: 1090;
+    display: grid;
+    gap: .2rem;
+    max-width: min(28rem, calc(100vw - 2.5rem));
+    padding: .8rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: 0 14px 36px rgb(15 23 42 / 18%);
+    font-size: .85rem;
+}
+
+.evento-link-bubble strong {
+    color: var(--primary);
+}
+
+.evento-link-bubble span {
+    overflow-wrap: anywhere;
+    color: var(--muted);
+    font-size: .78rem;
+}
+

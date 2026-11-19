@@ -17,6 +17,11 @@
             <dd class="participantes-valor">{{ $valor }}</dd>
         </div>
 
+        <div class="perfil-data__item">
+            <dt>Valor en Bs. (tasa BCV)</dt>
+            <dd class="participantes-valor">{{ $valorBs ?? '—' }}</dd>
+        </div>
+
         <div class="perfil-data__item perfil-data__item--wide">
             <dt>Descripción</dt>
             <dd class="participantes-text">{{ format_text($gift->description, 'Sin descripción') }}</dd>
