@@ -102,12 +102,13 @@ class AmigoSecretoModulesTest extends TestCase
 
         $this->assertSame('Pistas', end($tiles));
 
-        // El módulo abre vacío: el marcador de posición.
+        // El módulo ya no es un marcador de posición: abre el monitoreo de las
+        // pistas que cada participante emite (MonitoreoAdminController::pistas).
         $this->actingAs($admin)
             ->get('/amigo-secreto/pistas')
             ->assertOk()
             ->assertSee('Pistas')
-            ->assertSee('Este módulo está en construcción.');
+            ->assertDontSee('Este módulo está en construcción.');
 
         // El participante no lo ve ni puede entrar.
         $participant = $this->participant();
